@@ -42,9 +42,9 @@ branch until the deterministic spine is integrated and stable.
 | ID | Work | Prereqs | Owns (exclusive) | Status |
 |---|---|---|---|---|
 | P01 | Go toolchain, local quality gate, and repository bootstrap | — | `go.mod`, `go.sum`, `Taskfile.yml`, `.gitattributes`, `.github/workflows/**`, `cmd/mosaic/**` | ✅ Integrated — `057eaaa` |
-| P02 | Authored ontology schemas, generated Go types, contracts, and schema gate | P01 | `ontology/**`, `internal/ontology/**`, `internal/contracts/**`, `cmd/schema-gen/**`, `go.mod`, `go.sum` (schema-validator dependency only) | 🔒 Claimed — `/root/p02_contracts` |
-| P03 | SQLite migrations and append-only repositories | P02 | `internal/store/**`, `migrations/**` | ⬜ Ready |
-| P04 | Synthetic dataset manifest, scenario schema, and fixture validator | P02 | `datasets/**`, `internal/dataset/**`, `cmd/datasetgen/**` | ⬜ Ready |
+| P02 | Authored ontology schemas, generated Go types, contracts, and schema gate | P01 | `ontology/**`, `internal/ontology/**`, `internal/contracts/**`, `cmd/schema-gen/**`, `go.mod`, `go.sum` (schema-validator dependency only) | ✅ Integrated — `289acf9` |
+| P03 | SQLite migrations and append-only repositories | P02 | `internal/store/**`, `migrations/**`, `go.mod`, `go.sum` (SQLite driver only) | 🔒 Claimed — `/root/p03_store` |
+| P04 | Synthetic dataset manifest, scenario schema, and fixture validator | P02 | `datasets/**`, `internal/dataset/**`, `cmd/datasetgen/**` | 🔒 Claimed — `/root/p04_dataset` |
 | P05 | Raw ingestion, Luna-result lifecycle, idempotency, and semantic-duplicate links | P02, P03 | `internal/ingestion/**`, `internal/luna/**` | ⬜ Ready |
 | P06 | Deterministic COP projector, correction handling, checkpoints, and replay | P02, P03 | `internal/state/**`, `internal/replay/**` | ⬜ Ready |
 | P07 | Scenario simulator and replay publisher | P04, P05, P06 | `internal/simulator/**`, `cmd/simulator/**` | ⬜ Ready |
@@ -95,7 +95,7 @@ Wave 5:          P12
 | `AGENTS.md`, `HANDOFF.md`, `docs/rfcs/**` | Coordinator only during the cycle |
 | `ontology/**`, `internal/contracts/**` | P02; later changes are dedicated contract parcels |
 | `cmd/mosaic/**` | P01 initially; composition changes require a dedicated integration parcel |
-| `go.mod`, `go.sum`, `Taskfile.yml` | P01; P02 may add only the schema-validator dependency; later dependency changes require coordinator approval |
+| `go.mod`, `go.sum`, `Taskfile.yml` | P01; P02 may add only the schema-validator dependency; P03 may add only the SQLite driver; later dependency changes require coordinator approval |
 | `Mosaic_Architecture_and_Technical_Specification.md` | Product-owner/coordinator approval only |
 
 ## Verification command contract
@@ -116,3 +116,6 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-18 P01 integrated by coordinator — `057eaaa`; `go run ./cmd/mosaic quality` passed.
 - 2026-07-18 P02 claimed by `/root/p02_contracts` — branch
   `parcel/P02-ontology-contracts`, coordinator branch after P01; schema-validator dependency approved.
+- 2026-07-18 P02 integrated by coordinator — `289acf9`; schema and full quality gates passed.
+- 2026-07-18 P03 claimed by `/root/p03_store` — branch `parcel/P03-sqlite-store`; SQLite driver approved.
+- 2026-07-18 P04 claimed by `/root/p04_dataset` — branch `parcel/P04-dataset-scenario`.
