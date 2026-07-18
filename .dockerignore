@@ -1,0 +1,15 @@
+.git
+.github
+.worktrees
+localmodels
+*.gguf
+*.db
+*.db-shm
+*.db-wal
+node_modules
+ui/node_modules
+ui/dist
+tests
+docs
+Mosaic_Architecture_and_Technical_Specification.md
+Taskfile.yml

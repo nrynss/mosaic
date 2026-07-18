@@ -1,0 +1,36 @@
+services:
+  mosaic-data-init:
+    image: busybox:1.37.0
+    user: "0:0"
+    command: ["sh", "-c", "mkdir -p /var/lib/mosaic && chown -R 65532:65532 /var/lib/mosaic"]
+    volumes:
+      - mosaic-data:/var/lib/mosaic
+    restart: "no"
+
+  mosaic:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mosaic-demo:local
+    depends_on:
+      mosaic-data-init:
+        condition: service_completed_successfully
+    ports:
+      - "${MOSAIC_PORT:-8080}:8080"
+    environment:
+      MOSAIC_LISTEN_ADDR: ":8080"
+      MOSAIC_DB_PATH: "/var/lib/mosaic/mosaic.db"
+      MOSAIC_UI_DIR: "/srv/mosaic/ui"
+    volumes:
+      - mosaic-data:/var/lib/mosaic
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+
+volumes:
+  mosaic-data:
