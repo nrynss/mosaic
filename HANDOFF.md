@@ -49,7 +49,7 @@ branch until the deterministic spine is integrated and stable.
 | P06 | Deterministic COP projector, correction handling, checkpoints, and replay | P02, P03 | `internal/state/**`, `internal/replay/**` | ✅ Integrated — `1c53568` |
 | P07 | Scenario simulator and replay publisher | P04, P05, P06 | `internal/simulator/**`, `cmd/simulator/**` | ✅ Integrated — `fc236b7` |
 | P08 | HTTP/SSE read model and fixed demo-role audit endpoints | P03, P06 | `internal/api/**`, `internal/stream/**` | ✅ Integrated — `06410b8` |
-| P09 | Svelte dashboard shell and evidence-aware COP timeline | P08 | `ui/**` | 🔒 Claimed — `/root/p09_dashboard` |
+| P09 | Svelte dashboard shell and evidence-aware COP timeline | P08 | `ui/**` | ✅ Integrated — `118eb1d` |
 | P10 | Terra structured insight adapter and lifecycle | P03, P06 | `internal/terra/**`, `prompts/terra/**` | ✅ Integrated — `6bc8eaa` |
 | P11 | Sol supervisor briefing, recommendation, and audit-action adapter | P03, P06, P08 | `internal/sol/**`, `prompts/sol/**` | ✅ Integrated — `879102d` |
 | P12 | End-to-end scenario acceptance suite and local Docker runbook | P07–P11, P14 | `tests/e2e/**`, `Dockerfile`, `docker-compose.yml`, `docs/runbook/**` | 🔒 Claimed — `/root/p12_e2e` |
@@ -136,7 +136,7 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-18 P07 integrated by coordinator — `fc236b7`; in-memory scenario reached revision 9 with all fixture checks true.
 - 2026-07-18 P08 integrated by coordinator — `06410b8`; HTTP/SSE and fixed-role audit tests passed.
 - 2026-07-18 P10 integrated by coordinator — `6bc8eaa`; structured Terra lifecycle tests passed.
-- 2026-07-18 P09 claimed by `/root/p09_dashboard` — branch `parcel/P09-dashboard`; simple evidence-first demo UI.
+- 2026-07-18 P09 integrated by coordinator — `118eb1d`; evidence-aware Svelte 5 runes dashboard on Vite 8, with authenticated API/SSE and non-operational review controls.
 - 2026-07-18 P11 integrated by coordinator — `879102d`; supervisor-only advisory lifecycle validates evidence and records model runs without operational execution.
 - 2026-07-18 P13 claimed by `/root/p13_generation` — branch `parcel/P13-generation`; offline-only llama.cpp generation and explicit dataset freeze.
 - 2026-07-18 P12 claimed by `/root/p12_e2e` — Docker acceptance deferred on a new executable composition parcel.
