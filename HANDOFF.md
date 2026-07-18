@@ -54,7 +54,7 @@ branch until the deterministic spine is integrated and stable.
 | P11 | Sol supervisor briefing, recommendation, and audit-action adapter | P03, P06, P08 | `internal/sol/**`, `prompts/sol/**` | ✅ Integrated — `879102d` |
 | P12 | End-to-end scenario acceptance suite and local Docker runbook | P07–P11, P14 | `tests/e2e/**`, `Dockerfile`, `docker-compose.yml`, `docs/runbook/**` | 🔒 Claimed — `/root/p12_e2e` |
 | P13 | Offline llama.cpp synthetic-data generation and freeze workflow | P02, P04 | `cmd/datasetgen/**`, `internal/datasetgen/**`, `prompts/datasetgen/**`, `docs/dataset-generation.md` | ✅ Integrated — `3213b93` |
-| P14 | Executable demo composition root and static UI host | P03, P06, P07, P08, P09 | `cmd/mosaicdemo/**` | ⬜ Ready |
+| P14 | Executable demo composition root and static UI host | P03, P06, P07, P08, P09 | `cmd/mosaicdemo/**` | ✅ Integrated — `617081a` |
 | P15 | Reproducible GoMock tooling and generated contract mocks | P02 | `tools.go`, `internal/contracts/mocks/**`, `go.mod`, `go.sum` | ✅ Integrated — `86caf77` |
 
 ## Waves
@@ -142,5 +142,5 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-18 P11 integrated by coordinator — `879102d`; supervisor-only advisory lifecycle validates evidence and records model runs without operational execution.
 - 2026-07-18 P13 integrated by coordinator — `3213b93`; staged offline llama.cpp generation, provenance, validation, and explicit immutable freeze are now source-visible.
 - 2026-07-18 P12 claimed by `/root/p12_e2e` — Docker acceptance deferred on a new executable composition parcel.
-- 2026-07-18 P14 ready by coordinator — required executable composition root; no runtime server will be hidden under the test suite.
+- 2026-07-18 P14 integrated by coordinator — `617081a`; the executable serves the seeded deterministic API and guarded prebuilt dashboard, with no live model or operational integration.
 - 2026-07-18 P15 integrated by coordinator — `86caf77`; GoMock v0.6.0 is pinned and contract mocks regenerate cleanly.
