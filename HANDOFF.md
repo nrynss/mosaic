@@ -45,8 +45,8 @@ branch until the deterministic spine is integrated and stable.
 | P02 | Authored ontology schemas, generated Go types, contracts, and schema gate | P01 | `ontology/**`, `internal/ontology/**`, `internal/contracts/**`, `cmd/schema-gen/**`, `go.mod`, `go.sum` (schema-validator dependency only) | ✅ Integrated — `289acf9` |
 | P03 | SQLite migrations and append-only repositories | P02 | `internal/store/**`, `migrations/**`, `go.mod`, `go.sum` (SQLite driver only) | ✅ Integrated — `e746dfc` |
 | P04 | Synthetic dataset manifest, scenario schema, and fixture validator | P02 | `datasets/**`, `internal/dataset/**`, `cmd/datasetgen/**` | ✅ Integrated — `548752d` |
-| P05 | Raw ingestion, Luna-result lifecycle, idempotency, and semantic-duplicate links | P02, P03 | `internal/ingestion/**`, `internal/luna/**` | ⬜ Ready |
-| P06 | Deterministic COP projector, correction handling, checkpoints, and replay | P02, P03 | `internal/state/**`, `internal/replay/**` | ⬜ Ready |
+| P05 | Raw ingestion, Luna-result lifecycle, idempotency, and semantic-duplicate links | P02, P03 | `internal/ingestion/**`, `internal/luna/**` | 🔒 Claimed — `/root/p05_ingestion` |
+| P06 | Deterministic COP projector, correction handling, checkpoints, and replay | P02, P03 | `internal/state/**`, `internal/replay/**` | 🔒 Claimed — `/root/p06_state` |
 | P07 | Scenario simulator and replay publisher | P04, P05, P06 | `internal/simulator/**`, `cmd/simulator/**` | ⬜ Ready |
 | P08 | HTTP/SSE read model and fixed demo-role audit endpoints | P03, P06 | `internal/api/**`, `internal/stream/**` | ⬜ Ready |
 | P09 | Svelte dashboard shell and evidence-aware COP timeline | P08 | `ui/**` | ⬜ Ready |
