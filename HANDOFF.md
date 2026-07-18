@@ -52,7 +52,7 @@ branch until the deterministic spine is integrated and stable.
 | P09 | Svelte dashboard shell and evidence-aware COP timeline | P08 | `ui/**` | ✅ Integrated — `118eb1d` |
 | P10 | Terra structured insight adapter and lifecycle | P03, P06 | `internal/terra/**`, `prompts/terra/**` | ✅ Integrated — `6bc8eaa` |
 | P11 | Sol supervisor briefing, recommendation, and audit-action adapter | P03, P06, P08 | `internal/sol/**`, `prompts/sol/**` | ✅ Integrated — `879102d` |
-| P12 | End-to-end scenario acceptance suite and local Docker runbook | P07–P11, P14 | `tests/e2e/**`, `Dockerfile`, `docker-compose.yml`, `docs/runbook/**` | 🔒 Claimed — `/root/p12_e2e` |
+| P12 | End-to-end scenario acceptance suite and local Docker runbook | P07–P11, P14 | `tests/e2e/**`, `Dockerfile`, `docker-compose.yml`, `docs/runbook/**` | ✅ Integrated — `f4417f0` |
 | P13 | Offline llama.cpp synthetic-data generation and freeze workflow | P02, P04 | `cmd/datasetgen/**`, `internal/datasetgen/**`, `prompts/datasetgen/**`, `docs/dataset-generation.md` | ✅ Integrated — `3213b93` |
 | P14 | Executable demo composition root and static UI host | P03, P06, P07, P08, P09 | `cmd/mosaicdemo/**` | ✅ Integrated — `617081a` |
 | P15 | Reproducible GoMock tooling and generated contract mocks | P02 | `tools.go`, `internal/contracts/mocks/**`, `go.mod`, `go.sum` | ✅ Integrated — `86caf77` |
@@ -143,7 +143,7 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-18 P09 integrated by coordinator — `118eb1d`; evidence-aware Svelte 5 runes dashboard on Vite 8, with authenticated API/SSE and non-operational review controls.
 - 2026-07-18 P11 integrated by coordinator — `879102d`; supervisor-only advisory lifecycle validates evidence and records model runs without operational execution.
 - 2026-07-18 P13 integrated by coordinator — `3213b93`; staged offline llama.cpp generation, provenance, validation, and explicit immutable freeze are now source-visible.
-- 2026-07-18 P12 claimed by `/root/p12_e2e` — Docker acceptance deferred on a new executable composition parcel.
+- 2026-07-18 P12 integrated by coordinator — `f4417f0`; real Docker build/start smoke served the dashboard, COP revision 9, and resolved evidence while preserving the named SQLite volume.
 - 2026-07-18 P14 integrated by coordinator — `617081a`; the executable serves the seeded deterministic API and guarded prebuilt dashboard, with no live model or operational integration.
 - 2026-07-18 P15 integrated by coordinator — `86caf77`; GoMock v0.6.0 is pinned and contract mocks regenerate cleanly.
 - 2026-07-18 P16 integrated by coordinator — `db66b80`; RFC-0001 now records actual v0.1 persistence, API/UI, model, offline-generation, and composition status.
