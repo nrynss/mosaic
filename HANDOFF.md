@@ -53,7 +53,7 @@ branch until the deterministic spine is integrated and stable.
 | P10 | Terra structured insight adapter and lifecycle | P03, P06 | `internal/terra/**`, `prompts/terra/**` | ✅ Integrated — `6bc8eaa` |
 | P11 | Sol supervisor briefing, recommendation, and audit-action adapter | P03, P06, P08 | `internal/sol/**`, `prompts/sol/**` | ✅ Integrated — `879102d` |
 | P12 | End-to-end scenario acceptance suite and local Docker runbook | P07–P11, P14 | `tests/e2e/**`, `Dockerfile`, `docker-compose.yml`, `docs/runbook/**` | 🔒 Claimed — `/root/p12_e2e` |
-| P13 | Offline llama.cpp synthetic-data generation and freeze workflow | P02, P04 | `cmd/datasetgen/**`, `internal/datasetgen/**`, `prompts/datasetgen/**`, `docs/dataset-generation.md` | 🔒 Claimed — `/root/p13_generation` |
+| P13 | Offline llama.cpp synthetic-data generation and freeze workflow | P02, P04 | `cmd/datasetgen/**`, `internal/datasetgen/**`, `prompts/datasetgen/**`, `docs/dataset-generation.md` | ✅ Integrated — `3213b93` |
 | P14 | Executable demo composition root and static UI host | P03, P06, P07, P08, P09 | `cmd/mosaicdemo/**` | ⬜ Ready |
 
 ## Waves
@@ -138,6 +138,6 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-18 P10 integrated by coordinator — `6bc8eaa`; structured Terra lifecycle tests passed.
 - 2026-07-18 P09 integrated by coordinator — `118eb1d`; evidence-aware Svelte 5 runes dashboard on Vite 8, with authenticated API/SSE and non-operational review controls.
 - 2026-07-18 P11 integrated by coordinator — `879102d`; supervisor-only advisory lifecycle validates evidence and records model runs without operational execution.
-- 2026-07-18 P13 claimed by `/root/p13_generation` — branch `parcel/P13-generation`; offline-only llama.cpp generation and explicit dataset freeze.
+- 2026-07-18 P13 integrated by coordinator — `3213b93`; staged offline llama.cpp generation, provenance, validation, and explicit immutable freeze are now source-visible.
 - 2026-07-18 P12 claimed by `/root/p12_e2e` — Docker acceptance deferred on a new executable composition parcel.
 - 2026-07-18 P14 ready by coordinator — required executable composition root; no runtime server will be hidden under the test suite.
