@@ -1,14 +1,17 @@
-// Command datasetgen validates frozen synthetic Mosaic datasets.
+// Command datasetgen validates frozen synthetic Mosaic datasets and produces
+// staged offline candidates through an explicitly supplied local llama.cpp.
 package main
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 
 	"mosaic.local/mosaic/internal/dataset"
+	"mosaic.local/mosaic/internal/datasetgen"
 )
 
 func main() {
@@ -19,17 +22,73 @@ func main() {
 }
 
 func run(args []string) error {
-	if len(args) > 1 || (len(args) == 1 && args[0] != "validate") {
-		return errors.New("usage: datasetgen [validate]")
-	}
 	root, err := findModuleRoot()
 	if err != nil {
 		return err
 	}
-	if err := dataset.Validate(root); err != nil {
+	if len(args) == 0 || (len(args) == 1 && args[0] == "validate") {
+		if err := dataset.Validate(root); err != nil {
+			return err
+		}
+		fmt.Println("dataset domestic-disturbance: valid frozen artifacts")
+		return nil
+	}
+	switch args[0] {
+	case "generate":
+		return runGenerate(root, args[1:], datasetgen.ExecRunner{})
+	case "freeze":
+		return runFreeze(root, args[1:])
+	default:
+		return errors.New("usage: datasetgen validate | datasetgen generate --llama <path> --stage <dir> --scenario <id> --seed <integer> [--model <path>] [--prompt <path>] | datasetgen freeze --input <stage> --output <datasets/<scenario>-vN>")
+	}
+}
+
+func runGenerate(root string, args []string, runner datasetgen.CommandRunner) error {
+	flags := flag.NewFlagSet("generate", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	llamaPath := flags.String("llama", "", "path to local llama.cpp executable")
+	modelPath := flags.String("model", datasetgen.DefaultModelPath, "path to local GGUF model")
+	promptPath := flags.String("prompt", datasetgen.DefaultPromptPath, "path to versioned prompt")
+	stageDir := flags.String("stage", "", "new or empty candidate staging directory")
+	scenarioID := flags.String("scenario", "", "lowercase synthetic scenario identifier")
+	seed := flags.Int64("seed", 0, "llama.cpp generation seed")
+	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	fmt.Println("dataset domestic-disturbance: valid frozen artifacts")
+	if flags.NArg() != 0 {
+		return errors.New("generate accepts flags only")
+	}
+	provenance, err := datasetgen.Generate(root, datasetgen.GenerateConfig{
+		LlamaPath:  *llamaPath,
+		ModelPath:  *modelPath,
+		PromptPath: *promptPath,
+		StageDir:   *stageDir,
+		ScenarioID: *scenarioID,
+		Seed:       *seed,
+		Runner:     runner,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("dataset candidate staged at %s (raw response sha256 %s)\n", *stageDir, provenance.RawResponseSHA256)
+	return nil
+}
+
+func runFreeze(root string, args []string) error {
+	flags := flag.NewFlagSet("freeze", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	inputDir := flags.String("input", "", "candidate staging directory")
+	outputDir := flags.String("output", "", "new versioned directory under datasets")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("freeze accepts flags only")
+	}
+	if err := datasetgen.Freeze(root, datasetgen.FreezeConfig{InputDir: *inputDir, OutputDir: *outputDir}); err != nil {
+		return err
+	}
+	fmt.Printf("frozen validated dataset promoted to %s\n", *outputDir)
 	return nil
 }
 
