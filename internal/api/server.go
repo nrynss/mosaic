@@ -1,0 +1,482 @@
+// Package api implements Mosaic's local v0.1 HTTP and SSE read surface.
+// It has no external authentication or operational-action client: the two
+// fixed demo identities exist only to demonstrate the human decision boundary.
+package api
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+
+	"mosaic.local/mosaic/internal/contracts"
+	"mosaic.local/mosaic/internal/ontology/gen"
+	"mosaic.local/mosaic/internal/stream"
+)
+
+const (
+	// IdentityHeader selects one of the two synthetic, local demo identities.
+	// It is intentionally not a production authentication mechanism.
+	IdentityHeader = "X-Mosaic-Demo-Identity"
+
+	viewerIdentity     = "viewer-demo"
+	supervisorIdentity = "supervisor-demo"
+	schemaVersion      = "1.0.0"
+)
+
+// RecoveryReader is implemented by replay.Runner. It is kept local to avoid
+// enlarging the stable P02 contracts merely for an HTTP adapter.
+type RecoveryReader interface {
+	Recover(context.Context) (contracts.ProjectionResult, error)
+}
+
+// Config supplies the already-wired deterministic replay and append-only
+// persistence seams. The composition root chooses concrete P03/P06 instances.
+type Config struct {
+	Recovery RecoveryReader
+	Records  contracts.ImmutableRecordRepository
+	Evidence EvidenceResolver
+	Stream   *stream.Broker
+	Version  string
+	Clock    func() time.Time
+	NewID    func() string
+}
+
+// Server composes the v0.1 HTTP handlers. It reads a COP only through the P06
+// recovery seam and writes only immutable audit records through P03.
+type Server struct {
+	recovery RecoveryReader
+	records  contracts.ImmutableRecordRepository
+	evidence EvidenceResolver
+	stream   *stream.Broker
+	version  string
+	clock    func() time.Time
+	newID    func() string
+}
+
+// New rejects partial wiring so an endpoint cannot silently omit evidence or
+// audit persistence.
+func New(config Config) (*Server, error) {
+	if config.Recovery == nil {
+		return nil, errors.New("recovery reader is required")
+	}
+	if config.Records == nil {
+		return nil, errors.New("immutable record repository is required")
+	}
+	if config.Evidence == nil {
+		return nil, errors.New("evidence resolver is required")
+	}
+	if config.Stream == nil {
+		config.Stream = stream.NewBroker()
+	}
+	if config.Version == "" {
+		config.Version = "v0.1"
+	}
+	if config.Clock == nil {
+		config.Clock = time.Now
+	}
+	if config.NewID == nil {
+		config.NewID = randomID
+	}
+	return &Server{
+		recovery: config.Recovery,
+		records:  config.Records,
+		evidence: config.Evidence,
+		stream:   config.Stream,
+		version:  config.Version,
+		clock:    config.Clock,
+		newID:    config.NewID,
+	}, nil
+}
+
+// Handler returns the versioned HTTP surface. No route is an operational
+// command: supervisor POSTs only append immutable audit records.
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/health", s.handleHealth)
+	mux.HandleFunc("/api/v1/version", s.handleVersion)
+	mux.HandleFunc("/api/v1/cop", s.handleCOP)
+	mux.HandleFunc("/api/v1/evidence/", s.handleEvidence)
+	mux.HandleFunc("/api/v1/artifacts/", s.handleArtifact)
+	mux.HandleFunc("/api/v1/stream", s.handleStream)
+	mux.HandleFunc("/api/v1/briefings", s.handleBriefing)
+	mux.HandleFunc("/api/v1/audit-actions", s.handleAuditAction)
+	return mux
+}
+
+// Publish sends a named, best-effort update to current local SSE clients. A
+// reconnect always gets a deterministic COP snapshot before later updates.
+func (s *Server) Publish(name string, data any) {
+	if s == nil || strings.TrimSpace(name) == "" {
+		return
+	}
+	s.stream.Publish(stream.Event{Name: name, Data: data})
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"}, nil)
+}
+
+func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"version": s.version, "api_version": "v1"}, nil)
+}
+
+func (s *Server) handleCOP(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) || !s.requireReadIdentity(w, r) {
+		return
+	}
+	result, ok := s.recoverCOP(w, r)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, copPayload(result), nil)
+}
+
+func (s *Server) handleEvidence(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) || !s.requireReadIdentity(w, r) {
+		return
+	}
+	kind, id, ok := tailPair(r.URL.Path, "/api/v1/evidence/")
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, nil, apiError{Code: "invalid_evidence_path", Message: "evidence path must include a kind and ID"})
+		return
+	}
+
+	var cop map[string]any
+	if kind == "state_fact" {
+		result, recovered := s.recoverCOP(w, r)
+		if !recovered {
+			return
+		}
+		cop = result.COP
+	}
+	resolution, err := s.evidence.Resolve(r.Context(), kind, id, cop)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, nil, apiError{Code: "evidence_resolution_failed", Message: "unable to resolve evidence"})
+		return
+	}
+	if !resolution.Resolved {
+		writeJSON(w, http.StatusNotFound, resolution, apiError{Code: "evidence_not_found", Message: resolution.Reason})
+		return
+	}
+	writeJSON(w, http.StatusOK, resolution, nil)
+}
+
+func (s *Server) handleArtifact(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) || !s.requireReadIdentity(w, r) {
+		return
+	}
+	kind, id, ok := tailPair(r.URL.Path, "/api/v1/artifacts/")
+	if !ok || kind == "state_fact" {
+		writeJSON(w, http.StatusBadRequest, nil, apiError{Code: "invalid_artifact_path", Message: "artifact path must include a persisted kind and ID"})
+		return
+	}
+	resolution, err := s.evidence.Resolve(r.Context(), kind, id, nil)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, nil, apiError{Code: "artifact_resolution_failed", Message: "unable to resolve artifact"})
+		return
+	}
+	if !resolution.Resolved {
+		writeJSON(w, http.StatusNotFound, resolution, apiError{Code: "artifact_not_found", Message: resolution.Reason})
+		return
+	}
+	writeJSON(w, http.StatusOK, resolution, nil)
+}
+
+func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) || !s.requireReadIdentity(w, r) {
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeJSON(w, http.StatusInternalServerError, nil, apiError{Code: "streaming_unsupported", Message: "response writer does not support streaming"})
+		return
+	}
+
+	subscription := s.stream.Subscribe()
+	defer subscription.Cancel()
+	result, recovered := s.recoverCOP(w, r)
+	if !recovered {
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	if err := writeSSE(w, stream.Event{Name: "cop.snapshot", Data: copPayload(result)}); err != nil {
+		return
+	}
+	flusher.Flush()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case event, open := <-subscription.Events:
+			if !open {
+				return
+			}
+			if err := writeSSE(w, event); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
+func (s *Server) handleBriefing(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	identity, ok := s.requireSupervisor(w, r)
+	if !ok {
+		return
+	}
+	var request briefingRequest
+	if !decodeJSON(w, r, &request) {
+		return
+	}
+	if strings.TrimSpace(request.BriefingID) == "" {
+		request.BriefingID = "briefing-" + s.newID()
+	}
+	if strings.TrimSpace(request.BriefingID) == "briefing-" {
+		writeJSON(w, http.StatusInternalServerError, nil, apiError{Code: "audit_id_failed", Message: "could not create briefing audit identity"})
+		return
+	}
+
+	audit, err := s.appendAudit(r.Context(), identity, "briefing_requested", "briefing", request.BriefingID, request.Note)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, nil, apiError{Code: "audit_append_failed", Message: "could not record briefing request"})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"briefing_id":  request.BriefingID,
+		"audit_record": audit,
+		"executed":     false,
+	}, nil)
+}
+
+func (s *Server) handleAuditAction(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	identity, ok := s.requireSupervisor(w, r)
+	if !ok {
+		return
+	}
+	var request auditActionRequest
+	if !decodeJSON(w, r, &request) {
+		return
+	}
+	if !validAuditAction(request.Action) || !validAuditTarget(request.TargetKind) || strings.TrimSpace(request.TargetID) == "" {
+		writeJSON(w, http.StatusBadRequest, nil, apiError{Code: "invalid_audit_action", Message: "action, target_kind, and target_id must name a supported immutable review target"})
+		return
+	}
+	resolution, err := s.evidence.Resolve(r.Context(), request.TargetKind, request.TargetID, nil)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, nil, apiError{Code: "artifact_resolution_failed", Message: "unable to resolve review target"})
+		return
+	}
+	if !resolution.Resolved {
+		writeJSON(w, http.StatusNotFound, resolution, apiError{Code: "review_target_not_found", Message: resolution.Reason})
+		return
+	}
+
+	audit, err := s.appendAudit(r.Context(), identity, request.Action, request.TargetKind, request.TargetID, request.Note)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, nil, apiError{Code: "audit_append_failed", Message: "could not record review action"})
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"audit_record": audit, "executed": false}, nil)
+}
+
+func (s *Server) recoverCOP(w http.ResponseWriter, r *http.Request) (contracts.ProjectionResult, bool) {
+	result, err := s.recovery.Recover(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, nil, apiError{Code: "cop_unavailable", Message: "deterministic COP recovery is unavailable"})
+		return contracts.ProjectionResult{}, false
+	}
+	return result, true
+}
+
+type identity struct {
+	ID   string
+	Role string
+}
+
+func (s *Server) requireReadIdentity(w http.ResponseWriter, r *http.Request) bool {
+	_, ok := demoIdentity(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, nil, apiError{Code: "demo_identity_required", Message: "a fixed demo identity is required"})
+	}
+	return ok
+}
+
+func (s *Server) requireSupervisor(w http.ResponseWriter, r *http.Request) (identity, bool) {
+	caller, ok := demoIdentity(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, nil, apiError{Code: "demo_identity_required", Message: "a fixed supervisor identity is required"})
+		return identity{}, false
+	}
+	if caller.Role != "supervisor" {
+		writeJSON(w, http.StatusForbidden, nil, apiError{Code: "supervisor_required", Message: "only supervisor-demo may record a review action"})
+		return identity{}, false
+	}
+	return caller, true
+}
+
+func demoIdentity(r *http.Request) (identity, bool) {
+	switch r.Header.Get(IdentityHeader) {
+	case viewerIdentity:
+		return identity{ID: viewerIdentity, Role: "viewer"}, true
+	case supervisorIdentity:
+		return identity{ID: supervisorIdentity, Role: "supervisor"}, true
+	default:
+		return identity{}, false
+	}
+}
+
+func (s *Server) appendAudit(ctx context.Context, caller identity, action, targetKind, targetID, note string) (gen.AuditRecord, error) {
+	recordID := "audit-" + s.newID()
+	if recordID == "audit-" {
+		return gen.AuditRecord{}, errors.New("audit identity generator returned an empty value")
+	}
+	record := gen.AuditRecord{
+		SchemaVersion: schemaVersion,
+		AuditRecordID: recordID,
+		ActorID:       caller.ID,
+		ActorRole:     caller.Role,
+		Action:        action,
+		TargetKind:    targetKind,
+		TargetID:      targetID,
+		Note:          note,
+		CreatedAt:     s.clock().UTC().Format(time.RFC3339Nano),
+	}
+	if err := s.records.AppendAuditRecord(ctx, record); err != nil {
+		return gen.AuditRecord{}, err
+	}
+	return record, nil
+}
+
+type briefingRequest struct {
+	BriefingID string `json:"briefing_id"`
+	Note       string `json:"note"`
+}
+
+type auditActionRequest struct {
+	Action     string `json:"action"`
+	TargetKind string `json:"target_kind"`
+	TargetID   string `json:"target_id"`
+	Note       string `json:"note"`
+}
+
+func validAuditAction(action string) bool {
+	switch action {
+	case "acknowledged", "rejected", "noted":
+		return true
+	default:
+		return false
+	}
+}
+
+func validAuditTarget(kind string) bool {
+	return kind == "recommendation" || kind == "insight"
+}
+
+func tailPair(path, prefix string) (string, string, bool) {
+	tail := strings.TrimPrefix(path, prefix)
+	parts := strings.Split(tail, "/")
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
+}
+
+func requireMethod(w http.ResponseWriter, r *http.Request, want string) bool {
+	if r.Method == want {
+		return true
+	}
+	w.Header().Set("Allow", want)
+	writeJSON(w, http.StatusMethodNotAllowed, nil, apiError{Code: "method_not_allowed", Message: fmt.Sprintf("method must be %s", want)})
+	return false
+}
+
+func copPayload(result contracts.ProjectionResult) map[string]any {
+	return map[string]any{
+		"cop":            result.COP,
+		"state_revision": result.StateRevision,
+		"projected_at":   result.ProjectedAt.UTC().Format(time.RFC3339Nano),
+	}
+}
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, destination any) bool {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		writeJSON(w, http.StatusBadRequest, nil, apiError{Code: "invalid_json", Message: "request body must be a valid JSON object"})
+		return false
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		writeJSON(w, http.StatusBadRequest, nil, apiError{Code: "invalid_json", Message: "request body must contain one JSON object"})
+		return false
+	}
+	return true
+}
+
+func writeSSE(w http.ResponseWriter, event stream.Event) error {
+	if strings.TrimSpace(event.Name) == "" {
+		return errors.New("SSE event name is required")
+	}
+	encoded, err := json.Marshal(event.Data)
+	if err != nil {
+		return fmt.Errorf("marshal SSE event: %w", err)
+	}
+	_, err = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Name, encoded)
+	return err
+}
+
+type responseEnvelope struct {
+	Data  any       `json:"data,omitempty"`
+	Error *apiError `json:"error,omitempty"`
+}
+
+type apiError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+func writeJSON(w http.ResponseWriter, status int, data any, problem any) {
+	var apiProblem *apiError
+	switch value := problem.(type) {
+	case nil:
+	case apiError:
+		apiProblem = &value
+	case *apiError:
+		apiProblem = value
+	default:
+		apiProblem = &apiError{Code: "internal_error", Message: "invalid API error envelope"}
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(responseEnvelope{Data: data, Error: apiProblem})
+}
+
+func randomID() string {
+	bytes := make([]byte, 16)
+	if _, err := rand.Read(bytes); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(bytes)
+}
