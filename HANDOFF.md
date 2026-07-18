@@ -41,8 +41,8 @@ branch until the deterministic spine is integrated and stable.
 
 | ID | Work | Prereqs | Owns (exclusive) | Status |
 |---|---|---|---|---|
-| P01 | Go toolchain, local quality gate, and repository bootstrap | — | `go.mod`, `go.sum`, `Taskfile.yml`, `.gitattributes`, `.github/workflows/**`, `cmd/mosaic/**` | 🔒 Claimed — `/root/p01_bootstrap` |
-| P02 | Authored ontology schemas, generated Go types, contracts, and schema gate | P01 | `ontology/**`, `internal/ontology/**`, `internal/contracts/**`, `cmd/schema-gen/**` | ⬜ Ready |
+| P01 | Go toolchain, local quality gate, and repository bootstrap | — | `go.mod`, `go.sum`, `Taskfile.yml`, `.gitattributes`, `.github/workflows/**`, `cmd/mosaic/**` | ✅ Integrated — `057eaaa` |
+| P02 | Authored ontology schemas, generated Go types, contracts, and schema gate | P01 | `ontology/**`, `internal/ontology/**`, `internal/contracts/**`, `cmd/schema-gen/**` | 🔒 Claimed — `/root/p02_contracts` |
 | P03 | SQLite migrations and append-only repositories | P02 | `internal/store/**`, `migrations/**` | ⬜ Ready |
 | P04 | Synthetic dataset manifest, scenario schema, and fixture validator | P02 | `datasets/**`, `internal/dataset/**`, `cmd/datasetgen/**` | ⬜ Ready |
 | P05 | Raw ingestion, Luna-result lifecycle, idempotency, and semantic-duplicate links | P02, P03 | `internal/ingestion/**`, `internal/luna/**` | ⬜ Ready |
@@ -113,3 +113,6 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
   protocol, and first parcel board established in `7a2e738`; P01 is next.
 - 2026-07-18 P01 claimed by `/root/p01_bootstrap` — branch
   `parcel/P01-repo-bootstrap`, base `e637501`.
+- 2026-07-18 P01 integrated by coordinator — `057eaaa`; `go run ./cmd/mosaic quality` passed.
+- 2026-07-18 P02 claimed by `/root/p02_contracts` — branch
+  `parcel/P02-ontology-contracts`, base `057eaaa`.
