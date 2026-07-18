@@ -51,7 +51,7 @@ branch until the deterministic spine is integrated and stable.
 | P08 | HTTP/SSE read model and fixed demo-role audit endpoints | P03, P06 | `internal/api/**`, `internal/stream/**` | ✅ Integrated — `06410b8` |
 | P09 | Svelte dashboard shell and evidence-aware COP timeline | P08 | `ui/**` | 🔒 Claimed — `/root/p09_dashboard` |
 | P10 | Terra structured insight adapter and lifecycle | P03, P06 | `internal/terra/**`, `prompts/terra/**` | ✅ Integrated — `6bc8eaa` |
-| P11 | Sol supervisor briefing, recommendation, and audit-action adapter | P03, P06, P08 | `internal/sol/**`, `prompts/sol/**` | 🔒 Claimed — `/root/p11_sol` |
+| P11 | Sol supervisor briefing, recommendation, and audit-action adapter | P03, P06, P08 | `internal/sol/**`, `prompts/sol/**` | ✅ Integrated — `879102d` |
 | P12 | End-to-end scenario acceptance suite and local Docker runbook | P07–P11 | `tests/e2e/**`, `Dockerfile`, `docker-compose.yml`, `docs/runbook/**` | ⬜ Ready |
 | P13 | Offline llama.cpp synthetic-data generation and freeze workflow | P02, P04 | `cmd/datasetgen/**`, `internal/datasetgen/**`, `prompts/datasetgen/**`, `docs/dataset-generation.md` | 🔒 Claimed — `/root/p13_generation` |
 
@@ -135,5 +135,5 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-18 P08 integrated by coordinator — `06410b8`; HTTP/SSE and fixed-role audit tests passed.
 - 2026-07-18 P10 integrated by coordinator — `6bc8eaa`; structured Terra lifecycle tests passed.
 - 2026-07-18 P09 claimed by `/root/p09_dashboard` — branch `parcel/P09-dashboard`; simple evidence-first demo UI.
-- 2026-07-18 P11 claimed by `/root/p11_sol` — branch `parcel/P11-sol`; no operational execution path.
+- 2026-07-18 P11 integrated by coordinator — `879102d`; supervisor-only advisory lifecycle validates evidence and records model runs without operational execution.
 - 2026-07-18 P13 claimed by `/root/p13_generation` — branch `parcel/P13-generation`; offline-only llama.cpp generation and explicit dataset freeze.
