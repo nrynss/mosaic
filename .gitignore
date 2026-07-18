@@ -6,3 +6,4 @@ models/
 dist/
 node_modules/
 .env
+.worktrees/

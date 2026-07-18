@@ -41,7 +41,7 @@ branch until the deterministic spine is integrated and stable.
 
 | ID | Work | Prereqs | Owns (exclusive) | Status |
 |---|---|---|---|---|
-| P01 | Go toolchain, local quality gate, and repository bootstrap | — | `go.mod`, `go.sum`, `Taskfile.yml`, `.gitattributes`, `.github/workflows/**`, `cmd/mosaic/**` | ⬜ Ready |
+| P01 | Go toolchain, local quality gate, and repository bootstrap | — | `go.mod`, `go.sum`, `Taskfile.yml`, `.gitattributes`, `.github/workflows/**`, `cmd/mosaic/**` | 🔒 Claimed — `/root/p01_bootstrap` |
 | P02 | Authored ontology schemas, generated Go types, contracts, and schema gate | P01 | `ontology/**`, `internal/ontology/**`, `internal/contracts/**`, `cmd/schema-gen/**` | ⬜ Ready |
 | P03 | SQLite migrations and append-only repositories | P02 | `internal/store/**`, `migrations/**` | ⬜ Ready |
 | P04 | Synthetic dataset manifest, scenario schema, and fixture validator | P02 | `datasets/**`, `internal/dataset/**`, `cmd/datasetgen/**` | ⬜ Ready |
@@ -111,3 +111,5 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 
 - 2026-07-18 P00 integrated by coordinator — Git baseline, RFC-0001, agent
   protocol, and first parcel board established in `7a2e738`; P01 is next.
+- 2026-07-18 P01 claimed by `/root/p01_bootstrap` — branch
+  `parcel/P01-repo-bootstrap`, base `e637501`.
