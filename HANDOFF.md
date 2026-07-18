@@ -43,8 +43,8 @@ branch until the deterministic spine is integrated and stable.
 |---|---|---|---|---|
 | P01 | Go toolchain, local quality gate, and repository bootstrap | — | `go.mod`, `go.sum`, `Taskfile.yml`, `.gitattributes`, `.github/workflows/**`, `cmd/mosaic/**` | ✅ Integrated — `057eaaa` |
 | P02 | Authored ontology schemas, generated Go types, contracts, and schema gate | P01 | `ontology/**`, `internal/ontology/**`, `internal/contracts/**`, `cmd/schema-gen/**`, `go.mod`, `go.sum` (schema-validator dependency only) | ✅ Integrated — `289acf9` |
-| P03 | SQLite migrations and append-only repositories | P02 | `internal/store/**`, `migrations/**`, `go.mod`, `go.sum` (SQLite driver only) | 🔒 Claimed — `/root/p03_store` |
-| P04 | Synthetic dataset manifest, scenario schema, and fixture validator | P02 | `datasets/**`, `internal/dataset/**`, `cmd/datasetgen/**` | 🔒 Claimed — `/root/p04_dataset` |
+| P03 | SQLite migrations and append-only repositories | P02 | `internal/store/**`, `migrations/**`, `go.mod`, `go.sum` (SQLite driver only) | ✅ Integrated — `e746dfc` |
+| P04 | Synthetic dataset manifest, scenario schema, and fixture validator | P02 | `datasets/**`, `internal/dataset/**`, `cmd/datasetgen/**` | ✅ Integrated — `548752d` |
 | P05 | Raw ingestion, Luna-result lifecycle, idempotency, and semantic-duplicate links | P02, P03 | `internal/ingestion/**`, `internal/luna/**` | ⬜ Ready |
 | P06 | Deterministic COP projector, correction handling, checkpoints, and replay | P02, P03 | `internal/state/**`, `internal/replay/**` | ⬜ Ready |
 | P07 | Scenario simulator and replay publisher | P04, P05, P06 | `internal/simulator/**`, `cmd/simulator/**` | ⬜ Ready |
@@ -118,4 +118,4 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
   `parcel/P02-ontology-contracts`, coordinator branch after P01; schema-validator dependency approved.
 - 2026-07-18 P02 integrated by coordinator — `289acf9`; schema and full quality gates passed.
 - 2026-07-18 P03 claimed by `/root/p03_store` — branch `parcel/P03-sqlite-store`; SQLite driver approved.
-- 2026-07-18 P04 claimed by `/root/p04_dataset` — branch `parcel/P04-dataset-scenario`.
+- 2026-07-18 P04 claimed by /root/p04_dataset — branch parcel/P04-dataset-scenario.\n- 2026-07-18 P03 integrated by coordinator — 746dfc; schema and full quality gates passed.\n- 2026-07-18 P04 integrated by coordinator — 548752d; frozen dataset validation and full quality gates passed.
