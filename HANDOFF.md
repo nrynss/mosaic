@@ -47,10 +47,10 @@ branch until the deterministic spine is integrated and stable.
 | P04 | Synthetic dataset manifest, scenario schema, and fixture validator | P02 | `datasets/**`, `internal/dataset/**`, `cmd/datasetgen/**` | ✅ Integrated — `548752d` |
 | P05 | Raw ingestion, Luna-result lifecycle, idempotency, and semantic-duplicate links | P02, P03 | `internal/ingestion/**`, `internal/luna/**` | ✅ Integrated — `aa0b659` |
 | P06 | Deterministic COP projector, correction handling, checkpoints, and replay | P02, P03 | `internal/state/**`, `internal/replay/**` | ✅ Integrated — `1c53568` |
-| P07 | Scenario simulator and replay publisher | P04, P05, P06 | `internal/simulator/**`, `cmd/simulator/**` | ⬜ Ready |
-| P08 | HTTP/SSE read model and fixed demo-role audit endpoints | P03, P06 | `internal/api/**`, `internal/stream/**` | ⬜ Ready |
+| P07 | Scenario simulator and replay publisher | P04, P05, P06 | `internal/simulator/**`, `cmd/simulator/**` | 🔒 Claimed — `/root/p07_simulator` |
+| P08 | HTTP/SSE read model and fixed demo-role audit endpoints | P03, P06 | `internal/api/**`, `internal/stream/**` | 🔒 Claimed — `/root/p08_api` |
 | P09 | Svelte dashboard shell and evidence-aware COP timeline | P08 | `ui/**` | ⬜ Ready |
-| P10 | Terra structured insight adapter and lifecycle | P03, P06 | `internal/terra/**`, `prompts/terra/**` | ⬜ Ready |
+| P10 | Terra structured insight adapter and lifecycle | P03, P06 | `internal/terra/**`, `prompts/terra/**` | 🔒 Claimed — `/root/p10_terra` |
 | P11 | Sol supervisor briefing, recommendation, and audit-action adapter | P03, P06, P08 | `internal/sol/**`, `prompts/sol/**` | ⬜ Ready |
 | P12 | End-to-end scenario acceptance suite and local Docker runbook | P07–P11 | `tests/e2e/**`, `Dockerfile`, `docker-compose.yml`, `docs/runbook/**` | ⬜ Ready |
 
