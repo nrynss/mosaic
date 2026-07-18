@@ -1,0 +1,17 @@
+version: "3"
+
+tasks:
+  default:
+    desc: Run the local quality gate
+    cmds:
+      - task: quality
+
+  quality:
+    desc: Check Go formatting, then run vet and tests
+    cmds:
+      - go run ./cmd/mosaic quality
+
+  format:
+    desc: Apply Go formatting to tracked source directories
+    cmds:
+      - go run ./cmd/mosaic format
