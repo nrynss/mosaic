@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "scenario_id": "scenario-domestic-disturbance-v1",
+  "version": "1.0.0",
+  "title": "Synthetic domestic disturbance with access constraints",
+  "dataset_manifest_id": "manifest-domestic-disturbance-v1",
+  "beats": [
+    { "beat_id": "baseline-01-911-call", "order": 1, "raw_event_id": "raw-domestic-001-call", "delay_ms": 0 },
+    { "beat_id": "baseline-02-welfare-check", "order": 2, "raw_event_id": "raw-domestic-002-welfare", "delay_ms": 100 },
+    { "beat_id": "baseline-03-weather-alert", "order": 3, "raw_event_id": "raw-domestic-003-weather", "delay_ms": 100 },
+    { "beat_id": "baseline-04-road-closure", "order": 4, "raw_event_id": "raw-domestic-004-main-road", "delay_ms": 100 },
+    { "beat_id": "baseline-05-ems-availability", "order": 5, "raw_event_id": "raw-domestic-005-ems-available", "delay_ms": 100 },
+    { "beat_id": "baseline-06-officer-update", "order": 6, "raw_event_id": "raw-domestic-006-officer-update", "delay_ms": 100 },
+    { "beat_id": "fixture-07-repaired-incomplete-road", "order": 7, "raw_event_id": "raw-domestic-007-incomplete-road", "delay_ms": 100 },
+    { "beat_id": "fixture-08-quarantined-input", "order": 8, "raw_event_id": "raw-domestic-008-invalid-input", "delay_ms": 100 },
+    { "beat_id": "fixture-09-late-delivery", "order": 9, "raw_event_id": "raw-domestic-009-late-ems", "delay_ms": 100 },
+    { "beat_id": "fixture-10-road-correction", "order": 10, "raw_event_id": "raw-domestic-010-road-correction", "delay_ms": 100 }
+  ]
+}
