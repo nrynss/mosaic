@@ -56,6 +56,7 @@ branch until the deterministic spine is integrated and stable.
 | P13 | Offline llama.cpp synthetic-data generation and freeze workflow | P02, P04 | `cmd/datasetgen/**`, `internal/datasetgen/**`, `prompts/datasetgen/**`, `docs/dataset-generation.md` | ✅ Integrated — `3213b93` |
 | P14 | Executable demo composition root and static UI host | P03, P06, P07, P08, P09 | `cmd/mosaicdemo/**` | ✅ Integrated — `617081a` |
 | P15 | Reproducible GoMock tooling and generated contract mocks | P02 | `tools.go`, `internal/contracts/mocks/**`, `go.mod`, `go.sum` | ✅ Integrated — `86caf77` |
+| P16 | RFC-0001 implementation reconciliation | P08–P14 | `docs/rfcs/RFC-0001-mosaic-demo-foundation.md` | ✅ Integrated — `db66b80` |
 
 ## Waves
 
@@ -93,6 +94,7 @@ Independent:     P13 (offline dataset production; never a runtime dependency)
 - **P12:** a fresh local Docker run completes the end-to-end acceptance scenario through the P14 executable composition root.
 - **P14:** one local executable composes the deterministic demo API and the prebuilt dashboard, with no live model or operational-system integration.
 - **P15:** `go generate ./internal/contracts/mocks` reproduces the checked-in GoMock implementations from the stable contract interfaces.
+- **P16:** RFC-0001 distinguishes integrated behavior from the remaining Docker acceptance and deferred production decisions.
 - **P13:** a local llama.cpp run writes only a staged candidate dataset with
   complete provenance; validation and explicit freeze are required before a new
   versioned dataset is admitted.
@@ -144,3 +146,4 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-18 P12 claimed by `/root/p12_e2e` — Docker acceptance deferred on a new executable composition parcel.
 - 2026-07-18 P14 integrated by coordinator — `617081a`; the executable serves the seeded deterministic API and guarded prebuilt dashboard, with no live model or operational integration.
 - 2026-07-18 P15 integrated by coordinator — `86caf77`; GoMock v0.6.0 is pinned and contract mocks regenerate cleanly.
+- 2026-07-18 P16 integrated by coordinator — `db66b80`; RFC-0001 now records actual v0.1 persistence, API/UI, model, offline-generation, and composition status.
