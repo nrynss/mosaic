@@ -1,0 +1,86 @@
+{
+  "version": "1.0.0",
+  "dataset_manifest_id": "manifest-domestic-disturbance-v1",
+  "raw_events": [
+    {
+      "schema_version": "1.0.0", "raw_event_id": "raw-domestic-001-call",
+      "source": { "source_id": "synthetic-911", "source_record_id": "call-001" }, "content_type": "text/plain",
+      "payload_bytes_b64": "OTExIGNhbGxlciByZXBvcnRzIGEgdmVyYmFsIGRvbWVzdGljIGRpc3R1cmJhbmNlIGF0IDE0IENlZGFyIExhbmUu",
+      "raw_sha256": "bffccfdd859ea200099b2b927dc65914fe4146bc5079ff01653653d7af340802",
+      "source_occurred_at": "2026-07-18T10:00:00Z", "received_at": "2026-07-18T10:00:10Z",
+      "attributes": { "story_beat": "911 call" }
+    },
+    {
+      "schema_version": "1.0.0", "raw_event_id": "raw-domestic-002-welfare",
+      "source": { "source_id": "synthetic-history", "source_record_id": "welfare-002" }, "content_type": "text/plain",
+      "payload_bytes_b64": "UHJpb3Igd2VsZmFyZSBjaGVjayBhdCAxNCBDZWRhciBMYW5lIG9jY3VycmVkIHR3byBkYXlzIGVhcmxpZXIu",
+      "raw_sha256": "49860db8ddb11e2be82b0f7ccabb7604450b1aa334e4267edc4136ade71f544b",
+      "source_occurred_at": "2026-07-18T10:00:30Z", "received_at": "2026-07-18T10:00:45Z",
+      "attributes": { "story_beat": "historical welfare check" }
+    },
+    {
+      "schema_version": "1.0.0", "raw_event_id": "raw-domestic-003-weather",
+      "source": { "source_id": "synthetic-weather", "source_record_id": "weather-003" }, "content_type": "text/plain",
+      "payload_bytes_b64": "V2VhdGhlciBzZXJ2aWNlIHJlcG9ydHMgaGVhdnkgcmFpbiBhZHZpc29yeSBpbiB0aGUgQ2VkYXIgZGlzdHJpY3Qu",
+      "raw_sha256": "27aeb44b9555152a1245d46bc4dd70cd3e10ca05ce35648bd39ec0a35b8152ac",
+      "source_occurred_at": "2026-07-18T10:01:00Z", "received_at": "2026-07-18T10:01:10Z",
+      "attributes": { "story_beat": "weather alert" }
+    },
+    {
+      "schema_version": "1.0.0", "raw_event_id": "raw-domestic-004-main-road",
+      "source": { "source_id": "synthetic-roads", "source_record_id": "road-004" }, "content_type": "text/plain",
+      "payload_bytes_b64": "TWFpbiBTdHJlZXQgaXMgY2xvc2VkIGF0IHRoZSBicmlkZ2UgZHVlIHRvIGZsb29kaW5nLg==",
+      "raw_sha256": "942a1f5813a9d64c8aa8d831d47cb8aa720071bd5e9c5df01b04269ca268d23e",
+      "source_occurred_at": "2026-07-18T10:02:00Z", "received_at": "2026-07-18T10:02:10Z",
+      "attributes": { "story_beat": "road closure" }
+    },
+    {
+      "schema_version": "1.0.0", "raw_event_id": "raw-domestic-005-ems-available",
+      "source": { "source_id": "synthetic-ems", "source_record_id": "ems-005" }, "content_type": "text/plain",
+      "payload_bytes_b64": "RU1TLTQgaXMgYXZhaWxhYmxlIGF0IENlbnRyYWwgU3RhdGlvbi4=",
+      "raw_sha256": "5e9b3480398c54a220c6dda51755a4d9b0a5a428240a522399425fc8c137ecbf",
+      "source_occurred_at": "2026-07-18T10:03:00Z", "received_at": "2026-07-18T10:03:15Z",
+      "attributes": { "story_beat": "EMS availability" }
+    },
+    {
+      "schema_version": "1.0.0", "raw_event_id": "raw-domestic-006-officer-update",
+      "source": { "source_id": "synthetic-radio", "source_record_id": "radio-006" }, "content_type": "text/plain",
+      "payload_bytes_b64": "VW5pdCAxNyByZXBvcnRzIGFycml2YWwgbmVhciAxNCBDZWRhciBMYW5lLg==",
+      "raw_sha256": "e3424b3f125334a3ab4785db3924c01fe40ee80ffdcde7dce8e689373f500218",
+      "source_occurred_at": "2026-07-18T10:04:00Z", "received_at": "2026-07-18T10:04:10Z",
+      "attributes": { "story_beat": "officer radio update" }
+    },
+    {
+      "schema_version": "1.0.0", "raw_event_id": "raw-domestic-007-incomplete-road",
+      "source": { "source_id": "synthetic-roads", "source_record_id": "road-007" }, "content_type": "text/plain",
+      "payload_bytes_b64": "QnJvb2sgTGFuZSBjbG9zdXJlIHJlcG9ydGVkOyByb2FkIGlkZW50aWZpZXIgb21pdHRlZC4=",
+      "raw_sha256": "e0f03c37b77965f2f447283892c18292776efd891edd8d5e0f5de54a38d530b1",
+      "source_occurred_at": "2026-07-18T10:05:00Z", "received_at": "2026-07-18T10:05:30Z",
+      "attributes": { "fixture": "incomplete road data" }
+    },
+    {
+      "schema_version": "1.0.0", "raw_event_id": "raw-domestic-008-invalid-input",
+      "source": { "source_id": "synthetic-radio", "source_record_id": "radio-008" }, "content_type": "application/json",
+      "payload_bytes_b64": "eyBtYWxmb3JtZWQgaW5jaWRlbnQgcGF5bG9hZA==",
+      "raw_sha256": "7ef1fb0d5e3b4ae8b323dcc49010a883e5e1c8cb9396c4b9e021333347ff6448",
+      "source_occurred_at": "2026-07-18T10:06:00Z", "received_at": "2026-07-18T10:06:10Z",
+      "attributes": { "fixture": "quarantined invalid input" }
+    },
+    {
+      "schema_version": "1.0.0", "raw_event_id": "raw-domestic-009-late-ems",
+      "source": { "source_id": "synthetic-ems", "source_record_id": "ems-009" }, "content_type": "text/plain",
+      "payload_bytes_b64": "RU1TLTQgYmVjYW1lIHVuYXZhaWxhYmxlIGF0IDEwOjAyIGR1ZSB0byBhbm90aGVyIGFzc2lnbm1lbnQu",
+      "raw_sha256": "c608cefa65e9300e3a5275ccff91aad423c524408b0d6489bd92b675deb3a012",
+      "source_occurred_at": "2026-07-18T10:02:30Z", "received_at": "2026-07-18T10:09:00Z",
+      "attributes": { "fixture": "late delivery" }
+    },
+    {
+      "schema_version": "1.0.0", "raw_event_id": "raw-domestic-010-road-correction",
+      "source": { "source_id": "synthetic-roads", "source_record_id": "road-010" }, "content_type": "text/plain",
+      "payload_bytes_b64": "QnJvb2sgTGFuZSBoYXMgcmVvcGVuZWQgYWZ0ZXIgZGVicmlzIHJlbW92YWwu",
+      "raw_sha256": "5d369cd3ae11937bf6766779a49f16ea2602e9fdce032e3070fee5d544c003d3",
+      "source_occurred_at": "2026-07-18T10:10:00Z", "received_at": "2026-07-18T10:10:10Z",
+      "attributes": { "fixture": "superseding road correction" }
+    }
+  ]
+}
