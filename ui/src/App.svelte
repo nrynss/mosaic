@@ -5,36 +5,36 @@
   const defaultAPIBase = import.meta.env.VITE_MOSAIC_API_BASE_URL || '/api/v1';
   const hiddenArtifactFields = new Set(['payload_bytes_b64', 'raw_sha256']);
 
-  let apiBase = normaliseAPIBase(defaultAPIBase);
-  let apiBaseInput = apiBase;
-  let identity = 'viewer-demo';
-  let health = { state: 'idle', detail: 'Not checked' };
-  let version = { state: 'idle', detail: 'Not checked' };
-  let cop = null;
-  let copState = 'idle';
-  let copError = '';
-  let streamState = 'idle';
-  let streamDetail = 'Not connected';
-  let selectedEvidence = null;
-  let evidenceState = 'idle';
-  let evidenceError = '';
-  let briefingNote = 'Request a structured supervisor briefing for the current synthetic COP.';
-  let auditAction = 'acknowledged';
-  let auditTargetKind = 'recommendation';
-  let auditTargetID = '';
-  let auditNote = 'Supervisor review recorded for the synthetic demonstration.';
-  let actionState = 'idle';
-  let actionMessage = '';
+  let apiBase = $state(normaliseAPIBase(defaultAPIBase));
+  let apiBaseInput = $state(normaliseAPIBase(defaultAPIBase));
+  let identity = $state('viewer-demo');
+  let health = $state({ state: 'idle', detail: 'Not checked' });
+  let version = $state({ state: 'idle', detail: 'Not checked' });
+  let cop = $state(null);
+  let copState = $state('idle');
+  let copError = $state('');
+  let streamState = $state('idle');
+  let streamDetail = $state('Not connected');
+  let selectedEvidence = $state(null);
+  let evidenceState = $state('idle');
+  let evidenceError = $state('');
+  let briefingNote = $state('Request a structured supervisor briefing for the current synthetic COP.');
+  let auditAction = $state('acknowledged');
+  let auditTargetKind = $state('recommendation');
+  let auditTargetID = $state('');
+  let auditNote = $state('Supervisor review recorded for the synthetic demonstration.');
+  let actionState = $state('idle');
+  let actionMessage = $state('');
 
   let streamController;
   let reconnectTimer;
   let reconnectAttempt = 0;
   let destroyed = false;
 
-  $: isSupervisor = identity === 'supervisor-demo';
-  $: roleLabel = isSupervisor ? 'Supervisor demo identity' : 'Viewer demo identity';
-  $: copStateRevision = cop?.state_revision ?? cop?.cop?.state_revision ?? '—';
-  $: claimItems = makeClaimItems(cop?.cop);
+  let isSupervisor = $derived(identity === 'supervisor-demo');
+  let roleLabel = $derived(isSupervisor ? 'Supervisor demo identity' : 'Viewer demo identity');
+  let copStateRevision = $derived(cop?.state_revision ?? cop?.cop?.state_revision ?? '—');
+  let claimItems = $derived(makeClaimItems(cop?.cop));
 
   onMount(() => {
     void refreshAll();
@@ -291,6 +291,15 @@
     void loadCOP();
   }
 
+  function submitBriefing(event) {
+    event.preventDefault();
+    void requestBriefing();
+  }
+
+  function submitAuditAction(event) {
+    event.preventDefault();
+    void recordAuditAction();
+  }
   async function requestBriefing() {
     actionState = 'loading';
     actionMessage = '';
@@ -454,10 +463,10 @@
       <h1>Read the record.<br />Keep judgment human.</h1>
       <p class="rail-copy">{roleLabel}. The identity is a fixed demo control, not production authentication.</p>
       <div class="identity-switch" aria-label="Choose demo identity">
-        <button class:active={identity === 'viewer-demo'} aria-pressed={identity === 'viewer-demo'} on:click={() => selectIdentity('viewer-demo')}>
+        <button class:active={identity === 'viewer-demo'} aria-pressed={identity === 'viewer-demo'} onclick={() => selectIdentity('viewer-demo')}>
           <span>Viewer</span><small>Inspect only</small>
         </button>
-        <button class:active={identity === 'supervisor-demo'} aria-pressed={identity === 'supervisor-demo'} on:click={() => selectIdentity('supervisor-demo')}>
+        <button class:active={identity === 'supervisor-demo'} aria-pressed={identity === 'supervisor-demo'} onclick={() => selectIdentity('supervisor-demo')}>
           <span>Supervisor</span><small>Record review</small>
         </button>
       </div>
@@ -467,7 +476,7 @@
       <p class="eyebrow">Connection</p>
       <label for="api-base">API base URL</label>
       <input id="api-base" bind:value={apiBaseInput} spellcheck="false" autocomplete="off" />
-      <button class="quiet-button" on:click={applyAPIBase}>Apply endpoint</button>
+      <button class="quiet-button" onclick={applyAPIBase}>Apply endpoint</button>
       <dl class="service-status">
         <div><dt>Health</dt><dd data-state={health.state}>{health.detail}</dd></div>
         <div><dt>Version</dt><dd data-state={version.state}>{version.detail}</dd></div>
@@ -505,7 +514,7 @@
       <div class="empty-state error-state" role="alert">
         <strong>COP unavailable</strong>
         <p>{copError}</p>
-        <button class="quiet-button" on:click={refreshAll}>Try again</button>
+        <button class="quiet-button" onclick={refreshAll}>Try again</button>
       </div>
     {:else if claimItems.length === 0}
       <div class="empty-state">
@@ -528,7 +537,7 @@
               <div class="claim-footer">
                 <code>{item.id}</code>
                 {#if item.evidence.id}
-                  <button class="evidence-button" on:click={() => selectEvidence(item.evidence.kind, item.evidence.id, `${item.kind} · ${item.id}`)}>
+                  <button class="evidence-button" onclick={() => selectEvidence(item.evidence.kind, item.evidence.id, `${item.kind} · ${item.id}`)}>
                     Resolve evidence
                   </button>
                 {:else}
@@ -581,12 +590,12 @@
       <p class="eyebrow">Supervisor review</p>
       {#if isSupervisor}
         <p class="panel-copy">These calls append immutable demo audit records. They are visibly non-operational.</p>
-        <form on:submit|preventDefault={requestBriefing}>
+        <form onsubmit={submitBriefing}>
           <label for="briefing-note">Briefing request note</label>
           <textarea id="briefing-note" bind:value={briefingNote} rows="3"></textarea>
           <button class="review-button" disabled={actionState === 'loading'}>Record briefing request <span>executed: false</span></button>
         </form>
-        <form on:submit|preventDefault={recordAuditAction}>
+        <form onsubmit={submitAuditAction}>
           <label for="audit-action">Review action</label>
           <select id="audit-action" bind:value={auditAction}>
             <option value="acknowledged">Acknowledge</option>
