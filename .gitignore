@@ -1,0 +1,8 @@
+models/
+*.gguf
+*.db
+*.db-shm
+*.db-wal
+dist/
+node_modules/
+.env
