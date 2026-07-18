@@ -72,9 +72,10 @@ person, or otherwise makes an operational decision. AI informs; humans decide.
    JSON-Schema response contracts. For OpenAI Responses API adapters, use strict
    Structured Outputs through `text.format`; application-side validation and
    refusal handling remain mandatory.
-8. **Offline generation is separate.** The Gemma GGUF model runs through
-   llama.cpp in `cmd/datasetgen`, never in the online application image or live
-   Luna/Terra/Sol path. Model artifacts are not committed.
+8. **Offline generation is separate.** The Gemma GGUF model is kept in the
+   gitignored `localmodels/` directory and runs through llama.cpp in
+   `cmd/datasetgen`, never in the online application image or live Luna/Terra/Sol
+   path. Model artifacts are not committed.
 
 ## 4. Architecture
 
@@ -254,7 +255,7 @@ imperative command language.
 `cmd/datasetgen` invokes llama.cpp against the configured local Gemma model path.
 The model artifact is
 `unsloth/gemma-4-E2B-it-GGUF/gemma-4-E2B-it-UD-Q8_K_XL.gguf`. It is acquired
-locally (for example, with `hf download`), kept in ignored `models/`, and never
+locally (for example, with `hf download`), kept in ignored `localmodels/`, and never
 included in the application image. The generator records a manifest with model,
 prompt, schema versions, deterministic ID map, and seed where supported. Only
 validated artifacts enter `datasets/`.

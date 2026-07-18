@@ -405,7 +405,7 @@ This cleanly separates:
 
 # Offline Synthetic Data Generation
 
-The Gemma 4 E2B GGUF model runs locally through llama.cpp and is responsible only for generating synthetic data. The selected artifact is `unsloth/gemma-4-E2B-it-GGUF/gemma-4-E2B-it-UD-Q8_K_XL.gguf`.
+The Gemma 4 E2B GGUF model runs locally through llama.cpp and is responsible only for generating synthetic data. The selected artifact is `unsloth/gemma-4-E2B-it-GGUF/gemma-4-E2B-it-UD-Q8_K_XL.gguf`, stored locally under the gitignored `localmodels/` directory.
 
 It is an offline generator, not part of the online Mosaic application image or the Luna, Terra, and Sol runtime path. It never designs schemas.
 

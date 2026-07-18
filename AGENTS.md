@@ -48,7 +48,7 @@ is false, stop and propose a contract change.
 
 - The demo uses synthetic data only. Do not add real operational records, PII,
   API keys, tokens, or credentials to the repository.
-- `models/`, GGUF artifacts, databases, and local environment files are ignored.
+- `localmodels/`, GGUF artifacts, databases, and local environment files are ignored.
 - Raw Events, Canonical Events, Insights, Recommendations, model runs, and audit
   records are immutable. Corrections create superseding records; history is never
   rewritten.

@@ -1,4 +1,4 @@
-models/
+localmodels/
 *.gguf
 *.db
 *.db-shm
