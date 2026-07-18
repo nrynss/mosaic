@@ -52,8 +52,9 @@ branch until the deterministic spine is integrated and stable.
 | P09 | Svelte dashboard shell and evidence-aware COP timeline | P08 | `ui/**` | 🔒 Claimed — `/root/p09_dashboard` |
 | P10 | Terra structured insight adapter and lifecycle | P03, P06 | `internal/terra/**`, `prompts/terra/**` | ✅ Integrated — `6bc8eaa` |
 | P11 | Sol supervisor briefing, recommendation, and audit-action adapter | P03, P06, P08 | `internal/sol/**`, `prompts/sol/**` | ✅ Integrated — `879102d` |
-| P12 | End-to-end scenario acceptance suite and local Docker runbook | P07–P11 | `tests/e2e/**`, `Dockerfile`, `docker-compose.yml`, `docs/runbook/**` | ⬜ Ready |
+| P12 | End-to-end scenario acceptance suite and local Docker runbook | P07–P11, P14 | `tests/e2e/**`, `Dockerfile`, `docker-compose.yml`, `docs/runbook/**` | 🔒 Claimed — `/root/p12_e2e` |
 | P13 | Offline llama.cpp synthetic-data generation and freeze workflow | P02, P04 | `cmd/datasetgen/**`, `internal/datasetgen/**`, `prompts/datasetgen/**`, `docs/dataset-generation.md` | 🔒 Claimed — `/root/p13_generation` |
+| P14 | Executable demo composition root and static UI host | P03, P06, P07, P08, P09 | `cmd/mosaicdemo/**` | ⬜ Ready |
 
 ## Waves
 
@@ -63,7 +64,7 @@ Wave 1:          P03 ∥ P04
 Wave 2:          P05 ∥ P06
 Wave 3:          P07 ∥ P08
 Wave 4:          P09 ∥ P10; then P11
-Wave 5:          P12
+Wave 5:          P14; then P12
 Independent:     P13 (offline dataset production; never a runtime dependency)
 ```
 
@@ -88,7 +89,8 @@ Independent:     P13 (offline dataset production; never a runtime dependency)
   recommendations.
 - **P10/P11:** fixture and live adapters validate structured output; a refusal,
   invalid output, or timeout records a model run and changes no state.
-- **P12:** a fresh local Docker run completes the end-to-end acceptance scenario.
+- **P12:** a fresh local Docker run completes the end-to-end acceptance scenario through the P14 executable composition root.
+- **P14:** one local executable composes the deterministic demo API and the prebuilt dashboard, with no live model or operational-system integration.
 - **P13:** a local llama.cpp run writes only a staged candidate dataset with
   complete provenance; validation and explicit freeze are required before a new
   versioned dataset is admitted.
@@ -137,3 +139,5 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-18 P09 claimed by `/root/p09_dashboard` — branch `parcel/P09-dashboard`; simple evidence-first demo UI.
 - 2026-07-18 P11 integrated by coordinator — `879102d`; supervisor-only advisory lifecycle validates evidence and records model runs without operational execution.
 - 2026-07-18 P13 claimed by `/root/p13_generation` — branch `parcel/P13-generation`; offline-only llama.cpp generation and explicit dataset freeze.
+- 2026-07-18 P12 claimed by `/root/p12_e2e` — Docker acceptance deferred on a new executable composition parcel.
+- 2026-07-18 P14 ready by coordinator — required executable composition root; no runtime server will be hidden under the test suite.
