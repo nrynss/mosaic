@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mosaic.local/ontology/checkpoint/v1.0.0",
+  "title": "Checkpoint",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "checkpoint_id", "state_revision", "through_canonical_seq", "cop", "created_at"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" }, "checkpoint_id": { "type": "string", "minLength": 1 }, "state_revision": { "type": "integer", "minimum": 1 }, "through_canonical_seq": { "type": "integer", "minimum": 0 },
+    "cop": { "$ref": "#/$defs/cop" }, "created_at": { "type": "string", "format": "date-time" }
+  },
+  "$defs": { "cop": { "type": "object", "additionalProperties": false, "required": ["state_revision", "projected_at", "effective_event_ids", "incidents", "units", "resources", "roads", "weather_alerts", "active_insight_ids"], "properties": { "state_revision": { "type": "integer", "minimum": 1 }, "projected_at": { "type": "string", "format": "date-time" }, "effective_event_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } }, "incidents": { "type": "array", "items": { "type": "object" } }, "units": { "type": "array", "items": { "type": "object" } }, "resources": { "type": "array", "items": { "type": "object" } }, "roads": { "type": "array", "items": { "type": "object" } }, "weather_alerts": { "type": "array", "items": { "type": "object" } }, "active_insight_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } } } } }
+}

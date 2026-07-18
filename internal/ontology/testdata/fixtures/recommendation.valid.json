@@ -1,0 +1,8 @@
+{
+  "schema_version": "1.0.0",
+  "recommendation_id": "recommendation-001",
+  "state_revision": 1,
+  "text": "Consider reviewing the access constraint before deciding.",
+  "evidence": [{ "target_kind": "insight", "target_id": "insight-001", "explanation": "derived assessment" }],
+  "created_at": "2026-07-18T10:00:04Z"
+}

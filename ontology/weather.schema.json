@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mosaic.local/ontology/weather/v1.0.0",
+  "title": "Weather",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "weather_alert_id", "status", "summary"],
+  "properties": { "schema_version": { "const": "1.0.0" }, "weather_alert_id": { "type": "string", "minLength": 1 }, "status": { "enum": ["active", "cleared"] }, "severity": { "enum": ["low", "medium", "high"] }, "summary": { "type": "string", "minLength": 1 }, "updated_at": { "type": "string", "format": "date-time" } }
+}

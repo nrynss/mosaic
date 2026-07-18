@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mosaic.local/ontology/dataset-manifest/v1.0.0",
+  "title": "DatasetManifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "dataset_manifest_id", "generator", "model", "prompt_version", "schema_versions", "id_map", "created_at"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" }, "dataset_manifest_id": { "type": "string", "minLength": 1 }, "generator": { "type": "string", "minLength": 1 }, "model": { "type": "string", "minLength": 1 }, "prompt_version": { "type": "string", "minLength": 1 },
+    "schema_versions": { "type": "object", "minProperties": 1, "additionalProperties": { "type": "string", "minLength": 1 } }, "id_map": { "type": "object", "minProperties": 1, "additionalProperties": { "type": "string", "minLength": 1 } }, "seed": { "type": "integer" }, "created_at": { "type": "string", "format": "date-time" }
+  }
+}

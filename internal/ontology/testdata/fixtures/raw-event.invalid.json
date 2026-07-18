@@ -1,0 +1,8 @@
+{
+  "schema_version": "1.0.0",
+  "raw_event_id": "raw-002",
+  "source": { "source_id": "simulator" },
+  "content_type": "text/plain",
+  "raw_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "received_at": "2026-07-18T10:00:01Z"
+}

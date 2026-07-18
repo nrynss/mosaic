@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mosaic.local/ontology/road/v1.0.0",
+  "title": "Road",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "road_id", "name", "status"],
+  "properties": { "schema_version": { "const": "1.0.0" }, "road_id": { "type": "string", "minLength": 1 }, "name": { "type": "string", "minLength": 1 }, "status": { "enum": ["open", "blocked"] }, "effective_event_id": { "type": "string", "minLength": 1 }, "updated_at": { "type": "string", "format": "date-time" } }
+}

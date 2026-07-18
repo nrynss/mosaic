@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mosaic.local/ontology/audit-record/v1.0.0",
+  "title": "AuditRecord",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "audit_record_id", "actor_id", "actor_role", "action", "target_kind", "target_id", "created_at"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" }, "audit_record_id": { "type": "string", "minLength": 1 }, "actor_id": { "type": "string", "minLength": 1 }, "actor_role": { "enum": ["viewer", "supervisor", "system"] },
+    "action": { "enum": ["acknowledged", "rejected", "noted", "briefing_requested"] }, "target_kind": { "enum": ["recommendation", "insight", "briefing", "system"] }, "target_id": { "type": "string", "minLength": 1 },
+    "note": { "type": "string" }, "created_at": { "type": "string", "format": "date-time" }
+  }
+}

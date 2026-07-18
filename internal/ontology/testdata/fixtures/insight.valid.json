@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.0.0",
+  "insight_id": "insight-001",
+  "state_revision": 1,
+  "lifecycle_status": "active",
+  "assertions": ["Road access may be constrained."],
+  "evidence": [{ "target_kind": "canonical_event", "target_id": "canon-001", "explanation": "reported road status" }],
+  "confidence": { "source_quality": "medium", "transformation_certainty": "high", "reasoning_support": "medium", "basis": "one fixture event" },
+  "created_at": "2026-07-18T10:00:03Z"
+}

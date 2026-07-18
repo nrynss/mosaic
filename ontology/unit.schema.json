@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mosaic.local/ontology/unit/v1.0.0",
+  "title": "Unit",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "unit_id", "availability"],
+  "properties": { "schema_version": { "const": "1.0.0" }, "unit_id": { "type": "string", "minLength": 1 }, "availability": { "enum": ["available", "assigned", "unavailable"] }, "incident_id": { "type": "string", "minLength": 1 }, "updated_at": { "type": "string", "format": "date-time" } }
+}

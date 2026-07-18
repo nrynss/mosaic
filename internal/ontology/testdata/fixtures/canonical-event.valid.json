@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0.0",
+  "canonical_event_id": "canon-001",
+  "canonical_seq": 1,
+  "raw_event_id": "raw-001",
+  "event_type": "incident_reported",
+  "occurred_at": "2026-07-18T10:00:00Z",
+  "received_at": "2026-07-18T10:00:01Z",
+  "payload": { "incident_id": "incident-001", "category": "domestic-disturbance", "location_id": "location-001" },
+  "entity_refs": [{ "kind": "incident", "id": "incident-001" }],
+  "incident_refs": ["incident-001"],
+  "provenance": { "normalizer": "fixture", "raw_event_id": "raw-001" },
+  "confidence": { "source_quality": "high", "transformation_certainty": "high", "reasoning_support": "low", "basis": "synthetic fixture" }
+}

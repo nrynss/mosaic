@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mosaic.local/ontology/model-run/v1.0.0",
+  "title": "ModelRun",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "model_run_id", "agent", "provider", "model", "prompt_version", "output_schema_version", "validation_status", "started_at", "completed_at"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" }, "model_run_id": { "type": "string", "minLength": 1 }, "agent": { "enum": ["luna", "terra", "sol"] },
+    "provider": { "type": "string", "minLength": 1 }, "model": { "type": "string", "minLength": 1 }, "prompt_version": { "type": "string", "minLength": 1 }, "output_schema_version": { "type": "string", "minLength": 1 },
+    "input_event_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } }, "state_revision": { "type": "integer", "minimum": 1 }, "output_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "validation_status": { "enum": ["valid", "invalid", "refused", "failed", "timed_out"] }, "response_id": { "type": "string", "minLength": 1 }, "failure_detail": { "type": "string", "minLength": 1 },
+    "started_at": { "type": "string", "format": "date-time" }, "completed_at": { "type": "string", "format": "date-time" }
+  }
+}

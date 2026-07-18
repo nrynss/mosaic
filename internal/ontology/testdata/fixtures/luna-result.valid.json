@@ -1,0 +1,9 @@
+{
+  "schema_version": "1.0.0",
+  "luna_result_id": "luna-001",
+  "raw_event_id": "raw-001",
+  "status": "accepted",
+  "canonical_event_id": "canon-001",
+  "evidence": [{ "target_kind": "raw_event", "target_id": "raw-001", "explanation": "source envelope" }],
+  "created_at": "2026-07-18T10:00:02Z"
+}

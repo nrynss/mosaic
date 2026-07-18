@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mosaic.local/ontology/raw-event/v1.0.0",
+  "title": "RawEvent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "raw_event_id", "source", "content_type", "payload_bytes_b64", "raw_sha256", "received_at"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "raw_event_id": { "type": "string", "minLength": 1 },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id"],
+      "properties": {
+        "source_id": { "type": "string", "minLength": 1 },
+        "source_record_id": { "type": "string", "minLength": 1 },
+        "idempotency_key": { "type": "string", "minLength": 1 }
+      }
+    },
+    "content_type": { "type": "string", "minLength": 1 },
+    "payload_bytes_b64": { "type": "string", "pattern": "^[A-Za-z0-9+/]*={0,2}$" },
+    "raw_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "source_occurred_at": { "type": "string", "format": "date-time" },
+    "received_at": { "type": "string", "format": "date-time" },
+    "attributes": { "type": "object", "additionalProperties": true }
+  }
+}

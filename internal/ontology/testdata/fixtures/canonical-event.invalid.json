@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0.0",
+  "canonical_event_id": "canon-002",
+  "canonical_seq": 2,
+  "raw_event_id": "raw-002",
+  "event_type": "road_status_changed",
+  "occurred_at": "2026-07-18T10:00:00Z",
+  "received_at": "2026-07-18T10:00:01Z",
+  "payload": { "road_id": "road-001" },
+  "provenance": { "normalizer": "fixture", "raw_event_id": "raw-002" },
+  "confidence": { "source_quality": "high", "transformation_certainty": "high", "reasoning_support": "low", "basis": "synthetic fixture" }
+}

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mosaic.local/ontology/incident/v1.0.0",
+  "title": "Incident",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "incident_id", "status", "category", "location_id", "opened_at"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "incident_id": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["open", "resolved"] },
+    "category": { "type": "string", "minLength": 1 },
+    "location_id": { "type": "string", "minLength": 1 },
+    "linked_entity_refs": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["kind", "id"], "properties": { "kind": { "type": "string", "minLength": 1 }, "id": { "type": "string", "minLength": 1 } } } },
+    "opened_at": { "type": "string", "format": "date-time" },
+    "resolved_at": { "type": "string", "format": "date-time" }
+  }
+}

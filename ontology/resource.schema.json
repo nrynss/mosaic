@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mosaic.local/ontology/resource/v1.0.0",
+  "title": "Resource",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "resource_id", "resource_type", "availability"],
+  "properties": { "schema_version": { "const": "1.0.0" }, "resource_id": { "type": "string", "minLength": 1 }, "resource_type": { "type": "string", "minLength": 1 }, "availability": { "enum": ["available", "assigned", "unavailable"] }, "incident_id": { "type": "string", "minLength": 1 }, "updated_at": { "type": "string", "format": "date-time" } }
+}

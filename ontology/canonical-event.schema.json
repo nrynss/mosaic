@@ -1,0 +1,409 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mosaic.local/ontology/canonical-event/v1.0.0",
+  "title": "CanonicalEvent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "canonical_event_id",
+    "canonical_seq",
+    "raw_event_id",
+    "event_type",
+    "occurred_at",
+    "received_at",
+    "payload",
+    "provenance",
+    "confidence"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "canonical_event_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "canonical_seq": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "raw_event_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "event_type": {
+      "enum": [
+        "incident_reported",
+        "incident_resolved",
+        "unit_status_changed",
+        "resource_status_changed",
+        "road_status_changed",
+        "weather_alert_issued",
+        "weather_alert_cleared"
+      ]
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "received_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "payload": {
+      "type": "object"
+    },
+    "entity_refs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/entity_ref"
+      }
+    },
+    "incident_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "provenance": {
+      "$ref": "#/$defs/provenance"
+    },
+    "confidence": {
+      "$ref": "#/$defs/confidence"
+    },
+    "supersedes_event_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "correction_reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "duplicate_of": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "incident_reported"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/incident_payload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "incident_resolved"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/incident_resolved_payload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "unit_status_changed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/unit_payload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "resource_status_changed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/resource_payload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "road_status_changed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/road_payload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "enum": [
+              "weather_alert_issued",
+              "weather_alert_cleared"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/weather_payload"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "entity_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "id"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "incident",
+            "unit",
+            "resource",
+            "location",
+            "road",
+            "weather_alert"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "normalizer",
+        "raw_event_id"
+      ],
+      "properties": {
+        "normalizer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "raw_event_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model_run_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "confidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_quality",
+        "transformation_certainty",
+        "reasoning_support",
+        "basis"
+      ],
+      "properties": {
+        "source_quality": {
+          "$ref": "#/$defs/strength"
+        },
+        "transformation_certainty": {
+          "$ref": "#/$defs/strength"
+        },
+        "reasoning_support": {
+          "$ref": "#/$defs/strength"
+        },
+        "basis": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "strength": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "incident_payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "incident_id",
+        "category",
+        "location_id"
+      ],
+      "properties": {
+        "incident_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1
+        },
+        "location_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "summary": {
+          "type": "string"
+        }
+      }
+    },
+    "incident_resolved_payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "incident_id"
+      ],
+      "properties": {
+        "incident_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resolution": {
+          "type": "string"
+        }
+      }
+    },
+    "unit_payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "unit_id",
+        "availability"
+      ],
+      "properties": {
+        "unit_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "availability": {
+          "enum": [
+            "available",
+            "assigned",
+            "unavailable"
+          ]
+        },
+        "incident_id": {
+          "type": "string"
+        }
+      }
+    },
+    "resource_payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resource_id",
+        "availability"
+      ],
+      "properties": {
+        "resource_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "availability": {
+          "enum": [
+            "available",
+            "assigned",
+            "unavailable"
+          ]
+        },
+        "incident_id": {
+          "type": "string"
+        }
+      }
+    },
+    "road_payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "road_id",
+        "status"
+      ],
+      "properties": {
+        "road_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "open",
+            "blocked"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "weather_payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "weather_alert_id",
+        "status"
+      ],
+      "properties": {
+        "weather_alert_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "active",
+            "cleared"
+          ]
+        },
+        "severity": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}
