@@ -1,292 +1,244 @@
 # RFC-0001: Mosaic Demo Foundation — Auditable Event-to-COP Pipeline
 
-- **Status:** Draft — build contract for v0.1
+- **Status:** Partially implemented — reconciled to integrated v0.1 foundation
 - **Owner:** Mosaic coordinator
 - **Decision date:** 2026-07-18
+- **Implementation snapshot:** P01–P11, P13, and P14 integrated; P12 Docker acceptance remains pending
 - **Supersedes:** Nothing
-- **Input:** [`Mosaic_Architecture_and_Technical_Specification.md`](../../Mosaic_Architecture_and_Technical_Specification.md)
+- **Input:** [Mosaic Architecture and Technical Specification](../../Mosaic_Architecture_and_Technical_Specification.md)
 
-## 1. Summary
+## 1. Decision and scope
 
-Mosaic v0.1 is a local, single-instance Docker demonstration of one synthetic,
-replayable domestic-disturbance scenario. It proves an evidence-backed human
-decision-support loop:
+Mosaic v0.1 is a **local, synthetic, single-process demonstration foundation**.
+Its durable and reviewable path is:
 
 ```text
 Raw Event → Canonical Event → deterministic COP projection
-          → evidence-backed Insight → supervisor-reviewed Recommendation
-          → append-only Audit Record
+          → evidence-resolvable record → immutable audit record
 ```
 
-The demo never dispatches a resource, changes an operational record, contacts a
-person, or otherwise makes an operational decision. AI informs; humans decide.
+The intended product loop also includes evidence-backed Terra Insights and
+supervisor-reviewed Sol Recommendations. The structured Terra and Sol services
+are implemented as independently testable adapters, but no executable
+composition currently invokes a live model or connects that loop to the HTTP
+surface. The binding statements in this RFC distinguish integrated behavior
+from the next composition and acceptance parcels.
 
-## 2. Goals and non-goals
+Mosaic never dispatches a resource, changes an external operational record,
+contacts a person, or makes an operational decision. The demo contains only
+synthetic data.
 
-### Goals
+### Status at a glance
 
-- Demonstrate continuous information fusion without prompting.
-- Make every displayed claim traceable to persisted evidence and a state revision.
-- Preserve raw inputs, normalized revisions, corrections, model runs, and human
-  decisions as immutable records.
-- Rebuild an identical serialized COP from a checkpoint plus Canonical Events.
-- Provide a small Svelte dashboard for fixed synthetic-demo viewer and supervisor
-  identities.
-- Keep the online AI path structurally constrained and fail-safe.
-- Generate synthetic datasets offline with Gemma 4 E2B GGUF through llama.cpp.
-
-### Non-goals
-
-- Production CAD/RMS/radio/weather integration, real operational data, or PII.
-- Multi-instance coordination, HA, throughput targets, a shared broker, or a
-  Cloud Run deployment. The interfaces must leave room for them.
-- Experience Store retrieval, model training, fine-tuning, risk prediction, or
-  autonomous action.
-- A broad city ontology beyond the scenario's incident, unit/resource, road,
-  weather, location, evidence, insight, recommendation, and audit needs.
-- Enterprise authentication, RBAC, retention automation, or tamper-proof audit
-  guarantees. The demo has only the fixed roles defined below.
-
-## 3. Accepted decisions
-
-1. **Synthetic and local first.** SQLite is the durable system of record for the
-   local/rehearsal demo. PostgreSQL is not embedded in the application container.
-   A hosted Cloud Run demo will later use the same store contract with external
-   Cloud SQL for PostgreSQL.
-2. **One process, durable history.** The v0.1 runtime has one application
-   instance, an in-process dispatcher, and an in-memory COP projection backed by
-   SQLite events and checkpoints.
-3. **Schemas are source of truth.** Authored schemas live in `ontology/`; checked-
-   in generated Go types live in `internal/ontology/gen/`; cross-package
-   interfaces live in `internal/contracts/`.
-4. **Facts and assessments are distinct.** A Raw Event records an observation;
-   a Canonical Event is a validated normalized revision; an Insight is a derived
-   assessment; a Recommendation is a human-review-only option.
-5. **History is immutable.** Corrections, recoveries, obsolescence, and human
-   decisions append new records with references rather than altering stored rows.
-6. **The projector is deterministic; model inference is not.** Validation,
-   append order, projection, checkpoints, and replay are reproducible from stored
-   accepted artifacts. Model requests and outputs are recorded for audit, not
-   expected to re-run identically.
-7. **AI produces structured output only.** Luna, Terra, and Sol use versioned
-   JSON-Schema response contracts. For OpenAI Responses API adapters, use strict
-   Structured Outputs through `text.format`; application-side validation and
-   refusal handling remain mandatory.
-8. **Offline generation is separate.** The Gemma GGUF model is kept in the
-   gitignored `localmodels/` directory and runs through llama.cpp in
-   `cmd/datasetgen`, never in the online application image or live Luna/Terra/Sol
-   path. Model artifacts are not committed.
-
-## 4. Architecture
-
-```text
-Simulator / synthetic source
-  → Raw Event store
-  → Luna result (accepted | repaired | quarantined | rejected)
-  → Canonical Event append log
-  → deterministic COP projector + checkpoint
-  → Terra Insight lifecycle
-  → Sol briefing on supervisor request
-  → Dashboard + append-only human Audit Record
-```
-
-The Canonical Event log is the input to the COP projector and Terra. Sol receives
-only structured COP state, Insights, and Evidence; it never receives arbitrary
-source text. Luna may inspect raw source text only to produce a Canonical Event
-or a non-mutating result.
-
-## 5. Ontology and schema rules
-
-### 5.1 Versioning and generated code
-
-Every schema has an immutable `$id` and semantic `schema_version`. Compatible,
-additive changes increment the minor version. Breaking changes require a new
-major version and an adapter or migration. The schema gate must fail if generated
-Go code is out of date, a fixture fails validation, or a reference is invalid.
-
-### 5.2 Record contracts
-
-The first schema set contains:
-
-- `raw-event.schema.json`
-- `canonical-event.schema.json`
-- `luna-result.schema.json`
-- `incident.schema.json`, `unit.schema.json`, `resource.schema.json`
-- `location.schema.json`, `road.schema.json`, `weather.schema.json`
-- `evidence.schema.json`, `insight.schema.json`, `recommendation.schema.json`
-- `model-run.schema.json`, `audit-record.schema.json`, `checkpoint.schema.json`
-- `scenario.schema.json`, `dataset-manifest.schema.json`
-
-The Raw Event envelope must be valid even when its source payload is malformed.
-It carries an opaque `payload_bytes_b64`, `content_type`, `raw_sha256`, source
-identity, optional source record ID, optional source occurrence time, and receipt
-time. The unparseable payload is preserved unchanged.
-
-A Canonical Event has its own ID and append sequence, references one Raw Event,
-and includes type, schema version, UTC occurrence/receipt times, typed payload,
-entity/incident references, provenance, confidence dimensions, and optional
-`supersedes_event_id`.
-
-Luna returns exactly one `LunaResult` status:
-
-- `accepted` — Canonical Event is valid with no recovered field;
-- `repaired` — Canonical Event includes original/replacement values, repair
-  method, evidence, and confidence;
-- `quarantined` — stored for review but not projectable; or
-- `rejected` — stored as a rejected source envelope with reason.
-
-## 6. Event lifecycle and projection semantics
-
-### 6.1 Identity, idempotency, and ordering
-
-`(source, source_record_id)` is the idempotency key when a source record ID is
-available. A repeated key returns the original result and creates neither a new
-Raw Event nor a state revision. Sources without an ID use a caller-provided
-idempotency key; they are not semantically merged automatically.
-
-Each persisted Canonical Event receives a database-assigned, monotonically
-increasing `canonical_seq`. Projection and replay order are ascending
-`canonical_seq`; `occurred_at` is domain data, not a replay sort key. This makes
-late delivery deterministic: a late event is appended, then recomputes the
-affected incident projection at the next state revision.
-
-An exact duplicate is handled by the idempotency key. A suspected semantic
-duplicate remains a separate record with a confidence-scored `duplicate_of`
-relationship and evidence. It is visible in the UI and does not erase either
-source observation.
-
-### 6.2 Corrections and effective events
-
-A correction is a new Canonical Event that names `supersedes_event_id` and a
-reason. A superseded event remains in the log but is not effective in a fresh
-projection. If multiple direct corrections exist, the highest `canonical_seq` is
-effective. The projector recomputes only the affected incident from the durable
-log's effective events, then writes the next global state revision.
-
-### 6.3 Transaction and recovery boundary
-
-Raw Event persistence is its own durable action. Creating a Canonical Event,
-marking its projection status, calculating the next deterministic COP revision,
-and storing the resulting checkpoint happen in one SQLite transaction. External
-model calls never occur inside that transaction.
-
-After commit, the dispatcher invokes Terra. Insight and Recommendation writes are
-separate append-only transactions tied to the committed `state_revision`. On
-restart, Mosaic loads the latest checkpoint and replays later Canonical Events;
-it also finds committed, unprojected Canonical Events and completes projection.
-No outbox is required for v0.1.
-
-## 7. Minimum COP projection
-
-The COP is a versioned, serializable read model with:
-
-- `state_revision`, projection timestamp, and effective event IDs;
-- Incidents with `open` or `resolved` status, location, linked entities, and
-  event history;
-- Unit/resource availability (`available`, `assigned`, `unavailable`);
-- Roads (`open` or `blocked`) and the effective supporting event;
-- Weather alerts (`active` or `cleared`);
-- Typed, confidence-scored entity/incident associations; and
-- Current active Insights by ID, with their lifecycle status held separately from
-  source-derived facts.
-
-Only the projector changes these source-derived fields. Terra may append Insights
-and relation assessments but cannot rewrite Canonical Event facts or send commands.
-
-## 8. Evidence, confidence, and AI contracts
-
-`EvidenceRef` contains a target kind (`raw_event`, `canonical_event`,
-`state_fact`, or `insight`), target ID, optional JSON Pointer, and explanation.
-Every material Insight assertion must cite one or more persisted EvidenceRefs.
-
-Confidence is an evidence-strength assessment, not an outcome probability or
-permission to act. It is an object with `source_quality`,
-`transformation_certainty`, and `reasoning_support`, each `low`, `medium`, or
-`high` plus a short basis. Luna normally supplies the first two; Terra supplies
-reasoning support; Sol displays relevant dimensions but does not invent a
-probability.
-
-Each model invocation writes a `ModelRun`: provider/model identifier, prompt
-version, schema version, input event IDs, state revision, output IDs, validation
-result, response ID where available, timestamps, and failure/refusal details.
-
-For OpenAI adapters, strict Structured Outputs constrain the response shape, but
-the application still performs schema, evidence, and policy validation. A model
-refusal, invalid output, timeout, or provider failure creates a failed ModelRun
-and emits "no AI assessment available"; it never prevents Canonical Event
-projection or modifies operational state.
-
-Luna, Terra, and Sol must treat untrusted text as data. It cannot alter schemas,
-workflow routing, tool permissions, or policy. v0.1 gives these adapters no tools
-that can modify an external system.
-
-## 9. API, SSE, and dashboard contract
-
-All v0.1 routes are versioned under `/api/v1`.
-
-| Route | Purpose |
+| Status | Scope |
 |---|---|
-| `POST /events` | Persist a Raw Event and return its lifecycle status. |
-| `GET /events` | Read event, correction, and recovery history. |
-| `GET /cop` | Return the current serialized COP and state revision. |
-| `GET /insights` | Return active and obsolete Insights with evidence. |
-| `POST /scenarios/{id}/run` | Run a versioned synthetic scenario. |
-| `POST /briefings` | Supervisor-only Sol briefing request. |
-| `POST /audit-actions` | Record supervisor acknowledgement, rejection, or note. |
-| `GET /stream` | SSE stream of read-model changes. |
+| **Integrated** | P01–P11, P13, and P14: schemas/contracts, local SQLite store, ingestion, deterministic projection/replay, fixture simulator, HTTP/SSE read surface, Svelte UI, structured Terra/Sol services, offline data generation, and the local executable composition root. |
+| **Planned, not integrated** | P12: fresh-local-Docker end-to-end acceptance through P14. |
+| **Future** | Hosted Cloud Run/Cloud SQL, a shared broker, multi-instance coordination, production identity/privacy/retention, live operational integrations, live model-network adapters, and Experience Store retrieval. |
 
-SSE types are `cop.snapshot`, `event.lifecycle`, `insight.created`,
-`insight.obsolete`, `recommendation.created`, `audit.created`, and
-`system.status`.
+## 2. Binding v0.1 behavior that is implemented
 
-The demo supports two fixed identities passed by a local demo header or control:
-`viewer-demo` and `supervisor-demo`. Viewers may inspect data. Only the
-supervisor may request a briefing or record an action. This is a demonstration
-constraint, not production authentication.
+### 2.1 Ontology, records, and local storage
 
-The UI labels every display item as **Reported Fact**, **Derived Assessment**,
-or **Human-review Recommendation**, and links it to its evidence and state
-revision. A Recommendation uses neutral language such as “consider”, “review”,
-or “verify”; it cannot dispatch, mutate an incident, contact a person, or use
-imperative command language.
+- Authored JSON Schemas in `ontology/` are the source of truth. Checked-in Go
+  types are generated in `internal/ontology/gen/`; cross-package seams are in
+  `internal/contracts/`.
+- The integrated store is **SQLite only**, for the local demo. It persists Raw
+  Events, Canonical Events, Luna Results, Insights, Recommendations, Model
+  Runs, Audit Records, checkpoints, and projection receipts as append-only
+  records. It assigns the durable `canonical_seq` used for projection and
+  replay.
+- Raw source data is retained as a valid envelope even when the source body is
+  malformed. The envelope stores opaque payload bytes, content type, checksum,
+  source identity, source record or idempotency key, and receipt metadata.
+- Canonical records, model artifacts, and audit records are immutable. A
+  correction appends a Canonical Event that identifies the superseded event;
+  the effective correction chain is selected from canonical sequence order.
+- PostgreSQL is **not** part of v0.1 and is never bundled into the application
+  container. A future hosted demo may use external Cloud SQL for PostgreSQL
+  behind the same store contract.
 
-## 10. Synthetic data and scenario
+### 2.2 Ingestion, ordering, projection, and recovery
 
-`cmd/datasetgen` invokes llama.cpp against the configured local Gemma model path.
-The model artifact is
-`unsloth/gemma-4-E2B-it-GGUF/gemma-4-E2B-it-UD-Q8_K_XL.gguf`. It is acquired
-locally (for example, with `hf download`), kept in ignored `localmodels/`, and never
-included in the application image. The generator records a manifest with model,
-prompt, schema versions, deterministic ID map, and seed where supported. Only
-validated artifacts enter `datasets/`.
+- P05 persists the Raw Event before invoking its injected Luna normalizer.
+  `(source_id, source_record_id)` is idempotent when a source record ID exists;
+  otherwise the source must supply an idempotency key. An exact re-delivery
+  returns the existing lifecycle result without a second Canonical Event or
+  state revision.
+- Luna results are schema-validated and have one of `accepted`, `repaired`,
+  `quarantined`, or `rejected`. Only accepted and repaired results carry a
+  projectable Canonical Event. Quarantined and rejected inputs remain durable
+  but do not change the COP.
+- Canonical append order—not `occurred_at`—is deterministic replay order. Late
+  delivery is consequently appended at a later `canonical_seq`. Corrections
+  keep their antecedents in history and recompute the affected deterministic
+  projection from effective canonical records.
+- P06 is the only source-derived COP mutator. Its apply operation writes a
+  projection receipt and checkpoint together in its own SQLite transaction;
+  retrying an already projected event does not create another revision or
+  checkpoint. Recovery loads the latest checkpoint and replays later Canonical
+  Events to reproduce the serialized COP and revision.
 
-The v0.1 `domestic-disturbance` scenario begins with the six product-story beats:
-911 call, historical welfare check, weather alert, road closure, EMS availability,
-and officer radio update. Acceptance fixtures add an incomplete road event that
-Luna repairs, one invalid event that is quarantined, a late delivery, and a road
-reopening correction. Terra must create an access-constraint Insight with road
-and weather evidence, then mark it obsolete after the correction. A supervisor
-requests Sol after the officer update; the resulting Recommendation and supervisor
-action are audited.
+#### Current persistence/dispatch boundary
 
-## 11. Acceptance criteria
+The v0.1 foundation does **not** have one atomic transaction from Canonical
+Event persistence through projection and dispatch. Its implemented sequence is:
 
-| Area | Required proof |
+1. Persist the Raw Event.
+2. Persist the Luna Model Run.
+3. In one transaction, append the Canonical Event and its Luna Result.
+4. After that transaction commits, invoke the in-process deterministic
+   dispatcher for the committed Canonical Event.
+5. The projector independently commits its receipt and checkpoint transaction.
+
+If post-commit dispatch fails, the durable Canonical Event remains and P05
+returns that condition as `DispatchError`; it is not rolled back. The fixture
+simulator stops that run on a dispatch error, and the replay runner can rebuild
+a deterministic COP from the stored log. There is not yet a composed background
+worker, durable outbox, or automatic retry policy. P14 seeds and recovers the
+frozen scenario during local startup, but it does not add a background recovery
+worker; a later production RFC must decide shared-broker and multi-instance
+recovery semantics.
+
+### 2.3 Deterministic fixture scenario
+
+P04/P07 provide the frozen `domestic-disturbance` fixture and a CLI simulator.
+The ten declared raw-event beats cover the product-story call, welfare context,
+weather, road state, EMS availability, officer update, a repairable incomplete
+road event, a quarantined invalid event, late EMS delivery, and a road-opening
+correction. The fixture run proves a final state revision of 9 and checkpoint
+recovery of the same COP.
+
+Expected Insights and Recommendations are validated fixture artifacts for the
+Terra and Sol contracts. The P07 simulator does not run Terra or Sol as part of
+its deterministic event loop.
+
+### 2.4 Structured model boundaries and auditability
+
+- P10 and P11 accept injected, least-privilege structured clients. Terra sees
+  serialized committed COP data, a state revision, and permitted evidence;
+  Sol additionally sees active Insights and requires `supervisor-demo`.
+- Candidate Insights and Recommendations are schema-validated, constrained to
+  their requested state revision and permitted evidence, and persist a
+  ModelRun containing provider/model/prompt/schema identity, inputs, outputs,
+  timestamps, response metadata, and validation/failure status.
+- Refusals, invalid structured output, client failures, and timeouts persist a
+  ModelRun but create no Insight or Recommendation and cannot mutate the COP.
+  Insight obsolescence is represented by an appended record, not by deleting
+  history.
+- These services intentionally construct **no network client, OpenAI client,
+  API server, tool, shell, or operational-action client**. They are exercised
+  with fixture clients. A live model-network adapter and a policy for composing
+  it are not implemented in v0.1.
+
+The evidence, validation, canonical ordering, projection, checkpoints, and
+replay process are deterministic from accepted persisted artifacts. Model
+inference is not assumed deterministic; provenance records make an accepted
+model result auditable rather than reproducible by re-querying a model.
+
+### 2.5 Current /api/v1 and fixed demo identities
+
+P08 is a local HTTP/SSE **read and audit-record surface**, not an event-ingest,
+scenario-control, or live-agent API. GET /api/v1/health and GET /api/v1/version
+are public. All other reads require the X-Mosaic-Demo-Identity header with
+exactly `viewer-demo` or `supervisor-demo`; this is a fixed demonstration
+control, not authentication.
+
+| Route | Implemented behavior |
 |---|---|
-| Schema/type gate | Schemas validate, generated types are current, and golden fixtures round-trip. |
-| Ingestion | Duplicate source delivery changes state once; malformed sources persist without state change. |
-| Luna | Accepted, repaired, quarantined, and rejected paths preserve the required provenance. |
-| Corrections | Late and superseding events produce the specified revision while retaining history. |
-| Replay | Checkpoint plus later events rebuild the identical serialized COP and revision after restart. |
-| Terra | Every Insight has valid evidence and state revision; obsolete Insights append notices rather than vanish. |
-| Sol | Only a supervisor can request it; output is neutral, schema-valid, evidence-cited, and audited. |
-| Failure | Refusal, invalid output, or timeout produces a ModelRun and no state mutation. |
-| UI | Every displayed item resolves its evidence and claim type. |
-| End-to-end | A fresh local Docker run completes the scenario and full audit trail. |
+| GET /api/v1/cop | Returns a recovered deterministic COP and its revision. |
+| GET /api/v1/evidence/{kind}/{id} | Resolves a state fact or one persisted evidence target. |
+| GET /api/v1/artifacts/{kind}/{id} | Resolves one persisted immutable artifact. |
+| GET /api/v1/stream | Sends an initial `cop.snapshot`, then best-effort locally published named events. |
+| POST /api/v1/briefings | `supervisor-demo` only; appends a `briefing_requested` Audit Record and responds with `executed: false`. It does not invoke Sol. |
+| POST /api/v1/audit-actions | `supervisor-demo` only; validates an existing Insight or Recommendation target, appends an acknowledgement/rejection/note Audit Record, and responds with `executed: false`. |
 
-## 12. Follow-on work
+There is currently no /events, /insights, /scenarios/{id}/run, or
+Recommendation-producing HTTP endpoint. Apart from the initial `cop.snapshot`,
+event names and publishers are composition concerns; P08 alone does not attach
+the simulator or model services to the stream.
 
-RFC-0002 will decide the hosted Cloud Run/Cloud SQL deployment, durable broker,
-multi-instance ordering/leases, backup/recovery objectives, and production
-security/privacy controls. Experience retrieval requires its own RFC covering
-eligibility, retention, bias review, and causal-language restrictions.
+### 2.6 Dashboard
+
+P09 is a Svelte 5 runes application on Vite 8. It provides a deliberately local
+evidence-aware COP ledger with fixed viewer/supervisor identity controls,
+authenticated /api/v1 reads, SSE reconnect, claim-class labels, evidence
+resolution, and visibly non-operational review controls.
+
+The UI displays reported facts from the COP and does not infer a derived
+assessment from them. It leaves assessment/recommendation display unavailable
+until an evidence-resolvable API record is composed. It also omits
+`payload_bytes_b64` and `raw_sha256` when rendering an evidence artifact:
+raw source payload is not rendered by default.
+
+### 2.7 Offline synthetic-data production
+
+P13 adds an offline `cmd/datasetgen` process for the selected Gemma GGUF via an
+explicit local `llama.cpp` executable. The GGUF and staging directory belong in
+ignored `localmodels/`; the generator has no downloader, network code,
+credentials, or runtime role.
+
+Generation writes only a new empty stage with the raw model response, strict
+artifact bundle, and provenance (model/executable/prompt identities and hashes,
+schema versions, bounded arguments, seed, and response checksums). A reviewed
+candidate is admitted only by explicit `freeze` into a new versioned
+`datasets/` child after provenance, checksum, schema, reference, and artifact
+validation. The checked-in frozen fixture—not repeated inference—is the demo
+input.
+
+## 3. Executable composition and Docker acceptance
+
+| Parcel | Status and acceptance boundary | Current limitation |
+|---|---|---|
+| **P14 — executable composition** | **Integrated.** `cmd/mosaicdemo` validates the frozen dataset, opens SQLite, seeds/replays the deterministic scenario, serves the P08 API, and hosts a prebuilt P09 dashboard. It deliberately includes no live model or operational-system integration. | The executable requires a separately prebuilt `ui/dist`; no dashboard build artifact is committed. It does not compose Terra/Sol or publish a live-model assessment stream. |
+| **P12 — Docker end-to-end acceptance** | **Claimed, not integrated.** A fresh local Docker run must complete the scenario through P14 and verify the intended evidence/audit path. | No Dockerfile, compose file, runbook, or full end-to-end acceptance suite is integrated. |
+
+P10/P11 remain valid structured service parcels, but their live invocation,
+fixture composition, artifact read exposure, and any automatic Terra trigger
+remain outside P14 as currently scoped. A future parcel or RFC must make that
+integration decision explicitly.
+
+## 4. Acceptance evidence available now
+
+The integrated package tests prove the following narrow boundaries:
+
+| Area | Current proof |
+|---|---|
+| Schemas/contracts | Schema compilation, checked-in generated type verification, fixture validation, and cross-package contracts. |
+| Store and ingestion | SQLite migrations, immutable append behavior, canonical sequence, idempotency, Luna lifecycle provenance, and post-commit dispatch error handling. |
+| Deterministic state | Canonical ordering, correction handling, idempotent projector retry, checkpoint rollback behavior, restart replay, and byte-identical fixture COP serialization. |
+| Scenario | Ten-beat fixture replay, repaired/quarantined/late/correction paths, final revision 9, and replay verification. |
+| Terra/Sol | Structured fixture clients; schema, evidence, revision, role, neutral-language, refusal/failure/timeout, lifecycle, and ModelRun-record checks. |
+| API/UI | Fixed-role HTTP/SSE and immutable audit endpoint tests; P14 composition tests seed the deterministic API and guard the static UI host. Svelte type/build checks are provided by the UI package. |
+| Dataset generation | Local runner, staged bundle/provenance, validation, explicit freeze, and destination-safety tests. |
+
+Latency and throughput are observed only; they are not v0.1 release gates. The
+P14 local executable composition is covered by package tests; a fresh Docker
+execution remains the pending acceptance boundary.
+
+## 5. Deferred production decisions
+
+The following are intentionally not v0.1 behavior and require a later RFC or
+ADR before implementation:
+
+- Cloud Run deployment with external Cloud SQL for PostgreSQL, database
+  migration strategy, backups, RPO/RTO, and connection management.
+- Shared broker/outbox, cross-instance ordering, leases, redelivery, and
+  automatic recovery/retry of committed but unprojected Canonical Events.
+- Production identity, authorization, audit tamper resistance, privacy,
+  retention, secrets management, and real-data controls.
+- Live OpenAI or other model transport, model selection/configuration, prompt
+  rollout, operational monitoring, and end-to-end safety evaluation.
+- CAD/RMS/radio/weather connectors, real operational data, multi-tenant or
+  high-availability behavior, and latency/throughput release objectives.
+- Experience Store retrieval, eligibility, bias review, and causal-language
+  restrictions.
+
+## 6. Non-negotiable safety boundary
+
+For every later parcel, Raw Events, Canonical Events, Insights,
+Recommendations, Model Runs, and Audit Records remain immutable; corrections
+and obsolescence append new records. The deterministic projector remains the
+only mutator of source-derived COP state. AI output may assess evidence-backed
+state but cannot execute an operational action, and supervisor HTTP endpoints
+continue to create immutable records with `executed: false` only.
