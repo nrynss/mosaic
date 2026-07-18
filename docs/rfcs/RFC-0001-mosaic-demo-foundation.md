@@ -3,7 +3,7 @@
 - **Status:** Partially implemented — reconciled to integrated v0.1 foundation
 - **Owner:** Mosaic coordinator
 - **Decision date:** 2026-07-18
-- **Implementation snapshot:** P01–P11, P13, and P14 integrated; P12 Docker acceptance remains pending
+- **Implementation snapshot:** P01–P16 integrated; the local Docker/E2E acceptance is complete
 - **Supersedes:** Nothing
 - **Input:** [Mosaic Architecture and Technical Specification](../../Mosaic_Architecture_and_Technical_Specification.md)
 
@@ -32,8 +32,7 @@ synthetic data.
 
 | Status | Scope |
 |---|---|
-| **Integrated** | P01–P11, P13, and P14: schemas/contracts, local SQLite store, ingestion, deterministic projection/replay, fixture simulator, HTTP/SSE read surface, Svelte UI, structured Terra/Sol services, offline data generation, and the local executable composition root. |
-| **Planned, not integrated** | P12: fresh-local-Docker end-to-end acceptance through P14. |
+| **Integrated** | P01–P16: schemas/contracts and generated mocks, local SQLite store, ingestion, deterministic projection/replay, fixture simulator, HTTP/SSE read surface, Svelte UI, structured Terra/Sol services, offline data generation, executable composition, and fresh-local Docker/E2E acceptance. |
 | **Future** | Hosted Cloud Run/Cloud SQL, a shared broker, multi-instance coordination, production identity/privacy/retention, live operational integrations, live model-network adapters, and Experience Store retrieval. |
 
 ## 2. Binding v0.1 behavior that is implemented
@@ -191,7 +190,7 @@ input.
 | Parcel | Status and acceptance boundary | Current limitation |
 |---|---|---|
 | **P14 — executable composition** | **Integrated.** `cmd/mosaicdemo` validates the frozen dataset, opens SQLite, seeds/replays the deterministic scenario, serves the P08 API, and hosts a prebuilt P09 dashboard. It deliberately includes no live model or operational-system integration. | The executable requires a separately prebuilt `ui/dist`; no dashboard build artifact is committed. It does not compose Terra/Sol or publish a live-model assessment stream. |
-| **P12 — Docker end-to-end acceptance** | **Claimed, not integrated.** A fresh local Docker run must complete the scenario through P14 and verify the intended evidence/audit path. | No Dockerfile, compose file, runbook, or full end-to-end acceptance suite is integrated. |
+| **P12 — Docker end-to-end acceptance** | **Integrated.** The multi-stage image builds the Vite dashboard and `mosaicdemo`; Compose initializes only the named SQLite volume, then runs the application nonroot and read-only. The E2E suite and a fresh Docker smoke prove dashboard delivery, COP revision 9, governed evidence resolution, SSE, and immutable `executed: false` audit behavior. | The standard image intentionally contains no GGUF, local model directory, live model client, or operational-system client. |
 
 P10/P11 remain valid structured service parcels, but their live invocation,
 fixture composition, artifact read exposure, and any automatic Terra trigger
@@ -213,8 +212,7 @@ The integrated package tests prove the following narrow boundaries:
 | Dataset generation | Local runner, staged bundle/provenance, validation, explicit freeze, and destination-safety tests. |
 
 Latency and throughput are observed only; they are not v0.1 release gates. The
-P14 local executable composition is covered by package tests; a fresh Docker
-execution remains the pending acceptance boundary.
+P14 local executable composition is covered by package tests; P12 adds the fresh Docker build/start/smoke and durable-volume acceptance boundary.
 
 ## 5. Deferred production decisions
 
