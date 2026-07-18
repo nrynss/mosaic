@@ -109,5 +109,5 @@ verification, and the end-to-end replay scenario.
 
 Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 
-- 2026-07-18 P00 ready by coordinator — Git baseline, RFC-0001, agent protocol,
-  and first parcel board established; P01 is next.
+- 2026-07-18 P00 integrated by coordinator — Git baseline, RFC-0001, agent
+  protocol, and first parcel board established in `7a2e738`; P01 is next.
