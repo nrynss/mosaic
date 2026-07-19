@@ -57,6 +57,10 @@ branch until the deterministic spine is integrated and stable.
 | P14 | Executable demo composition root and static UI host | P03, P06, P07, P08, P09 | `cmd/mosaicdemo/**` | ✅ Integrated — `617081a` |
 | P15 | Reproducible GoMock tooling and generated contract mocks | P02 | `tools.go`, `internal/contracts/mocks/**`, `go.mod`, `go.sum` | ✅ Integrated — `86caf77` |
 | P16 | RFC-0001 implementation reconciliation | P08–P14 | `docs/rfcs/RFC-0001-mosaic-demo-foundation.md` | ✅ Integrated — `db66b80` |
+| P17 | Public actor/policy seam and evidence-backed agent-operations API | P08, P10, P11 | `internal/api/**`, `internal/stream/**` | ⬜ Ready |
+| P18 | Agent-operations dashboard panel | P17 | `ui/**` | ⬜ Ready |
+| P19 | Local executable composition for agent operations | P14, P17 | `cmd/mosaicdemo/**` | ⬜ Ready |
+| P20 | Public operations API/UI acceptance and runbook proof | P17–P19 | `tests/e2e/**`, `docs/runbook/**` | ⬜ Ready |
 
 ## Waves
 
@@ -67,6 +71,7 @@ Wave 2:          P05 ∥ P06
 Wave 3:          P07 ∥ P08
 Wave 4:          P09 ∥ P10; then P11
 Wave 5:          P14; then P12
+Wave 6:          P17; then P18 ∥ P19; then P20
 Independent:     P13 (offline dataset production; never a runtime dependency)
 ```
 
@@ -95,6 +100,10 @@ Independent:     P13 (offline dataset production; never a runtime dependency)
 - **P14:** one local executable composes the deterministic demo API and the prebuilt dashboard, with no live model or operational-system integration.
 - **P15:** `go generate ./internal/contracts/mocks` reproduces the checked-in GoMock implementations from the stable contract interfaces.
 - **P16:** RFC-0001 distinguishes integrated behavior from the remaining Docker acceptance and deferred production decisions.
+- **P17:** public reads and non-operational audit writes use replaceable actor/policy adapters; the operations endpoint exposes only bounded, evidence-backed status.
+- **P18:** the dashboard presents agent capability, recovery/degraded/unavailable state, and source timestamps without raw payloads or generic monitoring theatre.
+- **P19:** the local executable composes the SQLite operations reader and keeps the single-instance broker explicitly local.
+- **P20:** public API, dashboard, Docker, and runbook checks prove public access and the operations view; they make no claim of live reconciliation or operational action.
 - **P13:** a local llama.cpp run writes only a staged candidate dataset with
   complete provenance; validation and explicit freeze are required before a new
   versioned dataset is admitted.
@@ -108,6 +117,10 @@ Independent:     P13 (offline dataset production; never a runtime dependency)
 | `cmd/mosaic/**` | P01 initially; composition changes require a dedicated integration parcel |
 | `go.mod`, `go.sum`, `Taskfile.yml` | P01; P02 may add only the schema-validator dependency; P03 may add only the SQLite driver; later dependency changes require coordinator approval |
 | `cmd/datasetgen/**` | P04 initially; P13 is the dedicated offline-generation extension and adds no module dependency |
+| `internal/api/**`, `internal/stream/**` | P17 during RFC-0002 public-access and operations API work |
+| `ui/**` | P18 during the agent-operations dashboard work |
+| `cmd/mosaicdemo/**` | P19 during the operations-reader composition work |
+| `tests/e2e/**`, `docs/runbook/**` | P20 during RFC-0002 acceptance work |
 | `Mosaic_Architecture_and_Technical_Specification.md` | Product-owner/coordinator approval only |
 
 ## Verification command contract
@@ -147,3 +160,4 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-18 P14 integrated by coordinator — `617081a`; the executable serves the seeded deterministic API and guarded prebuilt dashboard, with no live model or operational integration.
 - 2026-07-18 P15 integrated by coordinator — `86caf77`; GoMock v0.6.0 is pinned and contract mocks regenerate cleanly.
 - 2026-07-18 P16 integrated by coordinator — `db66b80`; RFC-0001 now records actual v0.1 persistence, API/UI, model, offline-generation, and composition status.
+- 2026-07-19 P17–P20 ready by coordinator — RFC-0002 public access and agent-operations increment; PostgreSQL, multi-instance reconciliation, and live model transport remain out of scope.
