@@ -1,7 +1,8 @@
 # Local Docker demo runbook
 
-The image packages the dedicated mosaicdemo composition root. The deterministic
-in-process acceptance check remains available with:
+The image packages the dedicated mosaicdemo composition root, including the
+deterministic fixture-only Terra/Sol advisory replay. The in-process
+acceptance check remains available with:
 
 ~~~powershell
 go test ./tests/e2e -count=1
@@ -21,7 +22,7 @@ display metadata only and is not needed for any call below.
 
 The image builds two deterministic artifacts:
 
-- the public Svelte dashboard and bounded API; and
+- the public Svelte dashboard, bounded API, and fixture-only advisory history; and
 - the domestic-disturbance fixture and its ontology schemas.
 
 The container contains no PostgreSQL service. It runs a single process with one
@@ -48,7 +49,9 @@ docker compose ps
 
 Expected: mosaic is running with 0.0.0.0:8080->8080/tcp. Open
 <http://localhost:8080>; the public evidence ledger and its operations receipt
-should show synthetic facts at COP state revision 9.
+should show synthetic facts at COP state revision 9 and historical advisory
+cards. The rev-7 assessment is labelled superseded and its recommendation is
+labelled not current; neither is current operational advice.
 
 If port 8080 is already in use, select a different host port for this
 PowerShell session before starting:
@@ -74,17 +77,22 @@ Invoke-RestMethod "$base/api/v1/health"
 Invoke-RestMethod "$base/api/v1/version"
 Invoke-RestMethod "$base/api/v1/cop"
 Invoke-RestMethod "$base/api/v1/evidence/canonical_event/canonical-domestic-009-road-open"
+Invoke-RestMethod "$base/api/v1/advisories"
+Invoke-RestMethod "$base/api/v1/evidence/insight/insight-domestic-access-001"
 Invoke-RestMethod "$base/api/v1/operations"
 ~~~
 
 Expected salient fields are dashboard HTTP 200, health data.status: ok, version
 data.api_version: v1, COP data.state_revision: 9, and evidence data.resolved:
-True.
+True. The advisory response is bounded: it reports fixture-composed status,
+two superseded Insights, and one not-current Recommendation. It does not
+return raw payload bytes, checksums, prompts, model responses, or credentials.
 
 The operations response is a bounded receipt, not a record export. On a fresh
 startup it reports the recovered COP revision and fixture raw/canonical/
-projection/lifecycle counts. It labels Terra and Sol as not live-composed,
-durable reconciliation as unavailable, and external operational action as
+projection/lifecycle counts. It labels Terra and Sol as fixture-composed from
+local checked-in artifacts, not as live model transport; durable
+reconciliation remains unavailable and external operational action remains
 permanently unavailable. It does not expose raw payload bytes, raw checksums,
 prompts, or model responses.
 
@@ -100,11 +108,34 @@ Invoke-RestMethod "$base/api/v1/briefings" -Method Post -ContentType 'applicatio
 ~~~
 
 This request does not invoke Sol or take an operational action. The
-audit-actions route is public too, but it accepts only an existing persisted
-Insight or Recommendation target. The standard Docker startup deliberately
-does not compose Terra or Sol and therefore has no such target; the end-to-end
-test proves the successful immutable audit-action path against checked-in
-fixture advisories.
+audit-actions route is public and now has a fixture Recommendation target; it
+still appends only an immutable `executed: false` review record:
+
+~~~powershell
+$review = @{
+  action = 'acknowledged'
+  target_kind = 'recommendation'
+  target_id = 'recommendation-domestic-001'
+  note = 'Synthetic fixture review only.'
+} | ConvertTo-Json
+Invoke-RestMethod "$base/api/v1/audit-actions" -Method Post -ContentType 'application/json' -Body $review
+~~~
+
+## Verify retained-volume restart
+
+Stop and restart without removing the named volume:
+
+~~~powershell
+docker compose down
+docker compose up --detach
+Invoke-RestMethod "$base/api/v1/advisories"
+Invoke-RestMethod "$base/api/v1/operations"
+~~~
+
+The same fixture Insight, Recommendation, Model Run, and fixture Audit Record
+identities are reused; restart appends no duplicate fixture advisory history.
+The public review record above remains immutable history and does not change
+the recovered COP revision.
 
 ## Inspect the public bounded SSE stream
 
@@ -133,7 +164,8 @@ notice with a three-second context deadline.
   recovered for the current observation.
 - There is no durable reconciliation worker, autonomous recovery process, or
   shared projection ownership/lease.
-- There is no live Terra or Sol model transport.
+- Terra and Sol are composed only through local checked-in structured fixtures;
+  there is no live model transport, credential, network model request, or GGUF.
 - Mosaic never dispatches, contacts, or mutates an external operational system.
 
 PostgreSQL, shared dispatch/outbox, and multi-instance coordination are future
@@ -159,4 +191,16 @@ For startup diagnostics:
 
 ~~~powershell
 docker compose logs --follow mosaic
+~~~
+
+## Fresh Docker smoke
+
+For an isolated release-style smoke, remove only this demo's named volume,
+then build, start, and run the public no-header checks above:
+
+~~~powershell
+docker compose down --volumes
+docker compose up --build --detach
+Invoke-RestMethod "$base/api/v1/advisories"
+docker compose down
 ~~~
