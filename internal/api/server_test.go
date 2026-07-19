@@ -491,3 +491,216 @@ func newFlushRecorder() *flushRecorder {
 func (r *flushRecorder) Flush() {
 	r.once.Do(func() { close(r.flushed) })
 }
+
+type stubAdvisoryHistoryReader struct {
+	history contracts.AdvisoryHistory
+	err     error
+}
+
+func (s stubAdvisoryHistoryReader) ReadAdvisoryHistory(context.Context) (contracts.AdvisoryHistory, error) {
+	return s.history, s.err
+}
+
+type stubRecovery struct {
+	result contracts.ProjectionResult
+	err    error
+}
+
+func (s stubRecovery) Recover(context.Context) (contracts.ProjectionResult, error) {
+	return s.result, s.err
+}
+
+func TestAdvisoriesEndpoint(t *testing.T) {
+	// 1. Default setup has no AdvisoryHistory reader -> should return 503
+	fixture := newFixture(t)
+	resp := request(t, fixture.handler, http.MethodGet, "/api/v1/advisories", "", "")
+	if resp.Code != http.StatusServiceUnavailable {
+		t.Fatalf("default advisories status = %d, want 503", resp.Code)
+	}
+	if got := responseErrorCode(t, resp); got != "advisory_history_unavailable" {
+		t.Fatalf("default advisories error code = %q, want advisory_history_unavailable", got)
+	}
+
+	// 2. Deny policy should return 403
+	serverDeny, err := New(Config{
+		Recovery: fixture.server.recovery,
+		Records:  fixture.store,
+		Evidence: fixture.server.evidence,
+		Policy:   denyPolicy{deny: ActionReadAdvisories},
+	})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	respDeny := request(t, serverDeny.Handler(), http.MethodGet, "/api/v1/advisories", "", "")
+	if respDeny.Code != http.StatusForbidden {
+		t.Fatalf("deny advisories status = %d, want 403", respDeny.Code)
+	}
+	if got := responseErrorCode(t, respDeny); got != "action_denied" {
+		t.Fatalf("deny advisories error code = %q, want action_denied", got)
+	}
+
+	// 3. Test correct derived statuses at different revisions
+	history := contracts.AdvisoryHistory{
+		Insights: []gen.Insight{
+			{
+				SchemaVersion:   "1.0.0",
+				InsightID:       "insight-1",
+				StateRevision:   7,
+				LifecycleStatus: "active",
+			},
+			{
+				SchemaVersion:       "1.0.0",
+				InsightID:           "insight-2",
+				StateRevision:       9,
+				LifecycleStatus:     "obsolete",
+				SupersedesInsightID: "insight-1",
+			},
+		},
+		Recommendations: []gen.Recommendation{
+			{
+				SchemaVersion:    "1.0.0",
+				RecommendationID: "rec-1",
+				StateRevision:    7,
+				Evidence: []any{
+					map[string]any{"target_kind": "insight", "target_id": "insight-1", "explanation": "test"},
+				},
+				Text: "consider something",
+			},
+			{
+				SchemaVersion:    "1.0.0",
+				RecommendationID: "rec-2",
+				StateRevision:    9,
+				Evidence: []any{
+					map[string]any{"target_kind": "insight", "target_id": "insight-2", "explanation": "test"},
+				},
+				Text: "consider other",
+			},
+		},
+	}
+
+	// Test at Recovery revision 7
+	recoverySeven := stubRecovery{
+		result: contracts.ProjectionResult{StateRevision: 7},
+	}
+	serverSeven, err := New(Config{
+		Recovery:        recoverySeven,
+		Records:         fixture.store,
+		Evidence:        fixture.server.evidence,
+		AdvisoryHistory: stubAdvisoryHistoryReader{history: history},
+		AdvisoryMode:    "fixture-composed",
+	})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+
+	respSeven := request(t, serverSeven.Handler(), http.MethodGet, "/api/v1/advisories", "", "")
+	if respSeven.Code != http.StatusOK {
+		t.Fatalf("advisories status = %d, want 200, body = %s", respSeven.Code, respSeven.Body.String())
+	}
+
+	var envelopeSeven struct {
+		Data struct {
+			Insights        []advisoryInsight        `json:"insights"`
+			Recommendations []advisoryRecommendation `json:"recommendations"`
+			Status          string                   `json:"status"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(respSeven.Body.Bytes(), &envelopeSeven); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if envelopeSeven.Data.Status != "fixture-composed" {
+		t.Fatalf("expected status fixture-composed, got %q", envelopeSeven.Data.Status)
+	}
+
+	// At revision 7, only insight-1 and rec-1 should be returned (revision 9 is in the future).
+	if len(envelopeSeven.Data.Insights) != 1 || envelopeSeven.Data.Insights[0].InsightID != "insight-1" {
+		t.Fatalf("expected only insight-1 at revision 7, got: %#v", envelopeSeven.Data.Insights)
+	}
+	if got := envelopeSeven.Data.Insights[0].Status; got != "current" {
+		t.Fatalf("expected insight-1 status to be current, got %q", got)
+	}
+	if len(envelopeSeven.Data.Recommendations) != 1 || envelopeSeven.Data.Recommendations[0].RecommendationID != "rec-1" {
+		t.Fatalf("expected only rec-1 at revision 7, got: %#v", envelopeSeven.Data.Recommendations)
+	}
+	if got := envelopeSeven.Data.Recommendations[0].Status; got != "current" {
+		t.Fatalf("expected rec-1 status to be current, got %q", got)
+	}
+
+	// Test at Recovery revision 9
+	recoveryNine := stubRecovery{
+		result: contracts.ProjectionResult{StateRevision: 9},
+	}
+	serverNine, err := New(Config{
+		Recovery:        recoveryNine,
+		Records:         fixture.store,
+		Evidence:        fixture.server.evidence,
+		AdvisoryHistory: stubAdvisoryHistoryReader{history: history},
+		AdvisoryMode:    "fixture-composed",
+	})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+
+	respNine := request(t, serverNine.Handler(), http.MethodGet, "/api/v1/advisories", "", "")
+	if respNine.Code != http.StatusOK {
+		t.Fatalf("advisories status = %d, want 200, body = %s", respNine.Code, respNine.Body.String())
+	}
+
+	var envelopeNine struct {
+		Data struct {
+			Insights        []advisoryInsight        `json:"insights"`
+			Recommendations []advisoryRecommendation `json:"recommendations"`
+			Status          string                   `json:"status"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(respNine.Body.Bytes(), &envelopeNine); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	// At revision 9, both insights and recommendations are returned.
+	// - insight-1 (rev 7) should be superseded because insight-2 (rev 9) supersedes it.
+	// - insight-2 (rev 9) lifecycle is obsolete, so it is superseded.
+	// - rec-1 (rev 7) is not_current because its revision < 9.
+	// - rec-2 (rev 9) is not_current because its cited insight (insight-2) is superseded.
+	if len(envelopeNine.Data.Insights) != 2 {
+		t.Fatalf("expected 2 insights at revision 9, got %d", len(envelopeNine.Data.Insights))
+	}
+	for _, ins := range envelopeNine.Data.Insights {
+		if ins.Status != "superseded" {
+			t.Fatalf("expected insight %q status to be superseded, got %q", ins.InsightID, ins.Status)
+		}
+	}
+
+	if len(envelopeNine.Data.Recommendations) != 2 {
+		t.Fatalf("expected 2 recommendations at revision 9, got %d", len(envelopeNine.Data.Recommendations))
+	}
+	for _, rec := range envelopeNine.Data.Recommendations {
+		if rec.Status != "not_current" {
+			t.Fatalf("expected rec %q status to be not_current, got %q", rec.RecommendationID, rec.Status)
+		}
+	}
+}
+
+func TestOperationsCapabilitiesWithAdvisoryMode(t *testing.T) {
+	fixture := newFixture(t)
+	server, err := New(Config{
+		Recovery:     fixture.server.recovery,
+		Records:      fixture.store,
+		Evidence:     fixture.server.evidence,
+		Operations:   fixture.server.operations,
+		AdvisoryMode: "fixture_composed",
+	})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+
+	response := request(t, server.Handler(), http.MethodGet, "/api/v1/operations", "", "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("operations status = %d, body = %s", response.Code, response.Body.String())
+	}
+	data := responseData(t, response)
+	capabilities, _ := data["capabilities"].([]any)
+	assertCapability(t, capabilities, "terra_assessment", "fixture_composed", "available")
+	assertCapability(t, capabilities, "sol_advisory", "fixture_composed", "available")
+}
