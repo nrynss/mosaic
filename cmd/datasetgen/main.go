@@ -38,10 +38,12 @@ func run(args []string) error {
 		return runGenerate(root, args[1:], datasetgen.ExecRunner{})
 	case "generate-cerebras":
 		return runGenerateCerebras(root, args[1:])
+	case "validate-stage":
+		return runValidateStage(root, args[1:])
 	case "freeze":
 		return runFreeze(root, args[1:])
 	default:
-		return errors.New("usage: datasetgen validate | datasetgen generate --llama <path> --stage <dir> --scenario <id> --seed <integer> [--model <path>] [--prompt <path>] | datasetgen generate-cerebras --stage <dir> --scenario <id> --seed <integer> [--prompt <path>] | datasetgen freeze --input <stage> --output <datasets/<scenario>-vN>")
+		return errors.New("usage: datasetgen validate | datasetgen generate --llama <path> --stage <dir> --scenario <id> --seed <integer> [--model <path>] [--prompt <path>] | datasetgen generate-cerebras --stage <dir> --scenario <id> --seed <integer> [--prompt <path>] | datasetgen validate-stage --input <stage> | datasetgen freeze --input <stage> --output <datasets/<scenario>-vN>")
 	}
 }
 
@@ -101,6 +103,23 @@ func runGenerateCerebras(root string, args []string) error {
 		return err
 	}
 	fmt.Printf("Cerebras dataset candidate staged at %s (raw response sha256 %s)\n", *stageDir, provenance.RawResponseSHA256)
+	return nil
+}
+
+func runValidateStage(root string, args []string) error {
+	flags := flag.NewFlagSet("validate-stage", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	inputDir := flags.String("input", "", "candidate staging directory")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("validate-stage accepts flags only")
+	}
+	if err := datasetgen.ValidateStage(root, *inputDir); err != nil {
+		return err
+	}
+	fmt.Printf("staged dataset candidate at %s: valid without promotion\n", *inputDir)
 	return nil
 }
 

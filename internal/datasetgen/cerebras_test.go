@@ -83,6 +83,20 @@ func TestGenerateCerebrasStagesInspectableRemoteCandidate(t *testing.T) {
 	if strings.Contains(string(encoded), "test-api-key") {
 		t.Fatal("remote provenance contains the API key")
 	}
+	beforeOutput := mustReadFile(t, stage+"/"+StageModelOutputFile)
+	beforeProvenance := mustReadFile(t, stage+"/"+StageProvenanceFile)
+	if err := ValidateStage(root, stage); err != nil {
+		t.Fatalf("ValidateStage: %v", err)
+	}
+	if got := mustReadFile(t, stage+"/"+StageModelOutputFile); string(got) != string(beforeOutput) {
+		t.Fatal("ValidateStage changed model output")
+	}
+	if got := mustReadFile(t, stage+"/"+StageProvenanceFile); string(got) != string(beforeProvenance) {
+		t.Fatal("ValidateStage changed provenance")
+	}
+	if entries, err := os.ReadDir(root + "/datasets"); err != nil || len(entries) != 0 {
+		t.Fatalf("ValidateStage changed frozen datasets: entries=%v err=%v", entries, err)
+	}
 }
 
 func TestGenerateCerebrasStopsAfterOneFailedRequest(t *testing.T) {

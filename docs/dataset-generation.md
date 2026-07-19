@@ -77,13 +77,22 @@ parameters, candidate validation, human review, and explicit freeze promotion.
    checksums, and schema versions. It does not contain an API key, authorization
    header, full request prompt, or provider error body.
 
-3. Review the staged JSON. A candidate is intentionally not admitted to
+3. Validate the staged candidate without writing under `datasets/`. This checks
+   provenance, response checksums, exact artifact/model-output agreement, and
+   all current JSON schemas, but it does not freeze or modify the stage.
+
+   ```powershell
+   go run ./cmd/datasetgen validate-stage `
+     --input "localmodels\staging\domestic-disturbance-v2"
+   ```
+
+4. Review the staged JSON. A candidate is intentionally not admitted to
    `datasets/` merely because it parses. Verify that it is synthetic-only and
    that its manifest, scenario, event ordering, corrections, IDs, evidence, and
    expected outcomes are internally consistent. Invalid candidates remain in
    staging for inspection.
 
-4. Do not freeze without explicit coordinator and user approval. When approval
+5. Do not freeze without explicit coordinator and user approval. When approval
    exists, freeze exactly one reviewed candidate into a new, versioned direct
    child of the repository `datasets/` directory. The target must not exist.
 
@@ -100,7 +109,7 @@ parameters, candidate validation, human review, and explicit freeze promotion.
    failure. It refuses a pre-existing target or any destination outside the
    repository `datasets/` root.
 
-5. Validate frozen datasets with the normal offline gate:
+6. Validate frozen datasets with the normal offline gate:
 
    ```powershell
    go run ./cmd/datasetgen validate

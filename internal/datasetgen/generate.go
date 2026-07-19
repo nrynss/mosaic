@@ -285,35 +285,9 @@ func Freeze(root string, config FreezeConfig) error {
 		return fmt.Errorf("freeze: output: %w", err)
 	}
 
-	schemas, versions, err := compileSchemas(root)
-	if err != nil {
-		return fmt.Errorf("freeze: compile schemas: %w", err)
-	}
-	stage, err := readStage(inputDir)
+	stage, err := validateStagedCandidate(root, inputDir)
 	if err != nil {
 		return fmt.Errorf("freeze: staged candidate: %w", err)
-	}
-	if err := validateProvenance(stage.Provenance, versions); err != nil {
-		return fmt.Errorf("freeze: provenance: %w", err)
-	}
-	if sha256Hex(stage.ModelOutput) != stage.Provenance.RawResponseSHA256 {
-		return errors.New("freeze: model-output checksum does not match provenance")
-	}
-	bundle, err := parseArtifactBundle(stage.ModelOutput)
-	if err != nil {
-		return fmt.Errorf("freeze: model-output: %w", err)
-	}
-	if bundle.ScenarioID != stage.Provenance.ScenarioID {
-		return errors.New("freeze: provenance scenario does not match model output")
-	}
-	if err := bundle.validateScenarioArtifact(); err != nil {
-		return fmt.Errorf("freeze: model-output: %w", err)
-	}
-	if err := stage.matchesBundle(bundle); err != nil {
-		return fmt.Errorf("freeze: staged artifacts: %w", err)
-	}
-	if err := dataset.ValidateArtifacts(schemas, filepath.Join(inputDir, StageArtifactsDirectory)); err != nil {
-		return fmt.Errorf("freeze: validate candidate artifacts: %w", err)
 	}
 
 	datasetsRoot := filepath.Join(root, "datasets")
@@ -327,7 +301,7 @@ func Freeze(root string, config FreezeConfig) error {
 			_ = os.RemoveAll(temporaryDir)
 		}
 	}()
-	for _, artifact := range bundle.Artifacts.named() {
+	for _, artifact := range stage.Artifacts.named() {
 		if err := os.WriteFile(filepath.Join(temporaryDir, artifact.Name), artifact.Content, 0o644); err != nil {
 			return fmt.Errorf("freeze: write %s: %w", artifact.Name, err)
 		}
@@ -337,6 +311,61 @@ func Freeze(root string, config FreezeConfig) error {
 	}
 	removeTemporary = false
 	return nil
+}
+
+// ValidateStage performs every non-mutating validation required before a
+// reviewed candidate may be frozen. It never creates, modifies, or removes a
+// staged artifact or frozen dataset.
+func ValidateStage(root, inputDir string) error {
+	if inputDir == "" {
+		return errors.New("validate stage: --input is required")
+	}
+	root, err := absolutePath(root)
+	if err != nil {
+		return fmt.Errorf("validate stage: resolve repository root: %w", err)
+	}
+	inputDir, err = resolvePath(root, inputDir)
+	if err != nil {
+		return fmt.Errorf("validate stage: resolve input: %w", err)
+	}
+	if _, err := validateStagedCandidate(root, inputDir); err != nil {
+		return fmt.Errorf("validate stage: %w", err)
+	}
+	return nil
+}
+
+func validateStagedCandidate(root, inputDir string) (stagedCandidate, error) {
+	schemas, versions, err := compileSchemas(root)
+	if err != nil {
+		return stagedCandidate{}, fmt.Errorf("compile schemas: %w", err)
+	}
+	stage, err := readStage(inputDir)
+	if err != nil {
+		return stagedCandidate{}, err
+	}
+	if err := validateProvenance(stage.Provenance, versions); err != nil {
+		return stagedCandidate{}, fmt.Errorf("provenance: %w", err)
+	}
+	if sha256Hex(stage.ModelOutput) != stage.Provenance.RawResponseSHA256 {
+		return stagedCandidate{}, errors.New("model-output checksum does not match provenance")
+	}
+	bundle, err := parseArtifactBundle(stage.ModelOutput)
+	if err != nil {
+		return stagedCandidate{}, fmt.Errorf("model-output: %w", err)
+	}
+	if bundle.ScenarioID != stage.Provenance.ScenarioID {
+		return stagedCandidate{}, errors.New("provenance scenario does not match model output")
+	}
+	if err := bundle.validateScenarioArtifact(); err != nil {
+		return stagedCandidate{}, fmt.Errorf("model-output: %w", err)
+	}
+	if err := stage.matchesBundle(bundle); err != nil {
+		return stagedCandidate{}, fmt.Errorf("staged artifacts: %w", err)
+	}
+	if err := dataset.ValidateArtifacts(schemas, filepath.Join(inputDir, StageArtifactsDirectory)); err != nil {
+		return stagedCandidate{}, fmt.Errorf("validate candidate artifacts: %w", err)
+	}
+	return stage, nil
 }
 
 type stagedCandidate struct {
