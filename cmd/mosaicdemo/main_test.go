@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -33,6 +34,7 @@ func TestNewApplicationSeedsFixtureOnlyOnce(t *testing.T) {
 		t.Fatalf("compose first application: %v", err)
 	}
 	assertFixtureCOP(t, first.handler)
+	assertFixtureOperations(t, first.handler)
 	if err := first.close(); err != nil {
 		t.Fatalf("close first application: %v", err)
 	}
@@ -149,6 +151,49 @@ func assertFixtureCOP(t *testing.T, handler http.Handler) {
 	}
 }
 
+func assertFixtureOperations(t *testing.T, handler http.Handler) {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "http://mosaic.test/api/v1/operations", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("operations status = %d: %s", response.Code, response.Body.String())
+	}
+
+	var body struct {
+		Data struct {
+			Recovery struct {
+				Status        string `json:"status"`
+				StateRevision int64  `json:"state_revision"`
+			} `json:"recovery"`
+			Counts struct {
+				RawEvents         int `json:"raw_events"`
+				CanonicalEvents   int `json:"canonical_events"`
+				ProjectedEvents   int `json:"projected_events"`
+				UnprojectedEvents int `json:"unprojected_events"`
+				Checkpoints       int `json:"checkpoints"`
+			} `json:"counts"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode operations response: %v", err)
+	}
+	if body.Data.Recovery.Status != "recovered" || body.Data.Recovery.StateRevision != 9 {
+		t.Fatalf("operations recovery = %#v", body.Data.Recovery)
+	}
+	if got, want := body.Data.Counts.RawEvents, 10; got != want {
+		t.Fatalf("operations raw event count = %d, want %d", got, want)
+	}
+	if got, want := body.Data.Counts.CanonicalEvents, 9; got != want {
+		t.Fatalf("operations canonical event count = %d, want %d", got, want)
+	}
+	if got, want := body.Data.Counts.ProjectedEvents, 9; got != want {
+		t.Fatalf("operations projected event count = %d, want %d", got, want)
+	}
+	if body.Data.Counts.UnprojectedEvents != 0 || body.Data.Counts.Checkpoints != 9 {
+		t.Fatalf("operations projection counts = %#v", body.Data.Counts)
+	}
+}
 func makeDashboard(t *testing.T) string {
 	t.Helper()
 	directory := t.TempDir()

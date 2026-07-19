@@ -1,6 +1,6 @@
 // Command mosaicdemo composes Mosaic's local, synthetic v0.1 demonstration.
 // It deliberately wires only the frozen P07 fixture, deterministic replay, the
-// P08 read surface, and the checked-in static dashboard. No live model client
+// P08/P17 public read surfaces, and the checked-in static dashboard. No live model client
 // or operational-system client is present in this executable.
 package main
 
@@ -173,12 +173,18 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 		_ = closeDatabase()
 		return nil, fmt.Errorf("compose governed evidence resolver: %w", err)
 	}
+	operations, err := api.NewSQLiteOperationsReader(database)
+	if err != nil {
+		_ = closeDatabase()
+		return nil, fmt.Errorf("compose SQLite operations reader: %w", err)
+	}
 	apiServer, err := api.New(api.Config{
-		Recovery: scenario,
-		Records:  database,
-		Evidence: resolver,
-		Stream:   stream.NewBroker(),
-		Version:  "v0.1",
+		Recovery:   scenario,
+		Records:    database,
+		Evidence:   resolver,
+		Operations: operations,
+		Stream:     stream.NewBroker(),
+		Version:    "v0.1",
 	})
 	if err != nil {
 		_ = closeDatabase()
