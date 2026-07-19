@@ -41,6 +41,7 @@ var (
 	_ contracts.RawEventRepository        = (*Store)(nil)
 	_ contracts.CanonicalEventRepository  = (*Store)(nil)
 	_ contracts.ImmutableRecordRepository = (*Store)(nil)
+	_ contracts.AdvisoryHistoryReader     = (*Store)(nil)
 	_ contracts.CheckpointRepository      = (*Store)(nil)
 	_ contracts.TransactionRunner         = (*Store)(nil)
 )
@@ -651,7 +652,96 @@ func (s *Store) AppendAuditRecord(ctx context.Context, audit gen.AuditRecord) er
 	return nil
 }
 
+// ReadAdvisoryHistory returns the persisted advisory-domain records in stable
+// chronological order. It deliberately reads only immutable advisory records;
+// raw events, canonical events, and source payloads remain outside this seam.
+func (s *Store) ReadAdvisoryHistory(ctx context.Context) (contracts.AdvisoryHistory, error) {
+	exec, err := s.executor(ctx)
+	if err != nil {
+		return contracts.AdvisoryHistory{}, err
+	}
+
+	insights, err := readAdvisoryRecords(ctx, exec, `SELECT insight_id, record_json FROM insights
+		ORDER BY insight_id ASC`, "insight", func(insight gen.Insight) string { return insight.CreatedAt })
+	if err != nil {
+		return contracts.AdvisoryHistory{}, err
+	}
+	recommendations, err := readAdvisoryRecords(ctx, exec, `SELECT recommendation_id, record_json FROM recommendations
+		ORDER BY recommendation_id ASC`, "recommendation", func(recommendation gen.Recommendation) string { return recommendation.CreatedAt })
+	if err != nil {
+		return contracts.AdvisoryHistory{}, err
+	}
+	modelRuns, err := readAdvisoryRecords(ctx, exec, `SELECT model_run_id, record_json FROM model_runs
+		WHERE json_extract(record_json, '$.agent') IN ('terra', 'sol')
+		ORDER BY model_run_id ASC`, "model run", func(run gen.ModelRun) string { return run.CompletedAt })
+	if err != nil {
+		return contracts.AdvisoryHistory{}, err
+	}
+	auditRecords, err := readAdvisoryRecords(ctx, exec, `SELECT audit_record_id, record_json FROM audit_records
+		ORDER BY audit_record_id ASC`, "audit record", func(record gen.AuditRecord) string { return record.CreatedAt })
+	if err != nil {
+		return contracts.AdvisoryHistory{}, err
+	}
+
+	return contracts.AdvisoryHistory{
+		Insights:        insights,
+		Recommendations: recommendations,
+		ModelRuns:       modelRuns,
+		AuditRecords:    auditRecords,
+	}, nil
+}
+
+type advisoryRecord[T any] struct {
+	record     T
+	occurredAt time.Time
+	recordID   string
+}
+
+func readAdvisoryRecords[T any](ctx context.Context, exec sqlExecutor, query, recordType string, timestamp func(T) string) ([]T, error) {
+	rows, err := exec.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("list advisory %ss: %w", recordType, err)
+	}
+	defer rows.Close()
+
+	records := make([]advisoryRecord[T], 0)
+	for rows.Next() {
+		var recordID, recordJSON string
+		if err := rows.Scan(&recordID, &recordJSON); err != nil {
+			return nil, fmt.Errorf("scan advisory %s: %w", recordType, err)
+		}
+		var record T
+		if err := json.Unmarshal([]byte(recordJSON), &record); err != nil {
+			return nil, fmt.Errorf("decode advisory %s: %w", recordType, err)
+		}
+		occurredAt, err := time.Parse(time.RFC3339Nano, timestamp(record))
+		if err != nil {
+			return nil, fmt.Errorf("parse advisory %s timestamp for %q: %w", recordType, recordID, err)
+		}
+		records = append(records, advisoryRecord[T]{
+			record:     record,
+			occurredAt: occurredAt.UTC(),
+			recordID:   recordID,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate advisory %ss: %w", recordType, err)
+	}
+	sort.Slice(records, func(i, j int) bool {
+		if records[i].occurredAt.Equal(records[j].occurredAt) {
+			return records[i].recordID < records[j].recordID
+		}
+		return records[i].occurredAt.Before(records[j].occurredAt)
+	})
+
+	ordered := make([]T, 0, len(records))
+	for _, record := range records {
+		ordered = append(ordered, record.record)
+	}
+	return ordered, nil
+}
 func (s *Store) appendJSONRecord(ctx context.Context, table, idColumn, id string, stateRevision int64, record any) error {
+
 	recordJSON, err := marshalRecord(record)
 	if err != nil {
 		return err

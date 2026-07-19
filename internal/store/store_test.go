@@ -158,6 +158,109 @@ func TestLatestCheckpointUsesHighestStateRevision(t *testing.T) {
 	}
 }
 
+func TestReadAdvisoryHistoryEmpty(t *testing.T) {
+	s := newTestStore(t)
+
+	history, err := s.ReadAdvisoryHistory(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if history.Insights == nil || history.Recommendations == nil || history.ModelRuns == nil || history.AuditRecords == nil {
+		t.Fatalf("empty history contains unusable nil collections: %#v", history)
+	}
+	if len(history.Insights) != 0 || len(history.Recommendations) != 0 || len(history.ModelRuns) != 0 || len(history.AuditRecords) != 0 {
+		t.Fatalf("empty history = %#v", history)
+	}
+}
+
+func TestReadAdvisoryHistoryFiltersAndOrdersRecords(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	for _, insight := range []gen.Insight{
+		{InsightID: "insight-later", StateRevision: 7, CreatedAt: "2026-07-19T10:00:00Z"},
+		{InsightID: "insight-b", StateRevision: 7, CreatedAt: "2026-07-19T09:00:00Z"},
+		{InsightID: "insight-offset", StateRevision: 7, CreatedAt: "2026-07-19T08:30:00-01:00"},
+		{InsightID: "insight-a", StateRevision: 7, CreatedAt: "2026-07-19T09:00:00Z"},
+	} {
+		if err := s.AppendInsight(ctx, insight); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, recommendation := range []gen.Recommendation{
+		{RecommendationID: "recommendation-later", StateRevision: 7, CreatedAt: "2026-07-19T10:00:00Z"},
+		{RecommendationID: "recommendation-b", StateRevision: 7, CreatedAt: "2026-07-19T09:00:00Z"},
+		{RecommendationID: "recommendation-a", StateRevision: 7, CreatedAt: "2026-07-19T09:00:00Z"},
+	} {
+		if err := s.AppendRecommendation(ctx, recommendation); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// This malformed Luna timestamp must stay outside the advisory query.
+	for _, run := range []gen.ModelRun{
+		{ModelRunID: "model-run-luna", Agent: "luna", CompletedAt: "not-a-timestamp"},
+		{ModelRunID: "model-run-later", Agent: "sol", CompletedAt: "2026-07-19T10:00:00Z"},
+		{ModelRunID: "model-run-b", Agent: "terra", CompletedAt: "2026-07-19T09:00:00Z"},
+		{ModelRunID: "model-run-a", Agent: "sol", CompletedAt: "2026-07-19T09:00:00Z"},
+	} {
+		if err := s.AppendModelRun(ctx, run); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, audit := range []gen.AuditRecord{
+		{AuditRecordID: "audit-later", CreatedAt: "2026-07-19T10:00:00Z"},
+		{AuditRecordID: "audit-b", CreatedAt: "2026-07-19T09:00:00Z"},
+		{AuditRecordID: "audit-a", CreatedAt: "2026-07-19T09:00:00Z"},
+	} {
+		if err := s.AppendAuditRecord(ctx, audit); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	history, err := s.ReadAdvisoryHistory(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history.Insights) != 4 || history.Insights[0].InsightID != "insight-a" || history.Insights[1].InsightID != "insight-b" || history.Insights[2].InsightID != "insight-offset" || history.Insights[3].InsightID != "insight-later" {
+		t.Errorf("insight order = %#v", history.Insights)
+	}
+	if len(history.Recommendations) != 3 || history.Recommendations[0].RecommendationID != "recommendation-a" || history.Recommendations[1].RecommendationID != "recommendation-b" || history.Recommendations[2].RecommendationID != "recommendation-later" {
+		t.Errorf("recommendation order = %#v", history.Recommendations)
+	}
+	if len(history.ModelRuns) != 3 || history.ModelRuns[0].ModelRunID != "model-run-a" || history.ModelRuns[1].ModelRunID != "model-run-b" || history.ModelRuns[2].ModelRunID != "model-run-later" {
+		t.Errorf("advisory model-run order = %#v", history.ModelRuns)
+	}
+	if len(history.AuditRecords) != 3 || history.AuditRecords[0].AuditRecordID != "audit-a" || history.AuditRecords[1].AuditRecordID != "audit-b" || history.AuditRecords[2].AuditRecordID != "audit-later" {
+		t.Errorf("audit record order = %#v", history.AuditRecords)
+	}
+}
+
+func TestReadAdvisoryHistoryFailsClosedForMalformedStoredJSON(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	if _, err := s.SQLDB().ExecContext(ctx, `INSERT INTO insights
+		(insight_id, state_revision, record_json) VALUES (?, ?, ?)`, "malformed-insight", 1, `[]`); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.ReadAdvisoryHistory(ctx); err == nil {
+		t.Fatal("ReadAdvisoryHistory accepted malformed stored JSON")
+	}
+}
+
+func TestReadAdvisoryHistoryFailsClosedForInvalidTimestamp(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	if err := s.AppendInsight(ctx, gen.Insight{
+		InsightID: "invalid-timestamp-insight", StateRevision: 1, CreatedAt: "not-a-timestamp",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.ReadAdvisoryHistory(ctx); err == nil {
+		t.Fatal("ReadAdvisoryHistory accepted an invalid timestamp")
+	}
+}
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
 	s, err := OpenInMemory(context.Background())
