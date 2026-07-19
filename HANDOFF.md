@@ -161,4 +161,4 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-18 P15 integrated by coordinator — `86caf77`; GoMock v0.6.0 is pinned and contract mocks regenerate cleanly.
 - 2026-07-18 P16 integrated by coordinator — `db66b80`; RFC-0001 now records actual v0.1 persistence, API/UI, model, offline-generation, and composition status.
 - 2026-07-19 P17–P20 ready by coordinator — RFC-0002 public access and agent-operations increment; PostgreSQL, multi-instance reconciliation, and live model transport remain out of scope.
-- 2026-07-19 P17 claimed by `/root/p17_operations_api` — base `850462f`; public-by-default API policy and bounded operations read surface.
+- 2026-07-19 P17 claimed by `/root/p17_operations_api` — base `90b0c44`, branch `parcel/P17-operations-api`, worktree `.worktrees/P17-operations-api`; public-by-default API policy and bounded operations read surface.
