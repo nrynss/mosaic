@@ -31,7 +31,8 @@ to the coordinator for integration.
 ## Starting point and branch model
 
 The integration branch is `mosaic/v0.1-foundation`. The increment began at
-`c03ba39` after P01–P20; P21–P23 are now integrated through `8631d4e`.
+`c03ba39` after P01–P20; P21–P25, excluding the independently pending P26,
+are integrated through `e37c17a`.
 Every new claim bases from the latest integrated branch SHA recorded by the
 coordinator, never from an older parcel worktree.
 
@@ -43,10 +44,10 @@ mosaic/v0.1-foundation
 ├─ parcel/P21-fixture-advisory-rfc                 (integrated)
 ├─ parcel/P22-advisory-history-contracts           (integrated)
 ├─ parcel/P23-advisory-history-store                (integrated)
-├─ parcel/P24-fixture-advisory-replay               (ready; unclaimed)
-├─ parcel/P25-public-advisory-api                   (ready; unclaimed)
+├─ parcel/P24-fixture-advisory-replay               (integrated)
+├─ parcel/P25-public-advisory-api                   (integrated)
 ├─ parcel/P26-advisory-dashboard                    (waits for P25)
-├─ parcel/P27-advisory-composition                  (waits for P24/P25)
+├─ parcel/P27-advisory-composition                  (ready)
 └─ parcel/P28-advisory-acceptance                   (waits for P26/P27)
 ```
 
@@ -60,10 +61,10 @@ prerequisites are marked `✅ Integrated` on this board.
 | P21 | Re-baseline the handoff and record RFC-0003's fixture-only advisory decision | P20 | `HANDOFF.md`, `docs/archive/HANDOFF-v0.1-foundation.md`, `docs/rfcs/RFC-0003-fixture-advisory-composition.md` | ✅ Integrated — `48d96c8` |
 | P22 | Add the additive, read-only advisory-history contract and regenerate checked-in GoMock output | P21 | `internal/contracts/**` | ✅ Integrated — `17a4cde` |
 | P23 | Implement deterministic SQLite reads for the P22 advisory history contract; no migration | P22 | `internal/store/**` | ✅ Integrated — `8cbc905` |
-| P24 | Deterministic fixture Terra/Sol replay with immutable lifecycle/audit history | P22, P23 | `internal/simulator/**` | ⬜ Ready — unclaimed |
+| P24 | Deterministic fixture Terra/Sol replay with immutable lifecycle/audit history | P22, P23 | `internal/simulator/**` | ✅ Integrated — `e37c17a` |
 | P25 | Bounded public advisory API and truthful advisory capability status | P22, P23 | `internal/api/**` | ✅ Integrated — `8bde753` |
 | P26 | Advisory-history dashboard cards, evidence links, and supersession presentation | P25 | `ui/**` | ⬜ Ready — unclaimed |
-| P27 | Local executable composition of fixture replay, advisory history, and public API | P24, P25 | `cmd/mosaicdemo/**` | ⬜ Not claimable until P24/P25 integrate |
+| P27 | Local executable composition of fixture replay, advisory history, and public API | P24, P25 | `cmd/mosaicdemo/**` | ⬜ Ready — coordinator implementation |
 | P28 | Public advisory API/UI/Docker/runbook acceptance proof | P26, P27 | `tests/e2e/**`, `docs/runbook/**` | ⬜ Not claimable until P26/P27 integrate |
 
 ## P22 builder brief — advisory-history contract
@@ -337,3 +338,4 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-19 P24–P28 planned by coordinator — RFC-0003 and this board now contain exclusive ownership, dependencies, acceptance proof, waves, and external-builder handoff instructions; P24/P25 are ready but unclaimed.
 - 2026-07-20 P25 claimed by external builder — base `5bbf27a`, branch `parcel/P25-public-advisory-api`; submitted from the root worktree contrary to the isolated-worktree rule. The coordinator preserved that clean branch and used a separate integration worktree.
 - 2026-07-20 P25 integrated by coordinator — `8bde753`; public bounded advisory read route, policy seam, and configuration-driven capability status passed review and the full quality gate. P26 is now ready.
+- 2026-07-20 P24 integrated by coordinator — `e37c17a`; deterministic rev-7/rev-9 fixture replay now commits successful Terra/Sol Model Run-output pairs atomically, records failure Model Runs, detects partial history, and passed the full quality gate. P27 is now ready.
