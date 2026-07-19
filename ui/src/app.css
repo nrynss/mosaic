@@ -135,22 +135,6 @@ h3 { font-size: 1.1rem; line-height: 1.08; letter-spacing: -0.02em; }
   line-height: 1.55;
 }
 
-.identity-switch { margin-top: 1.3rem; display: grid; gap: 0.5rem; }
-
-.identity-switch button {
-  padding: 0.72rem 0.75rem;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  text-align: left;
-  color: #173342;
-  background: transparent;
-  border: 1px solid #9eb8c0;
-  border-left: 4px solid #9eb8c0;
-}
-
-.identity-switch button span { font-weight: 700; }
-.identity-switch button small { align-self: center; color: #5a6d77; font-size: 0.7rem; }
-.identity-switch button.active { border-color: #173342; border-left-color: #c9872f; background: #f7fbfa; }
 
 .connection-form { display: grid; gap: 0.55rem; }
 label { color: #2b3e48; font-size: 0.78rem; font-weight: 700; }
