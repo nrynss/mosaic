@@ -15,8 +15,9 @@ uses no model, API key, network model provider, localmodels directory, or GGUF
 artifact.
 
 Access is intentionally open for this demo: there is no login, token, session,
-or authorization check. Do not treat X-Mosaic-Demo-Identity as a credential; it
-is optional display metadata only and is not needed for any call below.
+or configured access restriction; the public actor/policy defaults permit these
+calls. Do not treat X-Mosaic-Demo-Identity as a credential; it is optional
+display metadata only and is not needed for any call below.
 
 The image builds two deterministic artifacts:
 
