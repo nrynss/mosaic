@@ -61,8 +61,8 @@ prerequisites are marked `✅ Integrated` on this board.
 | P22 | Add the additive, read-only advisory-history contract and regenerate checked-in GoMock output | P21 | `internal/contracts/**` | ✅ Integrated — `17a4cde` |
 | P23 | Implement deterministic SQLite reads for the P22 advisory history contract; no migration | P22 | `internal/store/**` | ✅ Integrated — `8cbc905` |
 | P24 | Deterministic fixture Terra/Sol replay with immutable lifecycle/audit history | P22, P23 | `internal/simulator/**` | ⬜ Ready — unclaimed |
-| P25 | Bounded public advisory API and truthful advisory capability status | P22, P23 | `internal/api/**` | ⬜ Ready — unclaimed |
-| P26 | Advisory-history dashboard cards, evidence links, and supersession presentation | P25 | `ui/**` | ⬜ Not claimable until P25 integrates |
+| P25 | Bounded public advisory API and truthful advisory capability status | P22, P23 | `internal/api/**` | ✅ Integrated — `8bde753` |
+| P26 | Advisory-history dashboard cards, evidence links, and supersession presentation | P25 | `ui/**` | ⬜ Ready — unclaimed |
 | P27 | Local executable composition of fixture replay, advisory history, and public API | P24, P25 | `cmd/mosaicdemo/**` | ⬜ Not claimable until P24/P25 integrate |
 | P28 | Public advisory API/UI/Docker/runbook acceptance proof | P26, P27 | `tests/e2e/**`, `docs/runbook/**` | ⬜ Not claimable until P26/P27 integrate |
 
@@ -335,3 +335,5 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-19 P23 claimed by coordinator — base `bec2744`, branch `parcel/P23-advisory-history-store`, worktree `.worktrees/P23-advisory-history-store`; deterministic SQLite advisory-history reads only, with no migrations.
 - 2026-07-19 P23 integrated by coordinator — `8cbc905`; bounded read-only SQLite history now filters Terra/Sol Model Runs, orders real RFC-3339 instants deterministically, and fails closed for selected corrupt records; full quality passed.
 - 2026-07-19 P24–P28 planned by coordinator — RFC-0003 and this board now contain exclusive ownership, dependencies, acceptance proof, waves, and external-builder handoff instructions; P24/P25 are ready but unclaimed.
+- 2026-07-20 P25 claimed by external builder — base `5bbf27a`, branch `parcel/P25-public-advisory-api`; submitted from the root worktree contrary to the isolated-worktree rule. The coordinator preserved that clean branch and used a separate integration worktree.
+- 2026-07-20 P25 integrated by coordinator — `8bde753`; public bounded advisory read route, policy seam, and configuration-driven capability status passed review and the full quality gate. P26 is now ready.

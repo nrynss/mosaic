@@ -1,12 +1,12 @@
 # RFC-0003: Fixture Advisory Composition
 
-- **Status:** Accepted — P21–P23 integrated; P24–P28 planned
+- **Status:** Accepted — P21–P23 and P25 integrated; P24 and P26–P28 planned
 - **Owner:** Mosaic coordinator
 - **Decision date:** 2026-07-19
 - **Depends on:** [RFC-0001](RFC-0001-mosaic-demo-foundation.md), [RFC-0002](RFC-0002-public-pluggability-and-agent-observability.md)
-- **Implementation snapshot:** P01–P23 integrated. The fixture advisory
-  contract and deterministic SQLite reader are complete; P24–P28 remain
-  unclaimed implementation and acceptance parcels.
+- **Implementation snapshot:** P01–P23 and P25 are integrated. The fixture
+  advisory contract, deterministic SQLite reader, and bounded public read API
+  are complete; P24 and P26–P28 remain unclaimed parcels.
 
 ## 1. Decision
 
