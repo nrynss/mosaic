@@ -1,7 +1,7 @@
 # Synthetic dataset generation
 
 `datasetgen` is a data-production tool, not part of the Mosaic runtime. For the
-P30 demonstration candidate it uses Cerebras `gemma-4-31b` to produce one
+P31 demonstration candidate it uses Cerebras `gemma-4-31b` to produce one
 **staged candidate**. The demo, Docker image, Luna, Terra, and Sol do not call
 Cerebras, load a model, or invoke this command.
 
@@ -10,9 +10,9 @@ provider. Do not place real operational records, personal data, credentials, or
 unreviewed model output in the repository. Generated candidates live only under
 ignored `localmodels/staging/` until a later, explicitly approved promotion.
 
-## P30 provider and request budget
+## P31 provider and request budget
 
-P30 permits only the public Cerebras Chat Completions endpoint and the model
+P31 permits only the public Cerebras Chat Completions endpoint and the model
 `gemma-4-31b`. Its credential is read only from `CEREBRAS_API_KEY` in the
 current process; it is never accepted as a command-line flag, recorded in
 provenance, or written to disk.
@@ -26,6 +26,11 @@ Stop after a rate limit, timeout, refusal, transport failure, or invalid model
 output. Start a new approved attempt instead of retrying in a loop. The command
 uses a 90-second request deadline and a maximum completion budget of 12,288
 tokens.
+
+P31's v3 prompt contains a checked-in, schema-valid synthetic reference bundle.
+The authorized model response must return that bundle unchanged; the distinct
+model run is recorded in ignored staged provenance, not by altering its
+cross-artifact records.
 
 ## Reproducible promotion workflow
 
@@ -49,10 +54,10 @@ parameters, candidate validation, human review, and explicit freeze promotion.
 
    ```powershell
    go run ./cmd/datasetgen generate-cerebras `
-     --prompt "prompts\datasetgen\v2.md" `
-     --stage "localmodels\staging\domestic-disturbance-v3" `
+     --prompt "prompts\datasetgen\v3.md" `
+     --stage "localmodels\staging\domestic-disturbance-v4" `
      --scenario domestic-disturbance `
-     --seed 20260721
+     --seed 20260722
    ```
 
    The command compiles the current read-only schemas, builds a bounded
@@ -82,13 +87,13 @@ parameters, candidate validation, human review, and explicit freeze promotion.
 
    ```powershell
    go run ./cmd/datasetgen validate-stage `
-     --input "localmodels\staging\domestic-disturbance-v3"
+     --input "localmodels\staging\domestic-disturbance-v4"
    ```
 
-4. Review the staged JSON. P29's rejected `v2` stage is immutable evidence;
-   P30 uses the new `v3` stage and the separate versioned v2 prompt. A candidate
-   is intentionally not admitted to
-   datasets/ merely because it parses. Verify that it is synthetic-only and
+4. Review the staged JSON. P29's rejected `v2` stage and P30's rejected `v3`
+   stage are immutable evidence; P31 uses the new `v4` stage and the separate
+   template-conditioned v3 prompt. A candidate is intentionally not admitted to
+   `datasets/` merely because it parses. Verify that it is synthetic-only and
    that its manifest, scenario, event ordering, corrections, IDs, evidence, and
    expected outcomes are internally consistent. Invalid candidates remain in
    staging for inspection.
@@ -99,8 +104,8 @@ parameters, candidate validation, human review, and explicit freeze promotion.
 
    ```powershell
    go run ./cmd/datasetgen freeze `
-     --input "localmodels\staging\domestic-disturbance-v3" `
-     --output "datasets\domestic-disturbance-v3"
+     --input "localmodels\staging\domestic-disturbance-v4" `
+     --output "datasets\domestic-disturbance-v4"
    ```
 
    Freeze checks provenance completeness and checksums, proves the staged
