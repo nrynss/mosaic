@@ -1,18 +1,19 @@
 <script>
   import { onMount } from 'svelte';
 
-  const identityHeader = 'X-Mosaic-Demo-Identity';
   const defaultAPIBase = import.meta.env.VITE_MOSAIC_API_BASE_URL || '/api/v1';
   const hiddenArtifactFields = new Set(['payload_bytes_b64', 'raw_sha256']);
 
   let apiBase = $state(normaliseAPIBase(defaultAPIBase));
   let apiBaseInput = $state(normaliseAPIBase(defaultAPIBase));
-  let identity = $state('viewer-demo');
   let health = $state({ state: 'idle', detail: 'Not checked' });
   let version = $state({ state: 'idle', detail: 'Not checked' });
   let cop = $state(null);
   let copState = $state('idle');
   let copError = $state('');
+  let operations = $state(null);
+  let operationsState = $state('idle');
+  let operationsError = $state('');
   let streamState = $state('idle');
   let streamDetail = $state('Not connected');
   let selectedEvidence = $state(null);
@@ -22,7 +23,7 @@
   let auditAction = $state('acknowledged');
   let auditTargetKind = $state('recommendation');
   let auditTargetID = $state('');
-  let auditNote = $state('Supervisor review recorded for the synthetic demonstration.');
+  let auditNote = $state('Public demo review recorded for the synthetic demonstration.');
   let actionState = $state('idle');
   let actionMessage = $state('');
 
@@ -31,10 +32,11 @@
   let reconnectAttempt = 0;
   let destroyed = false;
 
-  let isSupervisor = $derived(identity === 'supervisor-demo');
-  let roleLabel = $derived(isSupervisor ? 'Supervisor demo identity' : 'Viewer demo identity');
   let copStateRevision = $derived(cop?.state_revision ?? cop?.cop?.state_revision ?? '—');
   let claimItems = $derived(makeClaimItems(cop?.cop));
+  let operationsPresentation = $derived(describeOperations(operations, operationsState));
+  let operationsCapabilities = $derived(arrayOf(operations?.capabilities));
+  let modelRunAgents = $derived(arrayOf(operations?.counts?.model_runs?.by_agent));
 
   onMount(() => {
     void refreshAll();
@@ -55,18 +57,14 @@
     return `${base}/${suffix}`;
   }
 
-  function headersFor(identityRequired = true, additional = {}) {
-    const headers = new Headers(additional);
-    if (identityRequired) {
-      headers.set(identityHeader, identity);
-    }
-    return headers;
+  function headersFor(additional = {}) {
+    return new Headers(additional);
   }
 
-  async function readEnvelope(path, options = {}, identityRequired = true) {
+  async function readEnvelope(path, options = {}) {
     const response = await fetch(apiURL(path), {
       ...options,
-      headers: headersFor(identityRequired, options.headers)
+      headers: headersFor(options.headers)
     });
     let body = {};
     try {
@@ -81,7 +79,7 @@
   }
 
   async function refreshAll() {
-    await Promise.all([loadPublicStatus(), loadCOP()]);
+    await Promise.all([loadPublicStatus(), loadCOP(), loadOperations()]);
     connectStream();
   }
 
@@ -89,8 +87,8 @@
     health = { state: 'loading', detail: 'Checking health' };
     version = { state: 'loading', detail: 'Checking version' };
     const [healthResult, versionResult] = await Promise.allSettled([
-      readEnvelope('health', {}, false),
-      readEnvelope('version', {}, false)
+      readEnvelope('health'),
+      readEnvelope('version')
     ]);
     health = healthResult.status === 'fulfilled'
       ? { state: 'ready', detail: healthResult.value?.status || 'ok' }
@@ -113,15 +111,19 @@
     }
   }
 
-  function selectIdentity(nextIdentity) {
-    if (identity === nextIdentity) {
-      return;
+  async function loadOperations({ quiet = false } = {}) {
+    if (!quiet) {
+      operationsState = 'loading';
     }
-    identity = nextIdentity;
-    selectedEvidence = null;
-    evidenceState = 'idle';
-    evidenceError = '';
-    void refreshAll();
+    operationsError = '';
+    try {
+      operations = await readEnvelope('operations');
+      operationsState = Number(operations?.counts?.unprojected_events || 0) > 0 ? 'degraded' : 'ready';
+    } catch (error) {
+      operations = null;
+      operationsState = 'unavailable';
+      operationsError = error.message;
+    }
   }
 
   function applyAPIBase() {
@@ -203,6 +205,7 @@
       streamState = 'live';
       streamDetail = 'Live updates connected';
       reconnectAttempt = 0;
+      void loadOperations({ quiet: true });
       await consumeSSE(response.body, controller.signal);
       if (!controller.signal.aborted) {
         throw new Error('The evidence stream ended.');
@@ -289,6 +292,7 @@
     // P08's named event means the read model changed. Re-reading the COP keeps
     // the dashboard deterministic even when an event's payload is only a notice.
     void loadCOP();
+    void loadOperations({ quiet: true });
   }
 
   function submitBriefing(event) {
@@ -421,6 +425,52 @@
     }).format(date);
   }
 
+  function formatNumber(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? new Intl.NumberFormat().format(number) : '—';
+  }
+
+  function formatUptime(seconds) {
+    const total = Math.max(0, Math.floor(Number(seconds) || 0));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const remainder = total % 60;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    if (minutes > 0) return `${minutes}m ${remainder}s`;
+    return `${remainder}s`;
+  }
+
+  function describeOperations(snapshot, state) {
+    if (state === 'loading' || state === 'idle') {
+      return { state: 'loading', label: 'Collecting', detail: 'Reading bounded operational records.' };
+    }
+    if (state === 'unavailable') {
+      return { state: 'unavailable', label: 'Unavailable', detail: 'The bounded operations read model is not available.' };
+    }
+    const unprojected = Number(snapshot?.counts?.unprojected_events || 0);
+    if (unprojected > 0) {
+      return {
+        state: 'degraded',
+        label: 'Degraded',
+        detail: `${formatNumber(unprojected)} canonical event${unprojected === 1 ? '' : 's'} have no projection receipt.`
+      };
+    }
+    if (snapshot?.recovery?.status === 'recovered') {
+      return { state: 'recovered', label: 'Recovered', detail: 'Deterministic recovery completed for this observation.' };
+    }
+    return { state: 'ready', label: 'Observed', detail: 'Bounded records are available for this observation.' };
+  }
+
+  function outcomeSummary(statuses) {
+    const values = statuses || {};
+    return [
+      ['valid', values.valid],
+      ['invalid', values.invalid],
+      ['refused', values.refused],
+      ['failed', values.failed],
+      ['timed out', values.timed_out]
+    ].map(([label, count]) => `${label} ${formatNumber(count || 0)}`).join(' · ');
+  }
   function safeArtifact(value) {
     if (Array.isArray(value)) return value.map(safeArtifact);
     if (value && typeof value === 'object') {
@@ -449,7 +499,7 @@
     <span>Mosaic</span>
     <small>evidence ledger</small>
   </a>
-  <p class="scope">Synthetic demo · local only · no operational actions</p>
+  <p class="scope">Synthetic demo · single instance · no external actions</p>
   <div class="connection-pill" data-state={streamState} aria-live="polite">
     <span aria-hidden="true"></span>
     {streamState === 'live' ? 'Live' : streamState === 'reconnecting' ? 'Reconnecting' : 'Checking'}
@@ -459,17 +509,9 @@
 <main class="folio">
   <aside class="context-rail" aria-label="Demo context">
     <section class="rail-section">
-      <p class="eyebrow">Identity</p>
+      <p class="eyebrow">Public demo</p>
       <h1>Read the record.<br />Keep judgment human.</h1>
-      <p class="rail-copy">{roleLabel}. The identity is a fixed demo control, not production authentication.</p>
-      <div class="identity-switch" aria-label="Choose demo identity">
-        <button class:active={identity === 'viewer-demo'} aria-pressed={identity === 'viewer-demo'} onclick={() => selectIdentity('viewer-demo')}>
-          <span>Viewer</span><small>Inspect only</small>
-        </button>
-        <button class:active={identity === 'supervisor-demo'} aria-pressed={identity === 'supervisor-demo'} onclick={() => selectIdentity('supervisor-demo')}>
-          <span>Supervisor</span><small>Record review</small>
-        </button>
-      </div>
+      <p class="rail-copy">This synthetic demonstration is open to anyone. Review calls append an immutable record; they never dispatch an external action.</p>
     </section>
 
     <section class="rail-section connection-form">
@@ -481,6 +523,7 @@
         <div><dt>Health</dt><dd data-state={health.state}>{health.detail}</dd></div>
         <div><dt>Version</dt><dd data-state={version.state}>{version.detail}</dd></div>
         <div><dt>Stream</dt><dd data-state={streamState}>{streamDetail}</dd></div>
+        <div><dt>Operations</dt><dd data-state={operationsPresentation.state}>{operationsPresentation.label}</dd></div>
       </dl>
     </section>
 
@@ -559,8 +602,119 @@
       <div>
         <p class="claim-class recommended">Human-review recommendation</p>
         <h3>No recommendation artifact is exposed by this read surface.</h3>
-        <p>A supervisor may record a review only against an existing recommendation or insight ID. This never executes an operational action.</p>
+        <p>A public demo review may be recorded only against an existing recommendation or insight ID. This never executes an operational action.</p>
       </div>
+    </section>
+    <section class="operations-receipt" aria-labelledby="operations-title" data-state={operationsPresentation.state}>
+      <div class="operations-heading">
+        <div>
+          <p class="eyebrow">Agent operations</p>
+          <h2 id="operations-title">Operations receipt</h2>
+          <p>{operationsPresentation.detail}</p>
+        </div>
+        <div class="recovery-stamp" data-state={operationsPresentation.state} aria-label={`Operations state: ${operationsPresentation.label}`}>
+          <span>DETERMINISTIC</span>
+          <strong>{operationsPresentation.label}</strong>
+        </div>
+      </div>
+
+      {#if operationsState === 'loading' || operationsState === 'idle'}
+        <div class="operations-empty" aria-live="polite">Reading the bounded operations record…</div>
+      {:else if operationsState === 'unavailable'}
+        <div class="operations-empty operations-problem" role="alert">
+          <strong>Operations view unavailable</strong>
+          <p>{operationsError || operationsPresentation.detail}</p>
+          <button class="quiet-button" onclick={() => loadOperations()}>Try again</button>
+        </div>
+      {:else}
+        <div class="receipt-body">
+          <dl class="receipt-facts">
+            <div><dt>Observed</dt><dd>{formatTimestamp(operations?.observed_at)}</dd></div>
+            <div><dt>Source receipt</dt><dd>{formatTimestamp(operations?.latest_source_received_at)}</dd></div>
+            <div><dt>COP recovery</dt><dd>{operations?.recovery?.status || 'Not recorded'} · revision {formatNumber(operations?.recovery?.state_revision)}</dd></div>
+            <div><dt>Projected</dt><dd>{formatTimestamp(operations?.recovery?.projected_at)}</dd></div>
+            <div><dt>Service</dt><dd>{operations?.service?.version || 'Unknown'} · up {formatUptime(operations?.service?.uptime_seconds)}</dd></div>
+            <div><dt>Local stream</dt><dd>{formatNumber(operations?.stream?.local_subscriber_count)} subscriber{Number(operations?.stream?.local_subscriber_count) === 1 ? '' : 's'} · {operations?.stream?.last_published?.name || 'no event published'}</dd></div>
+            {#if operations?.stream?.last_published?.published_at}
+              <div><dt>Last stream event</dt><dd>{formatTimestamp(operations.stream.last_published.published_at)}</dd></div>
+            {/if}
+          </dl>
+
+          <div class="operations-ledgers">
+            <section class="durable-tally" aria-labelledby="durable-tally-title">
+              <div class="subsection-heading">
+                <p class="eyebrow">Immutable record</p>
+                <h3 id="durable-tally-title">Durable ledger</h3>
+              </div>
+              <dl>
+                <div><dt>Raw</dt><dd>{formatNumber(operations?.counts?.raw_events)}</dd></div>
+                <div><dt>Canonical</dt><dd>{formatNumber(operations?.counts?.canonical_events)}</dd></div>
+                <div><dt>Projected</dt><dd>{formatNumber(operations?.counts?.projected_events)}</dd></div>
+                <div><dt>Unprojected</dt><dd>{formatNumber(operations?.counts?.unprojected_events)}</dd></div>
+                <div><dt>Checkpoints</dt><dd>{formatNumber(operations?.counts?.checkpoints)}</dd></div>
+                <div><dt>Insights</dt><dd>{formatNumber(operations?.counts?.insights)}</dd></div>
+                <div><dt>Recommendations</dt><dd>{formatNumber(operations?.counts?.recommendations)}</dd></div>
+                <div><dt>Audit records</dt><dd>{formatNumber(operations?.counts?.audit_records)}</dd></div>
+              </dl>
+            </section>
+
+            <section class="lifecycle-tally" aria-labelledby="lifecycle-tally-title">
+              <div class="subsection-heading">
+                <p class="eyebrow">Fixture normalizer</p>
+                <h3 id="lifecycle-tally-title">Luna lifecycle</h3>
+              </div>
+              <dl>
+                <div><dt>Accepted</dt><dd>{formatNumber(operations?.counts?.luna_lifecycle?.accepted)}</dd></div>
+                <div><dt>Repaired</dt><dd>{formatNumber(operations?.counts?.luna_lifecycle?.repaired)}</dd></div>
+                <div><dt>Quarantined</dt><dd>{formatNumber(operations?.counts?.luna_lifecycle?.quarantined)}</dd></div>
+                <div><dt>Rejected</dt><dd>{formatNumber(operations?.counts?.luna_lifecycle?.rejected)}</dd></div>
+              </dl>
+              <p class="lifecycle-note">Lifecycle outcomes are recorded; only accepted and repaired records can enter deterministic projection.</p>
+            </section>
+          </div>
+
+          <section class="model-record" aria-labelledby="model-record-title">
+            <div class="subsection-heading">
+              <p class="eyebrow">Structured-model record</p>
+              <h3 id="model-record-title">Model runs <span>{formatNumber(operations?.counts?.model_runs?.total)}</span></h3>
+            </div>
+            <p>These are persisted invocation outcomes, not evidence of live Terra or Sol transport.</p>
+            <dl class="model-run-list">
+              {#each modelRunAgents as agent (agent.agent)}
+                <div>
+                  <dt>{agent.agent}</dt>
+                  <dd><strong>{formatNumber(agent.total)} run{Number(agent.total) === 1 ? '' : 's'}</strong>{outcomeSummary(agent.validation_statuses)}</dd>
+                </div>
+              {/each}
+            </dl>
+          </section>
+
+          <section class="capability-docket" aria-labelledby="capability-docket-title">
+            <div class="capability-heading">
+              <div>
+                <p class="eyebrow">Capability docket</p>
+                <h3 id="capability-docket-title">What is composed — and what is not</h3>
+              </div>
+              <p>Mode and status are statements of this demo’s current evidence boundary.</p>
+            </div>
+            <ul class="capability-cards">
+              {#each operationsCapabilities as capability (capability.capability)}
+                <li data-mode={capability.mode} data-status={capability.status}>
+                  <div class="capability-card-topline">
+                    <code>{capability.capability.replaceAll('_', ' ')}</code>
+                    <span>{capability.mode.replaceAll('_', ' ')}</span>
+                  </div>
+                  <h4>{capability.feature}</h4>
+                  <p>{capability.detail}</p>
+                  <strong>{capability.status}</strong>
+                </li>
+              {/each}
+            </ul>
+          </section>
+
+          <p class="operations-limits">No live Terra/Sol transport. No durable reconciliation worker. No external operational action.</p>
+        </div>
+      {/if}
     </section>
   </section>
 
@@ -569,7 +723,7 @@
       <p class="eyebrow">Evidence resolution</p>
       <h2>{selectedEvidence?.label || 'Select a ledger item'}</h2>
       {#if evidenceState === 'idle'}
-        <p class="panel-copy">Every evidence button calls the authenticated P08 resolver. Raw source payload bytes are never shown here by default.</p>
+        <p class="panel-copy">Every evidence button calls the public resolver. Raw source payload bytes are never shown here by default.</p>
       {:else if evidenceState === 'loading'}
         <p class="panel-copy" aria-live="polite">Resolving cited artifact…</p>
       {:else if evidenceState === 'error'}
@@ -587,37 +741,33 @@
     </section>
 
     <section class="review-panel">
-      <p class="eyebrow">Supervisor review</p>
-      {#if isSupervisor}
-        <p class="panel-copy">These calls append immutable demo audit records. They are visibly non-operational.</p>
-        <form onsubmit={submitBriefing}>
-          <label for="briefing-note">Briefing request note</label>
-          <textarea id="briefing-note" bind:value={briefingNote} rows="3"></textarea>
-          <button class="review-button" disabled={actionState === 'loading'}>Record briefing request <span>executed: false</span></button>
-        </form>
-        <form onsubmit={submitAuditAction}>
-          <label for="audit-action">Review action</label>
-          <select id="audit-action" bind:value={auditAction}>
-            <option value="acknowledged">Acknowledge</option>
-            <option value="rejected">Reject</option>
-            <option value="noted">Note</option>
-          </select>
-          <label for="audit-kind">Artifact kind</label>
-          <select id="audit-kind" bind:value={auditTargetKind}>
-            <option value="recommendation">Recommendation</option>
-            <option value="insight">Insight</option>
-          </select>
-          <label for="audit-target">Resolvable artifact ID</label>
-          <input id="audit-target" bind:value={auditTargetID} placeholder="recommendation-domestic-001" required />
-          <label for="audit-note">Review note</label>
-          <textarea id="audit-note" bind:value={auditNote} rows="3"></textarea>
-          <button class="review-button" disabled={actionState === 'loading'}>Record review <span>executed: false</span></button>
-        </form>
-        {#if actionState !== 'idle'}
-          <p class:problem={actionState === 'error'} class="action-result" aria-live="polite">{actionMessage || 'Recording immutable audit record…'}</p>
-        {/if}
-      {:else}
-        <p class="panel-copy">Viewer identity has no action controls. Select the fixed supervisor demo identity to record a non-operational briefing request or review.</p>
+      <p class="eyebrow">Public review</p>
+      <p class="panel-copy">These public-demo calls append immutable audit records. They are visibly non-operational and never dispatch an external action.</p>
+      <form onsubmit={submitBriefing}>
+        <label for="briefing-note">Briefing request note</label>
+        <textarea id="briefing-note" bind:value={briefingNote} rows="3"></textarea>
+        <button class="review-button" disabled={actionState === 'loading'}>Record briefing request <span>executed: false</span></button>
+      </form>
+      <form onsubmit={submitAuditAction}>
+        <label for="audit-action">Review action</label>
+        <select id="audit-action" bind:value={auditAction}>
+          <option value="acknowledged">Acknowledge</option>
+          <option value="rejected">Reject</option>
+          <option value="noted">Note</option>
+        </select>
+        <label for="audit-kind">Artifact kind</label>
+        <select id="audit-kind" bind:value={auditTargetKind}>
+          <option value="recommendation">Recommendation</option>
+          <option value="insight">Insight</option>
+        </select>
+        <label for="audit-target">Resolvable artifact ID</label>
+        <input id="audit-target" bind:value={auditTargetID} placeholder="recommendation-domestic-001" required />
+        <label for="audit-note">Review note</label>
+        <textarea id="audit-note" bind:value={auditNote} rows="3"></textarea>
+        <button class="review-button" disabled={actionState === 'loading'}>Record review <span>executed: false</span></button>
+      </form>
+      {#if actionState !== 'idle'}
+        <p class:problem={actionState === 'error'} class="action-result" aria-live="polite">{actionMessage || 'Recording immutable audit record…'}</p>
       {/if}
     </section>
   </aside>
