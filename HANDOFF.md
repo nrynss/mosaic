@@ -30,18 +30,24 @@ to the coordinator for integration.
 
 ## Starting point and branch model
 
-The integration branch is `mosaic/v0.1-foundation`. This increment begins from
-`c03ba39` (`docs: reconcile public operations increment`), after P01–P20 and
-their full quality/Docker proof.
+The integration branch is `mosaic/v0.1-foundation`. The increment began at
+`c03ba39` after P01–P20; P21–P23 are now integrated through `8631d4e`.
+Every new claim bases from the latest integrated branch SHA recorded by the
+coordinator, never from an older parcel worktree.
 
 Every implementation parcel uses a new isolated branch and worktree from the
 latest integrated `mosaic/v0.1-foundation` SHA:
 
 ```text
 mosaic/v0.1-foundation
-├─ parcel/P21-fixture-advisory-rfc
-├─ parcel/P22-advisory-history-contracts
-└─ parcel/P23-advisory-history-store
+├─ parcel/P21-fixture-advisory-rfc                 (integrated)
+├─ parcel/P22-advisory-history-contracts           (integrated)
+├─ parcel/P23-advisory-history-store                (integrated)
+├─ parcel/P24-fixture-advisory-replay               (ready; unclaimed)
+├─ parcel/P25-public-advisory-api                   (ready; unclaimed)
+├─ parcel/P26-advisory-dashboard                    (waits for P25)
+├─ parcel/P27-advisory-composition                  (waits for P24/P25)
+└─ parcel/P28-advisory-acceptance                   (waits for P26/P27)
 ```
 
 Do not reuse a prior P01–P20 worktree. Do not claim a row until all of its
@@ -54,6 +60,11 @@ prerequisites are marked `✅ Integrated` on this board.
 | P21 | Re-baseline the handoff and record RFC-0003's fixture-only advisory decision | P20 | `HANDOFF.md`, `docs/archive/HANDOFF-v0.1-foundation.md`, `docs/rfcs/RFC-0003-fixture-advisory-composition.md` | ✅ Integrated — `48d96c8` |
 | P22 | Add the additive, read-only advisory-history contract and regenerate checked-in GoMock output | P21 | `internal/contracts/**` | ✅ Integrated — `17a4cde` |
 | P23 | Implement deterministic SQLite reads for the P22 advisory history contract; no migration | P22 | `internal/store/**` | ✅ Integrated — `8cbc905` |
+| P24 | Deterministic fixture Terra/Sol replay with immutable lifecycle/audit history | P22, P23 | `internal/simulator/**` | ⬜ Ready — unclaimed |
+| P25 | Bounded public advisory API and truthful advisory capability status | P22, P23 | `internal/api/**` | ⬜ Ready — unclaimed |
+| P26 | Advisory-history dashboard cards, evidence links, and supersession presentation | P25 | `ui/**` | ⬜ Not claimable until P25 integrates |
+| P27 | Local executable composition of fixture replay, advisory history, and public API | P24, P25 | `cmd/mosaicdemo/**` | ⬜ Not claimable until P24/P25 integrate |
+| P28 | Public advisory API/UI/Docker/runbook acceptance proof | P26, P27 | `tests/e2e/**`, `docs/runbook/**` | ⬜ Not claimable until P26/P27 integrate |
 
 ## P22 builder brief — advisory-history contract
 
@@ -124,14 +135,162 @@ is a query adapter, not a migration and not a write path.
 - `go vet ./internal/store/...`, `go test ./internal/store/...`, and
   `task quality` pass.
 
+## P24 builder brief — fixture advisory replay
+
+### Goal
+
+Extend only `internal/simulator/` with an explicit fixture-advisory replay
+entry point. It must use the existing P10 Terra and P11 Sol services with local
+fixture clients, never a network or live model client. It consumes the loaded
+P04 expected outcomes plus P22/P23 interfaces; do not change datasets,
+ontology, P10/P11, contracts, store, migrations, or the executable root.
+
+### Required behavior
+
+- Replay the exact historical phases using the scenario's rev-7 and rev-9
+  timeline snapshots, not the final COP:
+  1. Terra active Insight at rev 7;
+  2. fixture `briefing_requested` Audit Record;
+  3. Sol Recommendation at rev 7 for `supervisor-demo`;
+  4. Terra obsolete Insight at rev 9; and
+  5. fixture recommendation acknowledgement Audit Record.
+- Validate candidate outputs through P10/P11, cite only permitted persisted
+  evidence, and create deterministic fixture Model Run identities/clocks.
+- Commit each Model Run/output pair through the existing transaction seam.
+  An intact restart appends no duplicate artifact. An absent stage may run; a
+  partial stage is an integrity error and must stop without rewriting history.
+- The fixture service is not a projector, cannot alter COP state, and cannot
+  make an operational call. It uses no credentials, GGUF, shell, or network.
+
+### Acceptance
+
+- Focused simulator tests prove fresh replay, intact-restart idempotency,
+  rev-7/rev-9 snapshot selection, evidence/lifecycle correctness, and partial
+  stage failure.
+- Tests prove a refusal/invalid fixture response records the Model Run but
+  creates no Insight/Recommendation and changes no COP.
+- `go vet ./internal/simulator/...`, `go test ./internal/simulator/...`, and
+  `go run ./cmd/mosaic quality` pass.
+
+## P25 builder brief — public advisory API
+
+### Goal
+
+Add only `internal/api/` support for a bounded public `GET /api/v1/advisories`
+read model. Consume `contracts.AdvisoryHistoryReader` through `api.Config`; do
+not query SQLite directly, compose a fixture, or change persistence.
+
+### Required behavior
+
+- Add a distinct policy action and route. The public default allows it; an
+  injected deny policy must return the established denied response.
+- Recover the COP, read the P22 history, and return only cited Insight and
+  Recommendation artifacts plus minimal lifecycle/composition status. Never
+  return raw payloads, checksums, prompts, model responses, secrets, or generic
+  Audit Record/Model Run contents.
+- Derive `historical`, `current`, `superseded`, and `not_current` strictly from
+  the recovered revision, Insight lifecycle links, and cited evidence. The
+  rev-7 fixture recommendation is not current at rev 9.
+- Make operations capability status configuration-driven: fixture-composed only
+  when composition explicitly supplies it; otherwise unavailable. Preserve all
+  P17 public actor/policy behavior and existing route responses.
+
+### Acceptance
+
+- API tests prove public no-header reads, replacement-policy denial, bounded
+  serialization, resolver/history failure handling, and rev-9 status results.
+- Tests prove an empty/uncomposed history never claims live Terra/Sol transport.
+- `go vet ./internal/api/...`, `go test ./internal/api/...`, and
+  `go run ./cmd/mosaic quality` pass.
+
+## P26 builder brief — advisory dashboard
+
+### Goal
+
+Update only `ui/` to render P25's bounded advisory response. Do not infer an
+assessment from COP facts or hard-code fixture IDs as a substitute for the API.
+
+### Required behavior
+
+- Replace withheld advisory placeholders with evidence-resolvable historical
+  Insight/Recommendation cards when the API supplies them.
+- Label the rev-7 active Insight as superseded and its Recommendation as not
+  current after the rev-9 correction. Show no current assessment or advice in
+  that state.
+- Keep explicit fixture-composed versus live-transport-unavailable language.
+  Review affordances may prefill a supported immutable target, but every write
+  remains the existing `executed: false` audit operation.
+- Preserve raw-payload omission, existing COP/evidence behavior, and public
+  no-header operation. No API, composition, or CSS outside `ui/**` is owned.
+
+### Acceptance
+
+- Svelte checks cover ready, empty, unavailable, superseded, and not-current
+  display states without raw/model-response leakage.
+- `npm run check`, `npm run build`, and `go run ./cmd/mosaic quality` pass.
+
+## P27 builder brief — executable advisory composition
+
+### Goal
+
+Update only `cmd/mosaicdemo/` so local startup composes the frozen scenario,
+P24 fixture-advisory replay, P23 history reader, and P25 public API before the
+existing static dashboard is served.
+
+### Required behavior
+
+- Startup remains local, synthetic, single-instance, and fixture-only. It does
+  not construct a live model client or operational-system client.
+- A fresh database persists the deterministic scenario and one complete
+  advisory history. Reopening a retained SQLite file verifies/reuses that exact
+  history without duplicates; an incomplete sequence stops startup visibly.
+- Inject the history reader and explicit fixture-composed capability state into
+  P25. Retain the public actor/policy defaults and guarded static UI host.
+- Do not alter UI source, API source, simulator source, Docker files, datasets,
+  migrations, or module dependencies.
+
+### Acceptance
+
+- Package tests prove fresh startup exposes the public advisory endpoint and
+  a retained-volume restart adds no advisory records.
+- Tests prove uncomposed/live transport is never selected and partial history
+  is surfaced as an error.
+- `go vet ./cmd/mosaicdemo/...`, `go test ./cmd/mosaicdemo/...`, and
+  `go run ./cmd/mosaic quality` pass.
+
+## P28 builder brief — advisory acceptance and runbook
+
+### Goal
+
+Update only end-to-end proof and the local Docker runbook for the composed
+fixture advisory story. The image and Compose files are exercised but not
+modified unless the coordinator opens a dedicated Docker parcel.
+
+### Required behavior and acceptance
+
+- E2E/public proof uses the executable composition, no identity header, and
+  verifies rev-9 COP, bounded `/api/v1/advisories` fields, superseded/not-current
+  wording, evidence resolution, and immutable `executed: false` review writes.
+- Restart proof verifies a retained SQLite volume does not duplicate fixture
+  Insights, Recommendations, Model Runs, or fixture Audit Records.
+- Runbook documents the fixture-only history, exact public checks, retained
+  volume behavior, and continued absence of live model/reconciliation/external
+  action claims.
+- Run Svelte check/build, `go run ./cmd/mosaic quality`, and a fresh isolated
+  Docker build/start/smoke. Report each command verbatim.
 ## Shared-file mutexes
 
 | Path | Owner / rule |
 |---|---|
-| `AGENTS.md`, `HANDOFF.md`, `docs/rfcs/**`, `docs/archive/**` | Coordinator / P21 only for this increment |
-| `internal/contracts/**` | P22 only; every cross-package shape is additive and generated mocks stay current |
-| `internal/store/**` | P23 only; no migrations or schema edits are permitted |
-| `ontology/**`, `internal/ontology/**`, `migrations/**`, `go.mod`, `go.sum`, `Taskfile.yml` | Frozen for P21–P23 |
+| `AGENTS.md`, `HANDOFF.md`, `docs/rfcs/**`, `docs/archive/**` | Coordinator only; external builders do not edit coordination documents |
+| `internal/contracts/**` | P22 integrated; frozen unless a new dedicated contract parcel is approved |
+| `internal/store/**` | P23 integrated; frozen unless a new dedicated store parcel is approved |
+| `internal/simulator/**` | P24 only while claimed |
+| `internal/api/**` | P25 only while claimed |
+| `ui/**` | P26 only while claimed |
+| `cmd/mosaicdemo/**` | P27 only while claimed |
+| `tests/e2e/**`, `docs/runbook/**` | P28 only while claimed |
+| `ontology/**`, `internal/ontology/**`, `migrations/**`, `go.mod`, `go.sum`, `Taskfile.yml`, `Dockerfile`, `docker-compose.yml` | Frozen for P24–P28 unless the coordinator opens a dedicated parcel |
 
 ## Integration and external handoff template
 
@@ -152,14 +311,19 @@ Unrelated changes: none
 The coordinator verifies the diff is within the parcel's owned paths, merges
 the parcel, reruns the complete quality gate, then records `✅ Integrated`.
 
-## Future sequence — not yet claimable
+## Execution waves and claim rules
 
-After P23, the coordinator will open dedicated parcels for fixture advisory
-replay, the bounded public advisory API, dashboard presentation, executable
-composition, and end-to-end/Docker proof. Those parcels are deliberately not
-pre-claimed here: their exact paths and acceptance criteria depend on the P22
-contract and P23 reader as integrated, not merely proposed, shapes.
+```text
+Wave A:  P24 fixture replay ∥ P25 public advisory API
+Wave B:  P26 dashboard (after P25) ∥ P27 executable composition (after P24/P25)
+Wave C:  P28 end-to-end/Docker/runbook proof (after P26/P27)
+```
 
+P24 and P25 are the only ready but unclaimed rows. They may be claimed in
+parallel by different builders after the coordinator records each branch,
+worktree, base SHA, and owner. P26–P28 must remain unclaimed until their stated
+prerequisites are `✅ Integrated`; no builder should pre-create a branch or edit
+its paths early.
 ## Notes
 
 Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
@@ -170,3 +334,4 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-19 P22 integrated by coordinator — `17a4cde`; reviewed the additive contract/mock change and reran `go run ./cmd/mosaic quality` successfully.
 - 2026-07-19 P23 claimed by coordinator — base `bec2744`, branch `parcel/P23-advisory-history-store`, worktree `.worktrees/P23-advisory-history-store`; deterministic SQLite advisory-history reads only, with no migrations.
 - 2026-07-19 P23 integrated by coordinator — `8cbc905`; bounded read-only SQLite history now filters Terra/Sol Model Runs, orders real RFC-3339 instants deterministically, and fails closed for selected corrupt records; full quality passed.
+- 2026-07-19 P24–P28 planned by coordinator — RFC-0003 and this board now contain exclusive ownership, dependencies, acceptance proof, waves, and external-builder handoff instructions; P24/P25 are ready but unclaimed.

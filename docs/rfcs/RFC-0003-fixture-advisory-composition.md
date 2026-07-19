@@ -1,11 +1,12 @@
 # RFC-0003: Fixture Advisory Composition
 
-- **Status:** Accepted — P21 design; P22/P23 implementation prerequisites
+- **Status:** Accepted — P21–P23 integrated; P24–P28 planned
 - **Owner:** Mosaic coordinator
 - **Decision date:** 2026-07-19
 - **Depends on:** [RFC-0001](RFC-0001-mosaic-demo-foundation.md), [RFC-0002](RFC-0002-public-pluggability-and-agent-observability.md)
-- **Implementation snapshot:** P01–P20 integrated; P21 establishes the
-  contract and SQLite read prerequisites for the next fixture-only increment.
+- **Implementation snapshot:** P01–P23 integrated. The fixture advisory
+  contract and deterministic SQLite reader are complete; P24–P28 remain
+  unclaimed implementation and acceptance parcels.
 
 ## 1. Decision
 
@@ -119,22 +120,83 @@ The existing P04 fixture is the sole source for advisory IDs, text, evidence,
 and lifecycle state. No new synthetic data needs to be generated and no model
 inference should occur during a normal build or test.
 
-## 7. Acceptance sequence
+## 7. Parcel plan and acceptance sequence
 
-P21–P23 establish the prerequisites:
+P21–P23 are integrated. The remaining parcels are independently claimable only
+when their listed prerequisites are integrated on `HANDOFF.md`.
 
-1. Archive the completed v0.1 handoff, create a fresh live handoff, and record
-   this decision.
-2. Add/regenerate the advisory-history contract and mock.
-3. Add deterministic SQLite reads over the existing immutable records with no
-   migration.
+| Parcel | Purpose | Prereqs | Exclusive ownership | Acceptance boundary |
+|---|---|---|---|---|
+| P21 | Archive the completed v0.1 board, establish RFC-0003, and create the new live handoff. | P20 | Coordinator docs/board paths | New cycle is externally handoff-ready. |
+| P22 | Add `AdvisoryHistoryReader` and generated mocks. | P21 | `internal/contracts/**` | Additive bounded contract compiles and regenerates. |
+| P23 | Implement the read-only SQLite advisory-history adapter. | P22 | `internal/store/**` | Terra/Sol filtering, actual-instant ordering, empty history, and fail-closed decode/timestamp behavior. |
+| P24 | Replay the frozen Terra/Sol advisory lifecycle through P10/P11 fixture clients. | P22, P23 | `internal/simulator/**` | Fresh/restart-safe immutable fixture history; no network or COP mutation. |
+| P25 | Add the bounded public advisory read endpoint and accurate capability status. | P22, P23 | `internal/api/**` | Public evidence-backed history with no raw/model-response leakage. |
+| P26 | Render the bounded advisory history and supersession state. | P25 | `ui/**` | Rev-7 advice is visibly historical/not current at revision 9. |
+| P27 | Compose P24/P25 into local executable startup. | P24, P25 | `cmd/mosaicdemo/**` | Fresh and retained-volume startup are idempotent and fixture-only. |
+| P28 | Prove the public API/UI/Docker/runbook boundary end-to-end. | P26, P27 | `tests/e2e/**`, `docs/runbook/**` | No-header public proof, supersession proof, restart proof, and Docker smoke. |
 
-The coordinator then defines the follow-on composition/API/UI/acceptance
-parcels against the integrated P22/P23 shapes. The final increment acceptance
-will prove fresh and restart-safe fixture composition, public bounded reads,
-supersession language, immutable `executed: false` review writes, and the full
-quality/Docker gate.
+The planned waves are:
 
+```text
+P21 → P22 → P23
+P24 ∥ P25
+P26 (after P25) ∥ P27 (after P24 and P25)
+P28 (after P26 and P27)
+```
+
+### P24 fixture replay acceptance
+
+P24 consumes only the frozen `domestic-disturbance` fixture and the P22/P23
+interfaces. It uses the existing P10 Terra and P11 Sol services with local
+fixture clients, fixed clocks, and deterministic fixture Model Run identifiers.
+It must preserve this sequence:
+
+1. validate/persist the active rev-7 Terra Insight;
+2. append the fixture's immutable briefing-request Audit Record;
+3. validate/persist the rev-7 Sol Recommendation for `supervisor-demo`;
+4. validate/persist the rev-9 Terra obsolescence Insight; and
+5. append the fixture's immutable supervisor acknowledgement Audit Record.
+
+The replay must use rev-7 and rev-9 COP snapshots from the deterministic
+scenario timeline, not infer state from the final COP. It must use transactions
+for each structured Model Run/output pair, recognize an intact replay on
+restart without appending duplicates, and fail closed on a partial fixture
+stage. It may not alter source-derived COP state, fixture data, ontology,
+P10/P11 source, migrations, or create any live transport.
+
+### P25 public advisory acceptance
+
+P25 adds one public, versioned `GET /api/v1/advisories` route and its policy
+action. It receives only `contracts.AdvisoryHistoryReader` plus recovered COP
+state through API configuration. The response may expose evidence-cited
+Insight/Recommendation artifacts and bounded lifecycle/composition status, but
+must not expose Model Run prompts/responses, raw payloads, checksums,
+credentials, or generic Audit Record history. It must classify the fixture's
+final state as historical/superseded/not current, not as current advice.
+
+The operations receipt must report `fixture_composed` only when composition
+explicitly supplies that mode; the API default stays unavailable for fixture
+advisory composition. Public no-header access and a replaceable deny policy
+must both be tested. Existing routes retain their behavior.
+
+### P26–P28 presentation and executable acceptance
+
+P26 renders only the P25 bounded response. It must offer evidence resolution
+and prefill a permitted immutable review target without inventing a new action.
+It must show the rev-7 recommendation as not current after rev-9 and retain the
+explicit absence of live Terra/Sol transport.
+
+P27 composes the frozen scenario, P24 replay, P23 history reader, and P25 API
+before serving the existing dashboard. A fresh SQLite file and a retained
+SQLite volume must produce one identical fixture history; startup must make no
+network request and may not silently repair a partial advisory sequence.
+
+P28 proves no-header public endpoint/UI behavior, bounded-field exclusion,
+rev-9 supersession language, immutable `executed: false` public review writes,
+restart idempotency, UI check/build, and the fresh isolated Docker smoke. The
+Docker image continues to contain no model binary, live model client, or
+operational-system client.
 ## 8. Non-negotiable boundary
 
 This RFC does not make Mosaic a live advisor. It makes a frozen synthetic
