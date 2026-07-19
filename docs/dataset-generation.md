@@ -1,7 +1,7 @@
 # Synthetic dataset generation
 
 `datasetgen` is a data-production tool, not part of the Mosaic runtime. For the
-P29 demonstration candidate it uses Cerebras `gemma-4-31b` to produce one
+P30 demonstration candidate it uses Cerebras `gemma-4-31b` to produce one
 **staged candidate**. The demo, Docker image, Luna, Terra, and Sol do not call
 Cerebras, load a model, or invoke this command.
 
@@ -10,17 +10,16 @@ provider. Do not place real operational records, personal data, credentials, or
 unreviewed model output in the repository. Generated candidates live only under
 ignored `localmodels/staging/` until a later, explicitly approved promotion.
 
-## P29 provider and request budget
+## P30 provider and request budget
 
-P29 permits only the public Cerebras Chat Completions endpoint and the model
+P30 permits only the public Cerebras Chat Completions endpoint and the model
 `gemma-4-31b`. Its credential is read only from `CEREBRAS_API_KEY` in the
 current process; it is never accepted as a command-line flag, recorded in
 provenance, or written to disk.
 
 The budget is deliberately small:
 
-- one no-data readiness smoke;
-- at most one fixed-seed candidate request; and
+- one fixed-seed candidate request; and
 - no automatic retries.
 
 Stop after a rate limit, timeout, refusal, transport failure, or invalid model
@@ -50,10 +49,10 @@ parameters, candidate validation, human review, and explicit freeze promotion.
 
    ```powershell
    go run ./cmd/datasetgen generate-cerebras `
-     --prompt "prompts\datasetgen\v1.md" `
-     --stage "localmodels\staging\domestic-disturbance-v2" `
+     --prompt "prompts\datasetgen\v2.md" `
+     --stage "localmodels\staging\domestic-disturbance-v3" `
      --scenario domestic-disturbance `
-     --seed 20260720
+     --seed 20260721
    ```
 
    The command compiles the current read-only schemas, builds a bounded
@@ -83,11 +82,13 @@ parameters, candidate validation, human review, and explicit freeze promotion.
 
    ```powershell
    go run ./cmd/datasetgen validate-stage `
-     --input "localmodels\staging\domestic-disturbance-v2"
+     --input "localmodels\staging\domestic-disturbance-v3"
    ```
 
-4. Review the staged JSON. A candidate is intentionally not admitted to
-   `datasets/` merely because it parses. Verify that it is synthetic-only and
+4. Review the staged JSON. P29's rejected `v2` stage is immutable evidence;
+   P30 uses the new `v3` stage and the separate versioned v2 prompt. A candidate
+   is intentionally not admitted to
+   datasets/ merely because it parses. Verify that it is synthetic-only and
    that its manifest, scenario, event ordering, corrections, IDs, evidence, and
    expected outcomes are internally consistent. Invalid candidates remain in
    staging for inspection.
@@ -98,8 +99,8 @@ parameters, candidate validation, human review, and explicit freeze promotion.
 
    ```powershell
    go run ./cmd/datasetgen freeze `
-     --input "localmodels\staging\domestic-disturbance-v2" `
-     --output "datasets\domestic-disturbance-v2"
+     --input "localmodels\staging\domestic-disturbance-v3" `
+     --output "datasets\domestic-disturbance-v3"
    ```
 
    Freeze checks provenance completeness and checksums, proves the staged
