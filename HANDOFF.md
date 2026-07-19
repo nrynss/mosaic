@@ -58,9 +58,9 @@ branch until the deterministic spine is integrated and stable.
 | P15 | Reproducible GoMock tooling and generated contract mocks | P02 | `tools.go`, `internal/contracts/mocks/**`, `go.mod`, `go.sum` | ✅ Integrated — `86caf77` |
 | P16 | RFC-0001 implementation reconciliation | P08–P14 | `docs/rfcs/RFC-0001-mosaic-demo-foundation.md` | ✅ Integrated — `db66b80` |
 | P17 | Public actor/policy seam and evidence-backed agent-operations API | P08, P10, P11 | `internal/api/**`, `internal/stream/**` | ✅ Integrated — `3f054b8` |
-| P18 | Agent-operations dashboard panel | P17 | `ui/**` | 🔒 Claimed — `/root/p18_operations_dashboard` |
+| P18 | Agent-operations dashboard panel | P17 | `ui/**` | ✅ Integrated — `df8895e` |
 | P19 | Local executable composition for agent operations | P14, P17 | `cmd/mosaicdemo/**` | ✅ Integrated — `0b60d68` |
-| P20 | Public operations API/UI acceptance and runbook proof | P17–P19 | `tests/e2e/**`, `docs/runbook/**` | ⬜ Ready |
+| P20 | Public operations API/UI acceptance and runbook proof | P17–P19 | `tests/e2e/**`, `docs/runbook/**` | 🔒 Claimed — `/root/p20_public_operations_acceptance` |
 
 ## Waves
 
@@ -166,3 +166,5 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-19 P18 claimed by `/root/p18_operations_dashboard` — base `3f054b8`, branch `parcel/P18-operations-dashboard`, worktree `.worktrees/P18-operations-dashboard`; bounded operations dashboard and truthful capability presentation.
 - 2026-07-19 P19 claimed by `/root/p19_operations_composition` — base `3f054b8`, branch `parcel/P19-operations-composition`, worktree `.worktrees/P19-operations-composition`; compose the local SQLite operations reader only.
 - 2026-07-19 P19 integrated by coordinator — `0b60d68`; executable composes the SQLite operations reader and package test proves public populated operations telemetry.
+- 2026-07-19 P18 integrated by coordinator — `df8895e`; Svelte 5 runes operations receipt builds on Vite 8 with bounded telemetry, explicit limitations, and public-demo review controls.
+- 2026-07-19 P20 claimed by `/root/p20_public_operations_acceptance` — base `df8895e`, branch `parcel/P20-public-operations-acceptance`, worktree `.worktrees/P20-public-operations-acceptance`; final public API, UI, Docker, and runbook proof.
