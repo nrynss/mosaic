@@ -47,7 +47,8 @@ mosaic/v0.1-foundation
 ├─ parcel/P25-public-advisory-api                   (integrated)
 ├─ parcel/P26-advisory-dashboard                    (integrated)
 ├─ parcel/P27-advisory-composition                  (integrated)
-└─ parcel/P28-advisory-acceptance                   (integrated)
+├─ parcel/P28-advisory-acceptance                   (integrated)
+└─ parcel/P29-local-feed-generation                 (claimed by coordinator)
 ```
 
 Do not reuse a prior P01–P20 worktree. Do not claim a row until all of its
@@ -65,6 +66,7 @@ prerequisites are marked `✅ Integrated` on this board.
 | P26 | Advisory-history dashboard cards, evidence links, and supersession presentation | P25 | `ui/**` | ✅ Integrated — `24c7d70` |
 | P27 | Local executable composition of fixture replay, advisory history, and public API | P24, P25 | `cmd/mosaicdemo/**` | ✅ Integrated — `3ecbefb` |
 | P28 | Public advisory API/UI/Docker/runbook acceptance proof | P26, P27 | `tests/e2e/**`, `docs/runbook/**` | ✅ Integrated — `8d15b0b` |
+| P29 | Generate and inspect one local-model synthetic feed candidate for controlled demo playback; do not freeze it yet | P28 | `localmodels/staging/domestic-disturbance-v2/**`, `docs/dataset-generation.md` | 🔒 Claimed — coordinator; base `b050618` |
 
 ## P22 builder brief — advisory-history contract
 
@@ -278,6 +280,43 @@ modified unless the coordinator opens a dedicated Docker parcel.
   action claims.
 - Run Svelte check/build, `go run ./cmd/mosaic quality`, and a fresh isolated
   Docker build/start/smoke. Report each command verbatim.
+`r`n## P29 coordinator brief — local synthetic feed candidate
+
+### Goal
+
+Generate one staged, local-model candidate for a future controlled playback
+demo. The model creates synthetic source-feed artifacts before the demo; a
+later parcel may replay a reviewed, frozen version through the normal
+ingestion path. P29 does not change the checked-in dataset, startup
+composition, public API, UI, or any live-model policy.
+
+### Required behavior
+
+- Use the existing offline `datasetgen` command with a locally installed
+  llama.cpp executable and GGUF. The model and staging directory remain ignored
+  local artifacts; no model binary, generated candidate, credential, or real
+  record may enter Git.
+- Generate only into the initially empty
+  `localmodels/staging/domestic-disturbance-v2/` directory, for scenario
+  `domestic-disturbance` and a recorded fixed seed.
+- Before generation, run the package-generation test and validate the existing
+  frozen fixture. After generation, inspect the staged provenance, manifest,
+  scenario, and a bounded sample of raw events for synthetic-only content,
+  expected temporal ordering, corrections, and internally consistent IDs.
+- Do not run `datasetgen freeze` until the coordinator and user have reviewed
+  the staged candidate. Promotion is a separate, explicitly approved parcel.
+- Update the generation runbook's example to use the installed `llama-cli`
+  discovery path rather than a stale build-directory example.
+
+### Acceptance
+
+- `go test ./internal/datasetgen/... -count=1` and
+  `go run ./cmd/datasetgen validate` pass before generation.
+- A local-model smoke invocation produces exactly the documented stage layout
+  and valid provenance without writing under `datasets/`.
+- The coordinator records the model path, seed, staged response checksum, and
+  concise spot-check outcome in the P29 handoff note; no staged content is
+  committed.
 ## Shared-file mutexes
 
 | Path | Owner / rule |
@@ -290,6 +329,7 @@ modified unless the coordinator opens a dedicated Docker parcel.
 | `ui/**` | P26 integrated; frozen unless the coordinator opens a dedicated parcel |
 | `cmd/mosaicdemo/**` | P27 integrated; frozen unless the coordinator opens a dedicated parcel |
 | `tests/e2e/**`, `docs/runbook/**` | P28 integrated; frozen unless the coordinator opens a dedicated parcel |
+| `localmodels/staging/domestic-disturbance-v2/**`, `docs/dataset-generation.md` | P29 only while claimed; staged contents are ignored and never committed |
 | `ontology/**`, `internal/ontology/**`, `migrations/**`, `go.mod`, `go.sum`, `Taskfile.yml`, `Dockerfile`, `docker-compose.yml` | Frozen for P24–P28 unless the coordinator opens a dedicated parcel |
 
 ## Integration and external handoff template
@@ -317,10 +357,11 @@ the parcel, reruns the complete quality gate, then records `✅ Integrated`.
 Wave A:  P24 fixture replay ∥ P25 public advisory API — completed
 Wave B:  P26 dashboard (after P25) ∥ P27 executable composition (after P24/P25) — completed
 Wave C:  P28 end-to-end/Docker/runbook proof (after P26/P27) — completed
+Wave D:  P29 local synthetic feed candidate (after P28) — in progress
 ```
 
-All P21–P28 parcels are integrated. There are no active parcel claims in this
-increment. New work begins only through a new coordinator-owned parcel row.
+P29 is claimed by the coordinator. No other builder may edit its staged
+candidate or dataset-generation runbook path while the claim is active.
 ## Notes
 
 Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
@@ -341,3 +382,4 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-20 P26 integrated by coordinator — `24c7d70`; bounded advisory cards now cover loading, unavailable, empty, superseded, and not-current states with evidence resolution and immutable review prefill. Svelte check/build and full quality passed.
 - 2026-07-20 P28 claimed by coordinator — base `24c7d70`, branch `parcel/P28-advisory-acceptance`, worktree `.worktrees/P28-advisory-acceptance`; complete public API/UI/restart/runbook/Docker acceptance proof only.
 - 2026-07-20 P28 integrated by coordinator — `8d15b0b`; real executable no-header E2E/restart proof, Svelte check/build, full quality, and a fresh isolated `mosaic-p28smoke` Docker build/public smoke/restart all passed. The disposable Compose volume was removed after the check.
+- 2026-07-20 P29 claimed by coordinator — base `b050618`, branch `parcel/P29-local-feed-generation`, worktree `.worktrees/P29-local-feed-generation`; generate one ignored local-model candidate and inspect it before any promotion.
