@@ -57,7 +57,7 @@ branch until the deterministic spine is integrated and stable.
 | P14 | Executable demo composition root and static UI host | P03, P06, P07, P08, P09 | `cmd/mosaicdemo/**` | ✅ Integrated — `617081a` |
 | P15 | Reproducible GoMock tooling and generated contract mocks | P02 | `tools.go`, `internal/contracts/mocks/**`, `go.mod`, `go.sum` | ✅ Integrated — `86caf77` |
 | P16 | RFC-0001 implementation reconciliation | P08–P14 | `docs/rfcs/RFC-0001-mosaic-demo-foundation.md` | ✅ Integrated — `db66b80` |
-| P17 | Public actor/policy seam and evidence-backed agent-operations API | P08, P10, P11 | `internal/api/**`, `internal/stream/**` | ⬜ Ready |
+| P17 | Public actor/policy seam and evidence-backed agent-operations API | P08, P10, P11 | `internal/api/**`, `internal/stream/**` | 🔒 Claimed — `/root/p17_operations_api` |
 | P18 | Agent-operations dashboard panel | P17 | `ui/**` | ⬜ Ready |
 | P19 | Local executable composition for agent operations | P14, P17 | `cmd/mosaicdemo/**` | ⬜ Ready |
 | P20 | Public operations API/UI acceptance and runbook proof | P17–P19 | `tests/e2e/**`, `docs/runbook/**` | ⬜ Ready |
@@ -161,3 +161,4 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-18 P15 integrated by coordinator — `86caf77`; GoMock v0.6.0 is pinned and contract mocks regenerate cleanly.
 - 2026-07-18 P16 integrated by coordinator — `db66b80`; RFC-0001 now records actual v0.1 persistence, API/UI, model, offline-generation, and composition status.
 - 2026-07-19 P17–P20 ready by coordinator — RFC-0002 public access and agent-operations increment; PostgreSQL, multi-instance reconciliation, and live model transport remain out of scope.
+- 2026-07-19 P17 claimed by `/root/p17_operations_api` — base `850462f`; public-by-default API policy and bounded operations read surface.
