@@ -51,8 +51,8 @@ prerequisites are marked `✅ Integrated` on this board.
 
 | ID | Work | Prereqs | Owns (exclusive) | Status |
 |---|---|---|---|---|
-| P21 | Re-baseline the handoff and record RFC-0003's fixture-only advisory decision | P20 | `HANDOFF.md`, `docs/archive/HANDOFF-v0.1-foundation.md`, `docs/rfcs/RFC-0003-fixture-advisory-composition.md` | 🟡 Ready for integration — base `c03ba39`, branch `parcel/P21-fixture-advisory-rfc`, worktree `.worktrees/P21-fixture-advisory-rfc` |
-| P22 | Add the additive, read-only advisory-history contract and regenerate checked-in GoMock output | P21 | `internal/contracts/**` | ⬜ Not claimable until P21 integrates |
+| P21 | Re-baseline the handoff and record RFC-0003's fixture-only advisory decision | P20 | `HANDOFF.md`, `docs/archive/HANDOFF-v0.1-foundation.md`, `docs/rfcs/RFC-0003-fixture-advisory-composition.md` | ✅ Integrated — `48d96c8` |
+| P22 | Add the additive, read-only advisory-history contract and regenerate checked-in GoMock output | P21 | `internal/contracts/**` | ⬜ Ready |
 | P23 | Implement deterministic SQLite reads for the P22 advisory history contract; no migration | P22 | `internal/store/**` | ⬜ Not claimable until P22 integrates |
 
 ## P22 builder brief — advisory-history contract
@@ -165,3 +165,4 @@ contract and P23 reader as integrated, not merely proposed, shapes.
 Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 
 - 2026-07-19 P21 claimed by coordinator — base `c03ba39`, branch `parcel/P21-fixture-advisory-rfc`, worktree `.worktrees/P21-fixture-advisory-rfc`; archive completed v0.1 handoff and define the next external-builder-ready parcels.
+- 2026-07-19 P21 integrated by coordinator — `48d96c8`; archived the completed v0.1 board, created RFC-0003, and released P22 for an isolated external-builder claim.
