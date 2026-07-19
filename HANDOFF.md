@@ -66,7 +66,7 @@ prerequisites are marked `✅ Integrated` on this board.
 | P26 | Advisory-history dashboard cards, evidence links, and supersession presentation | P25 | `ui/**` | ✅ Integrated — `24c7d70` |
 | P27 | Local executable composition of fixture replay, advisory history, and public API | P24, P25 | `cmd/mosaicdemo/**` | ✅ Integrated — `3ecbefb` |
 | P28 | Public advisory API/UI/Docker/runbook acceptance proof | P26, P27 | `tests/e2e/**`, `docs/runbook/**` | ✅ Integrated — `8d15b0b` |
-| P29 | Generate and inspect one local-model synthetic feed candidate for controlled demo playback; do not freeze it yet | P28 | `localmodels/staging/domestic-disturbance-v2/**`, `docs/dataset-generation.md` | 🔒 Claimed — coordinator; base `b050618` |
+| P29 | Generate and inspect one local-model synthetic feed candidate for controlled demo playback; do not freeze it yet | P28 | `internal/datasetgen/**`, `localmodels/staging/domestic-disturbance-v2/**`, `docs/dataset-generation.md` | 🔒 Claimed — coordinator; base `b050618` |
 
 ## P22 builder brief — advisory-history contract
 
@@ -296,6 +296,9 @@ composition, public API, UI, or any live-model policy.
   llama.cpp executable and GGUF. The model and staging directory remain ignored
   local artifacts; no model binary, generated candidate, credential, or real
   record may enter Git.
+- Ensure the local llama invocation is explicitly single-turn/non-interactive,
+  with a focused regression test, so a valid JSON response exits rather than
+  waiting for console input.
 - Generate only into the initially empty
   `localmodels/staging/domestic-disturbance-v2/` directory, for scenario
   `domestic-disturbance` and a recorded fixed seed.
@@ -329,7 +332,7 @@ composition, public API, UI, or any live-model policy.
 | `ui/**` | P26 integrated; frozen unless the coordinator opens a dedicated parcel |
 | `cmd/mosaicdemo/**` | P27 integrated; frozen unless the coordinator opens a dedicated parcel |
 | `tests/e2e/**`, `docs/runbook/**` | P28 integrated; frozen unless the coordinator opens a dedicated parcel |
-| `localmodels/staging/domestic-disturbance-v2/**`, `docs/dataset-generation.md` | P29 only while claimed; staged contents are ignored and never committed |
+| `internal/datasetgen/**`, `localmodels/staging/domestic-disturbance-v2/**`, `docs/dataset-generation.md` | P29 only while claimed; staged contents are ignored and never committed |
 | `ontology/**`, `internal/ontology/**`, `migrations/**`, `go.mod`, `go.sum`, `Taskfile.yml`, `Dockerfile`, `docker-compose.yml` | Frozen for P24–P28 unless the coordinator opens a dedicated parcel |
 
 ## Integration and external handoff template
