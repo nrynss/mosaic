@@ -39,6 +39,19 @@ type ImmutableRecordRepository interface {
 	AppendAuditRecord(context.Context, gen.AuditRecord) error
 }
 
+// AdvisoryHistoryReader returns persisted Terra/Sol advisory records for a bounded read model.
+type AdvisoryHistoryReader interface {
+	ReadAdvisoryHistory(context.Context) (AdvisoryHistory, error)
+}
+
+// AdvisoryHistory is an immutable advisory-domain snapshot without source payloads or commands.
+type AdvisoryHistory struct {
+	Insights        []gen.Insight
+	Recommendations []gen.Recommendation
+	ModelRuns       []gen.ModelRun
+	AuditRecords    []gen.AuditRecord
+}
+
 // CheckpointRepository persists serializable COP checkpoints for deterministic recovery.
 type CheckpointRepository interface {
 	AppendCheckpoint(context.Context, gen.Checkpoint) error

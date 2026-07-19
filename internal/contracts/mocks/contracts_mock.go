@@ -249,6 +249,45 @@ func (mr *MockImmutableRecordRepositoryMockRecorder) AppendRecommendation(arg0, 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AppendRecommendation", reflect.TypeOf((*MockImmutableRecordRepository)(nil).AppendRecommendation), arg0, arg1)
 }
 
+// MockAdvisoryHistoryReader is a mock of AdvisoryHistoryReader interface.
+type MockAdvisoryHistoryReader struct {
+	ctrl     *gomock.Controller
+	recorder *MockAdvisoryHistoryReaderMockRecorder
+	isgomock struct{}
+}
+
+// MockAdvisoryHistoryReaderMockRecorder is the mock recorder for MockAdvisoryHistoryReader.
+type MockAdvisoryHistoryReaderMockRecorder struct {
+	mock *MockAdvisoryHistoryReader
+}
+
+// NewMockAdvisoryHistoryReader creates a new mock instance.
+func NewMockAdvisoryHistoryReader(ctrl *gomock.Controller) *MockAdvisoryHistoryReader {
+	mock := &MockAdvisoryHistoryReader{ctrl: ctrl}
+	mock.recorder = &MockAdvisoryHistoryReaderMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockAdvisoryHistoryReader) EXPECT() *MockAdvisoryHistoryReaderMockRecorder {
+	return m.recorder
+}
+
+// ReadAdvisoryHistory mocks base method.
+func (m *MockAdvisoryHistoryReader) ReadAdvisoryHistory(arg0 context.Context) (contracts.AdvisoryHistory, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ReadAdvisoryHistory", arg0)
+	ret0, _ := ret[0].(contracts.AdvisoryHistory)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ReadAdvisoryHistory indicates an expected call of ReadAdvisoryHistory.
+func (mr *MockAdvisoryHistoryReaderMockRecorder) ReadAdvisoryHistory(arg0 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReadAdvisoryHistory", reflect.TypeOf((*MockAdvisoryHistoryReader)(nil).ReadAdvisoryHistory), arg0)
+}
+
 // MockCheckpointRepository is a mock of CheckpointRepository interface.
 type MockCheckpointRepository struct {
 	ctrl     *gomock.Controller
