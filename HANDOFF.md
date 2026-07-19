@@ -47,7 +47,7 @@ mosaic/v0.1-foundation
 ├─ parcel/P24-fixture-advisory-replay               (integrated)
 ├─ parcel/P25-public-advisory-api                   (integrated)
 ├─ parcel/P26-advisory-dashboard                    (waits for P25)
-├─ parcel/P27-advisory-composition                  (ready)
+├─ parcel/P27-advisory-composition                  (claimed by coordinator)
 └─ parcel/P28-advisory-acceptance                   (waits for P26/P27)
 ```
 
@@ -64,7 +64,7 @@ prerequisites are marked `✅ Integrated` on this board.
 | P24 | Deterministic fixture Terra/Sol replay with immutable lifecycle/audit history | P22, P23 | `internal/simulator/**` | ✅ Integrated — `e37c17a` |
 | P25 | Bounded public advisory API and truthful advisory capability status | P22, P23 | `internal/api/**` | ✅ Integrated — `8bde753` |
 | P26 | Advisory-history dashboard cards, evidence links, and supersession presentation | P25 | `ui/**` | ⬜ Ready — unclaimed |
-| P27 | Local executable composition of fixture replay, advisory history, and public API | P24, P25 | `cmd/mosaicdemo/**` | ⬜ Ready — coordinator implementation |
+| P27 | Local executable composition of fixture replay, advisory history, and public API | P24, P25 | `cmd/mosaicdemo/**` | 🔒 Claimed — coordinator; base `613929f` |
 | P28 | Public advisory API/UI/Docker/runbook acceptance proof | P26, P27 | `tests/e2e/**`, `docs/runbook/**` | ⬜ Not claimable until P26/P27 integrate |
 
 ## P22 builder brief — advisory-history contract
@@ -339,3 +339,4 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-20 P25 claimed by external builder — base `5bbf27a`, branch `parcel/P25-public-advisory-api`; submitted from the root worktree contrary to the isolated-worktree rule. The coordinator preserved that clean branch and used a separate integration worktree.
 - 2026-07-20 P25 integrated by coordinator — `8bde753`; public bounded advisory read route, policy seam, and configuration-driven capability status passed review and the full quality gate. P26 is now ready.
 - 2026-07-20 P24 integrated by coordinator — `e37c17a`; deterministic rev-7/rev-9 fixture replay now commits successful Terra/Sol Model Run-output pairs atomically, records failure Model Runs, detects partial history, and passed the full quality gate. P27 is now ready.
+- 2026-07-20 P27 claimed by coordinator — base `613929f`, branch `parcel/P27-advisory-composition`, worktree `.worktrees/P27-advisory-composition`; compose local fixture replay, history reader, and public advisory API only.
