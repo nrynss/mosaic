@@ -53,7 +53,7 @@ prerequisites are marked `✅ Integrated` on this board.
 |---|---|---|---|---|
 | P21 | Re-baseline the handoff and record RFC-0003's fixture-only advisory decision | P20 | `HANDOFF.md`, `docs/archive/HANDOFF-v0.1-foundation.md`, `docs/rfcs/RFC-0003-fixture-advisory-composition.md` | ✅ Integrated — `48d96c8` |
 | P22 | Add the additive, read-only advisory-history contract and regenerate checked-in GoMock output | P21 | `internal/contracts/**` | ✅ Integrated — `17a4cde` |
-| P23 | Implement deterministic SQLite reads for the P22 advisory history contract; no migration | P22 | `internal/store/**` | ⬜ Ready |
+| P23 | Implement deterministic SQLite reads for the P22 advisory history contract; no migration | P22 | `internal/store/**` | 🔒 Claimed — base `bec2744`, branch `parcel/P23-advisory-history-store`, worktree `.worktrees/P23-advisory-history-store` |
 
 ## P22 builder brief — advisory-history contract
 
@@ -168,3 +168,4 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-19 P21 integrated by coordinator — `48d96c8`; archived the completed v0.1 board, created RFC-0003, and released P22 for an isolated external-builder claim.
 - 2026-07-19 P22 claimed by coordinator — base `4b9a69e`, branch `parcel/P22-advisory-history-contracts`, worktree `.worktrees/P22-advisory-history-contracts`; additive advisory-history contract and regenerated GoMock output only.
 - 2026-07-19 P22 integrated by coordinator — `17a4cde`; reviewed the additive contract/mock change and reran `go run ./cmd/mosaic quality` successfully.
+- 2026-07-19 P23 claimed by coordinator — base `bec2744`, branch `parcel/P23-advisory-history-store`, worktree `.worktrees/P23-advisory-history-store`; deterministic SQLite advisory-history reads only, with no migrations.
