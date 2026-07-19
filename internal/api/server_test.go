@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"mosaic.local/mosaic/internal/contracts"
 	"mosaic.local/mosaic/internal/ontology/gen"
 	"mosaic.local/mosaic/internal/replay"
 	"mosaic.local/mosaic/internal/state"
@@ -19,11 +21,11 @@ import (
 	"mosaic.local/mosaic/internal/stream"
 )
 
-func TestReadSurfaceReturnsCOPAndResolvableEvidenceWithoutWriting(t *testing.T) {
+func TestPublicReadSurfaceReturnsCOPAndResolvableEvidenceWithoutWriting(t *testing.T) {
 	fixture := newFixture(t)
 	before := durableCounts(t, fixture.store)
 
-	response := request(t, fixture.handler, http.MethodGet, "/api/v1/cop", viewerIdentity, "")
+	response := request(t, fixture.handler, http.MethodGet, "/api/v1/cop", "", "")
 	if response.Code != http.StatusOK {
 		t.Fatalf("COP status = %d, body = %s", response.Code, response.Body.String())
 	}
@@ -38,7 +40,7 @@ func TestReadSurfaceReturnsCOPAndResolvableEvidenceWithoutWriting(t *testing.T) 
 		"/api/v1/evidence/state_fact/incident-1",
 		"/api/v1/artifacts/recommendation/recommendation-1",
 	} {
-		response := request(t, fixture.handler, http.MethodGet, path, viewerIdentity, "")
+		response := request(t, fixture.handler, http.MethodGet, path, "", "")
 		if response.Code != http.StatusOK {
 			t.Fatalf("GET %s status = %d, body = %s", path, response.Code, response.Body.String())
 		}
@@ -47,7 +49,7 @@ func TestReadSurfaceReturnsCOPAndResolvableEvidenceWithoutWriting(t *testing.T) 
 		}
 	}
 
-	missing := request(t, fixture.handler, http.MethodGet, "/api/v1/evidence/raw_event/missing", viewerIdentity, "")
+	missing := request(t, fixture.handler, http.MethodGet, "/api/v1/evidence/raw_event/missing", "", "")
 	if missing.Code != http.StatusNotFound {
 		t.Fatalf("missing evidence status = %d, body = %s", missing.Code, missing.Body.String())
 	}
@@ -59,32 +61,22 @@ func TestReadSurfaceReturnsCOPAndResolvableEvidenceWithoutWriting(t *testing.T) 
 	}
 }
 
-func TestFixedRolesGateAuditWritesAndNeverExecuteAnAction(t *testing.T) {
+func TestPublicAuditWritesNeverExecuteAnAction(t *testing.T) {
 	fixture := newFixture(t)
 
-	unauthenticated := request(t, fixture.handler, http.MethodGet, "/api/v1/cop", "", "")
-	if unauthenticated.Code != http.StatusUnauthorized {
-		t.Fatalf("unauthenticated COP status = %d", unauthenticated.Code)
-	}
-	viewerBriefing := request(t, fixture.handler, http.MethodPost, "/api/v1/briefings", viewerIdentity, `{"briefing_id":"briefing-1"}`)
-	if viewerBriefing.Code != http.StatusForbidden {
-		t.Fatalf("viewer briefing status = %d, body = %s", viewerBriefing.Code, viewerBriefing.Body.String())
-	}
-	if got := tableCount(t, fixture.store, "audit_records"); got != 0 {
-		t.Fatalf("viewer request appended audit record count=%d", got)
-	}
-
-	briefing := request(t, fixture.handler, http.MethodPost, "/api/v1/briefings", supervisorIdentity, `{"briefing_id":"briefing-1","note":"review requested"}`)
+	briefing := request(t, fixture.handler, http.MethodPost, "/api/v1/briefings", "", `{"briefing_id":"briefing-1","note":"review requested"}`)
 	if briefing.Code != http.StatusAccepted {
-		t.Fatalf("supervisor briefing status = %d, body = %s", briefing.Code, briefing.Body.String())
+		t.Fatalf("public briefing status = %d, body = %s", briefing.Code, briefing.Body.String())
 	}
-	if executed, _ := responseData(t, briefing)["executed"].(bool); executed {
+	briefingData := responseData(t, briefing)
+	if executed, _ := briefingData["executed"].(bool); executed {
 		t.Fatal("briefing endpoint claimed to execute an operational action")
 	}
+	assertAuditActor(t, briefingData, "public-demo", "viewer")
 
-	acknowledgement := request(t, fixture.handler, http.MethodPost, "/api/v1/audit-actions", supervisorIdentity, `{"action":"acknowledged","target_kind":"recommendation","target_id":"recommendation-1","note":"reviewed"}`)
+	acknowledgement := request(t, fixture.handler, http.MethodPost, "/api/v1/audit-actions", "", `{"action":"acknowledged","target_kind":"recommendation","target_id":"recommendation-1","note":"reviewed"}`)
 	if acknowledgement.Code != http.StatusCreated {
-		t.Fatalf("supervisor acknowledgement status = %d, body = %s", acknowledgement.Code, acknowledgement.Body.String())
+		t.Fatalf("public acknowledgement status = %d, body = %s", acknowledgement.Code, acknowledgement.Body.String())
 	}
 	if executed, _ := responseData(t, acknowledgement)["executed"].(bool); executed {
 		t.Fatal("acknowledgement endpoint claimed to execute an operational action")
@@ -100,12 +92,118 @@ func TestFixedRolesGateAuditWritesAndNeverExecuteAnAction(t *testing.T) {
 	}
 }
 
+func TestIdentityHeaderIsDisplayMetadataNotAccessControl(t *testing.T) {
+	fixture := newFixture(t)
+	for _, identity := range []string{"", viewerIdentity, supervisorIdentity, "unrecognised"} {
+		response := request(t, fixture.handler, http.MethodGet, "/api/v1/cop", identity, "")
+		if response.Code != http.StatusOK {
+			t.Fatalf("COP with identity %q status = %d, body = %s", identity, response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestInjectedDenyPolicyProvesPublicPolicySeam(t *testing.T) {
+	fixture := newFixture(t)
+	server, err := New(Config{
+		Recovery:   fixture.server.recovery,
+		Records:    fixture.store,
+		Evidence:   fixture.server.evidence,
+		Operations: fixture.server.operations,
+		Stream:     fixture.broker,
+		Policy:     denyPolicy{deny: ActionReadOperations},
+	})
+	if err != nil {
+		t.Fatalf("new server with deny policy: %v", err)
+	}
+	response := request(t, server.Handler(), http.MethodGet, "/api/v1/operations", "", "")
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("denied operations status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if code := responseErrorCode(t, response); code != "action_denied" {
+		t.Fatalf("deny error code = %q", code)
+	}
+}
+
+func TestOperationsReturnsBoundedEvidenceBackedTelemetry(t *testing.T) {
+	fixture := newFixture(t)
+	fixture.server.Publish("cop.updated", map[string]any{"payload_bytes_b64": "must-not-leak"})
+
+	response := request(t, fixture.handler, http.MethodGet, "/api/v1/operations", "", "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("operations status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if strings.Contains(response.Body.String(), "payload_bytes_b64") || strings.Contains(response.Body.String(), "must-not-leak") {
+		t.Fatalf("operations response leaked event payload: %s", response.Body.String())
+	}
+	data := responseData(t, response)
+	if data["observed_at"] == nil || data["latest_source_received_at"] == nil {
+		t.Fatalf("operations timestamps missing: %#v", data)
+	}
+	service, _ := data["service"].(map[string]any)
+	if service["version"] != "v0.1" || service["uptime_seconds"] != float64(0) {
+		t.Fatalf("service telemetry = %#v", service)
+	}
+	recovery, _ := data["recovery"].(map[string]any)
+	if recovery["status"] != "recovered" || recovery["state_revision"] != float64(1) {
+		t.Fatalf("recovery telemetry = %#v", recovery)
+	}
+	counts, _ := data["counts"].(map[string]any)
+	for field, want := range map[string]float64{
+		"raw_events": 1, "canonical_events": 1, "projected_events": 1,
+		"unprojected_events": 0, "checkpoints": 1, "insights": 0,
+		"recommendations": 1, "audit_records": 0,
+	} {
+		if got := counts[field]; got != want {
+			t.Fatalf("count %s = %#v, want %v", field, got, want)
+		}
+	}
+	lifecycle, _ := counts["luna_lifecycle"].(map[string]any)
+	if lifecycle["accepted"] != float64(1) || lifecycle["quarantined"] != float64(1) {
+		t.Fatalf("Luna lifecycle counts = %#v", lifecycle)
+	}
+	modelRuns, _ := counts["model_runs"].(map[string]any)
+	if modelRuns["total"] != float64(3) {
+		t.Fatalf("model run total = %#v", modelRuns)
+	}
+	streamData, _ := data["stream"].(map[string]any)
+	last, _ := streamData["last_published"].(map[string]any)
+	if streamData["local_subscriber_count"] != float64(0) || last["name"] != "cop.updated" || last["published_at"] == nil {
+		t.Fatalf("stream telemetry = %#v", streamData)
+	}
+	capabilities, _ := data["capabilities"].([]any)
+	if len(capabilities) != 9 {
+		t.Fatalf("capability count = %d, want 9", len(capabilities))
+	}
+	assertCapability(t, capabilities, "startup_recovery", "composed", "recovered")
+	assertCapability(t, capabilities, "terra_assessment", "unavailable", "unavailable")
+	assertCapability(t, capabilities, "reconciliation", "unavailable", "unavailable")
+	assertCapability(t, capabilities, "operational_action", "permanently_unavailable", "unavailable")
+	if strings.Contains(strings.ToLower(response.Body.String()), "self-healing") {
+		t.Fatal("operations response made an unsupported self-healing claim")
+	}
+}
+
+func TestOperationsRequiresSameRequestRecoveryAndReader(t *testing.T) {
+	fixture := newFixture(t)
+	fixture.server.recovery = failingRecovery{}
+	response := request(t, fixture.handler, http.MethodGet, "/api/v1/operations", "", "")
+	if response.Code != http.StatusServiceUnavailable || responseErrorCode(t, response) != "cop_unavailable" {
+		t.Fatalf("recovery failure = %d %s", response.Code, response.Body.String())
+	}
+
+	fixture = newFixture(t)
+	fixture.server.operations = failingOperationsReader{}
+	response = request(t, fixture.handler, http.MethodGet, "/api/v1/operations", "", "")
+	if response.Code != http.StatusServiceUnavailable || responseErrorCode(t, response) != "operations_unavailable" {
+		t.Fatalf("reader failure = %d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestStreamSendsSnapshotAndCleansUpOnCancellation(t *testing.T) {
 	fixture := newFixture(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/stream", nil).WithContext(ctx)
-	request.Header.Set(IdentityHeader, viewerIdentity)
 	writer := newFlushRecorder()
 	done := make(chan struct{})
 	go func() {
@@ -136,7 +234,7 @@ func TestStreamSendsSnapshotAndCleansUpOnCancellation(t *testing.T) {
 	}
 }
 
-func TestHealthAndVersionArePublicButReadDataNeedsDemoIdentity(t *testing.T) {
+func TestHealthAndVersionRemainPublic(t *testing.T) {
 	fixture := newFixture(t)
 	for _, path := range []string{"/api/v1/health", "/api/v1/version"} {
 		response := request(t, fixture.handler, http.MethodGet, path, "", "")
@@ -144,14 +242,11 @@ func TestHealthAndVersionArePublicButReadDataNeedsDemoIdentity(t *testing.T) {
 			t.Fatalf("GET %s status = %d", path, response.Code)
 		}
 	}
-	response := request(t, fixture.handler, http.MethodGet, "/api/v1/evidence/raw_event/raw-1", "", "")
-	if response.Code != http.StatusUnauthorized {
-		t.Fatalf("unauthenticated evidence status = %d", response.Code)
-	}
 }
 
 type apiFixture struct {
 	store   *store.Store
+	server  *Server
 	handler http.Handler
 	broker  *stream.Broker
 }
@@ -213,17 +308,41 @@ func newFixture(t *testing.T) apiFixture {
 	}); err != nil {
 		t.Fatalf("append recommendation: %v", err)
 	}
+	for _, result := range []gen.LunaResult{
+		{SchemaVersion: "1.0.0", LunaResultID: "luna-accepted", RawEventID: raw.RawEventID, CanonicalEventID: event.CanonicalEventID, Status: "accepted", CreatedAt: raw.ReceivedAt},
+		{SchemaVersion: "1.0.0", LunaResultID: "luna-quarantined", RawEventID: raw.RawEventID, Status: "quarantined", Reason: "fixture", CreatedAt: raw.ReceivedAt},
+	} {
+		if err := database.AppendLunaResult(ctx, result); err != nil {
+			t.Fatalf("append Luna result: %v", err)
+		}
+	}
+	for _, run := range []gen.ModelRun{
+		{SchemaVersion: "1.0.0", ModelRunID: "run-luna", Agent: "luna", Provider: "fixture", Model: "fixture", PromptVersion: "v1", OutputSchemaVersion: "1.0.0", ValidationStatus: "valid", StartedAt: raw.ReceivedAt, CompletedAt: raw.ReceivedAt},
+		{SchemaVersion: "1.0.0", ModelRunID: "run-terra", Agent: "terra", Provider: "fixture", Model: "fixture", PromptVersion: "v1", OutputSchemaVersion: "1.0.0", ValidationStatus: "failed", StartedAt: raw.ReceivedAt, CompletedAt: raw.ReceivedAt},
+		{SchemaVersion: "1.0.0", ModelRunID: "run-sol", Agent: "sol", Provider: "fixture", Model: "fixture", PromptVersion: "v1", OutputSchemaVersion: "1.0.0", ValidationStatus: "refused", StartedAt: raw.ReceivedAt, CompletedAt: raw.ReceivedAt},
+	} {
+		if err := database.AppendModelRun(ctx, run); err != nil {
+			t.Fatalf("append model run: %v", err)
+		}
+	}
 
 	resolver, err := NewSQLiteEvidenceResolver(database)
 	if err != nil {
 		t.Fatalf("new evidence resolver: %v", err)
 	}
-	broker := stream.NewBroker()
+	operations, err := NewSQLiteOperationsReader(database)
+	if err != nil {
+		t.Fatalf("new operations reader: %v", err)
+	}
+	broker := stream.NewBrokerWithClock(func() time.Time {
+		return time.Date(2026, 7, 18, 12, 2, 0, 0, time.UTC)
+	})
 	server, err := New(Config{
-		Recovery: replay.Runner{Canonical: database, Checkpoints: database, Projector: projector},
-		Records:  database,
-		Evidence: resolver,
-		Stream:   broker,
+		Recovery:   replay.Runner{Canonical: database, Checkpoints: database, Projector: projector},
+		Records:    database,
+		Evidence:   resolver,
+		Operations: operations,
+		Stream:     broker,
 		Clock: func() time.Time {
 			return time.Date(2026, 7, 18, 12, 2, 0, 0, time.UTC)
 		},
@@ -232,7 +351,7 @@ func newFixture(t *testing.T) apiFixture {
 	if err != nil {
 		t.Fatalf("new API server: %v", err)
 	}
-	return apiFixture{store: database, handler: server.Handler(), broker: broker}
+	return apiFixture{store: database, server: server, handler: server.Handler(), broker: broker}
 }
 
 func request(t *testing.T, handler http.Handler, method, path, identity, body string) *httptest.ResponseRecorder {
@@ -257,6 +376,39 @@ func responseData(t *testing.T, response *httptest.ResponseRecorder) map[string]
 	return envelope.Data
 }
 
+func responseErrorCode(t *testing.T, response *httptest.ResponseRecorder) string {
+	t.Helper()
+	var envelope struct {
+		Error apiError `json:"error"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode error response %q: %v", response.Body.String(), err)
+	}
+	return envelope.Error.Code
+}
+
+func assertAuditActor(t *testing.T, data map[string]any, id, role string) {
+	t.Helper()
+	audit, _ := data["audit_record"].(map[string]any)
+	if audit["actor_id"] != id || audit["actor_role"] != role {
+		t.Fatalf("audit actor = %#v, want %s/%s", audit, id, role)
+	}
+}
+
+func assertCapability(t *testing.T, capabilities []any, want, mode, status string) {
+	t.Helper()
+	for _, value := range capabilities {
+		capability, _ := value.(map[string]any)
+		if capability["capability"] == want {
+			if capability["mode"] != mode || capability["status"] != status {
+				t.Fatalf("capability %s = %#v", want, capability)
+			}
+			return
+		}
+	}
+	t.Fatalf("capability %q was not returned", want)
+}
+
 func tableCount(t *testing.T, database *store.Store, table string) int {
 	t.Helper()
 	allowed := map[string]bool{
@@ -269,7 +421,6 @@ func tableCount(t *testing.T, database *store.Store, table string) int {
 		"luna_results":                  true,
 		"insights":                      true,
 		"model_runs":                    true,
-		"audit_records_test":            false,
 	}
 	if !allowed[table] {
 		t.Fatalf("unsupported test table %q", table)
@@ -292,6 +443,7 @@ func durableCounts(t *testing.T, database *store.Store) map[string]int {
 	}
 	return counts
 }
+
 func sequentialIDs() func() string {
 	var mu sync.Mutex
 	next := 0
@@ -301,6 +453,29 @@ func sequentialIDs() func() string {
 		next++
 		return "test-" + string(rune('0'+next))
 	}
+}
+
+type denyPolicy struct {
+	deny Action
+}
+
+func (p denyPolicy) Authorize(_ context.Context, _ Actor, action Action) (PolicyDecision, error) {
+	if action == p.deny {
+		return PolicyDecision{Reason: "test denial"}, nil
+	}
+	return PolicyDecision{Allowed: true}, nil
+}
+
+type failingRecovery struct{}
+
+func (failingRecovery) Recover(context.Context) (contracts.ProjectionResult, error) {
+	return contracts.ProjectionResult{}, errors.New("fixture recovery failed")
+}
+
+type failingOperationsReader struct{}
+
+func (failingOperationsReader) ReadOperations(context.Context) (OperationsSnapshot, error) {
+	return OperationsSnapshot{}, errors.New("fixture operations reader failed")
 }
 
 type flushRecorder struct {
