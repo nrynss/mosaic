@@ -56,23 +56,44 @@ type TerraObsolescenceExpectation struct {
 	AfterCanonicalEventID string `json:"after_canonical_event_id"`
 }
 
+// SolRequestExpectation is the fixture's supervisor briefing-request identity.
+type SolRequestExpectation struct {
+	AuditRecordID    string `json:"audit_record_id"`
+	BriefingID       string `json:"briefing_id"`
+	RecommendationID string `json:"recommendation_id"`
+	RequestedBy      string `json:"requested_by"`
+}
+
+// SupervisorActionExpectation is the fixture's non-operational acknowledgement.
+type SupervisorActionExpectation struct {
+	AuditRecordID    string `json:"audit_record_id"`
+	RecommendationID string `json:"recommendation_id"`
+	ActorID          string `json:"actor_id"`
+	Action           string `json:"action"`
+}
+
 // FixtureExpectation captures the fixture checks that P07 can verify without
-// taking ownership of Terra or Sol artifacts.
+// taking ownership of Terra or Sol artifacts, plus the advisory identities
+// required by the P24 fixture-advisory replay.
 type FixtureExpectation struct {
 	TerraObsolescence TerraObsolescenceExpectation `json:"terra_obsolescence"`
+	SolRequest        SolRequestExpectation        `json:"sol_request"`
+	SupervisorAction  SupervisorActionExpectation  `json:"supervisor_action"`
 }
 
 // Fixture is the decoded, immutable domestic-disturbance test scenario.
 // Maps are private so callers cannot accidentally edit the deterministic
-// records used by FixtureLuna.
+// records used by FixtureLuna and fixture advisory replay.
 type Fixture struct {
-	ScenarioID   string
-	Beats        []Beat
-	Expectation  FixtureExpectation
-	rawByID      map[string]gen.RawEvent
-	outputByRaw  map[string]fixtureOutput
-	canonicalIDs map[string]struct{}
-	insights     map[string]gen.Insight
+	ScenarioID      string
+	Beats           []Beat
+	Expectation     FixtureExpectation
+	rawByID         map[string]gen.RawEvent
+	outputByRaw     map[string]fixtureOutput
+	canonicalIDs    map[string]struct{}
+	insights        map[string]gen.Insight
+	recommendations map[string]gen.Recommendation
+	auditRecords    map[string]gen.AuditRecord
 }
 
 // RawEvent returns a copy of the frozen envelope associated with id.
@@ -122,18 +143,8 @@ type fixtureChecksDocument struct {
 		SupersedesEventID string `json:"supersedes_event_id"`
 	} `json:"road_correction"`
 	TerraObsolescence TerraObsolescenceExpectation `json:"terra_obsolescence"`
-	SolRequest        struct {
-		AuditRecordID    string `json:"audit_record_id"`
-		BriefingID       string `json:"briefing_id"`
-		RecommendationID string `json:"recommendation_id"`
-		RequestedBy      string `json:"requested_by"`
-	} `json:"sol_request"`
-	SupervisorAction struct {
-		AuditRecordID    string `json:"audit_record_id"`
-		RecommendationID string `json:"recommendation_id"`
-		ActorID          string `json:"actor_id"`
-		Action           string `json:"action"`
-	} `json:"supervisor_action"`
+	SolRequest        SolRequestExpectation        `json:"sol_request"`
+	SupervisorAction  SupervisorActionExpectation  `json:"supervisor_action"`
 }
 
 type fixtureEventCheck struct {
@@ -168,13 +179,19 @@ func LoadFixture(dir string) (*Fixture, error) {
 	}
 
 	fixture := &Fixture{
-		ScenarioID:   scenario.ScenarioID,
-		Beats:        append([]Beat(nil), scenario.Beats...),
-		Expectation:  FixtureExpectation{TerraObsolescence: outcomes.Checks.TerraObsolescence},
-		rawByID:      make(map[string]gen.RawEvent, len(rawDocument.RawEvents)),
-		outputByRaw:  make(map[string]fixtureOutput, len(outcomes.LunaResults)),
-		canonicalIDs: make(map[string]struct{}, len(outcomes.CanonicalEvents)),
-		insights:     make(map[string]gen.Insight, len(outcomes.Insights)),
+		ScenarioID: scenario.ScenarioID,
+		Beats:      append([]Beat(nil), scenario.Beats...),
+		Expectation: FixtureExpectation{
+			TerraObsolescence: outcomes.Checks.TerraObsolescence,
+			SolRequest:        outcomes.Checks.SolRequest,
+			SupervisorAction:  outcomes.Checks.SupervisorAction,
+		},
+		rawByID:         make(map[string]gen.RawEvent, len(rawDocument.RawEvents)),
+		outputByRaw:     make(map[string]fixtureOutput, len(outcomes.LunaResults)),
+		canonicalIDs:    make(map[string]struct{}, len(outcomes.CanonicalEvents)),
+		insights:        make(map[string]gen.Insight, len(outcomes.Insights)),
+		recommendations: make(map[string]gen.Recommendation, len(outcomes.Recommendations)),
+		auditRecords:    make(map[string]gen.AuditRecord, len(outcomes.AuditRecords)),
 	}
 	for _, raw := range rawDocument.RawEvents {
 		if raw.RawEventID == "" {
@@ -228,6 +245,21 @@ func LoadFixture(dir string) (*Fixture, error) {
 			return nil, errors.New("fixture insight is missing insight_id")
 		}
 		fixture.insights[insight.InsightID] = insight
+	}
+	for _, recommendation := range outcomes.Recommendations {
+		if recommendation.RecommendationID == "" {
+			return nil, errors.New("fixture recommendation is missing recommendation_id")
+		}
+		fixture.recommendations[recommendation.RecommendationID] = recommendation
+	}
+	for _, audit := range outcomes.AuditRecords {
+		if audit.AuditRecordID == "" {
+			return nil, errors.New("fixture audit record is missing audit_record_id")
+		}
+		fixture.auditRecords[audit.AuditRecordID] = audit
+	}
+	if err := validateAdvisoryFixtureExpectation(fixture); err != nil {
+		return nil, err
 	}
 
 	sort.Slice(fixture.Beats, func(i, j int) bool { return fixture.Beats[i].Order < fixture.Beats[j].Order })
@@ -627,7 +659,7 @@ func (s *Service) verifyModelRuns(ctx context.Context) error {
 		return fmt.Errorf("read model runs: %w", err)
 	}
 	defer rows.Close()
-	count := 0
+	lunaCount := 0
 	for rows.Next() {
 		var record string
 		if err := rows.Scan(&record); err != nil {
@@ -640,16 +672,55 @@ func (s *Service) verifyModelRuns(ctx context.Context) error {
 		if err := s.validator.ValidateModelRun(run); err != nil {
 			return fmt.Errorf("validate persisted model run %q: %w", run.ModelRunID, err)
 		}
-		if run.Agent != "luna" || run.Provider != "mosaic-fixture" || run.Model != fixtureModel || run.ValidationStatus != "valid" {
-			return fmt.Errorf("persisted model run %q has unexpected fixture provenance", run.ModelRunID)
+		switch run.Agent {
+		case "luna":
+			if run.Provider != "mosaic-fixture" || run.Model != fixtureModel || run.ValidationStatus != "valid" {
+				return fmt.Errorf("persisted model run %q has unexpected fixture provenance", run.ModelRunID)
+			}
+			lunaCount++
+		case "terra", "sol":
+			// Terra/Sol Model Runs are owned by the fixture-advisory replay path.
+		default:
+			return fmt.Errorf("persisted model run %q has unexpected agent %q", run.ModelRunID, run.Agent)
 		}
-		count++
 	}
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	if count != len(s.fixture.outputByRaw) {
-		return fmt.Errorf("persisted model run count = %d, want %d", count, len(s.fixture.outputByRaw))
+	if lunaCount != len(s.fixture.outputByRaw) {
+		return fmt.Errorf("persisted Luna model run count = %d, want %d", lunaCount, len(s.fixture.outputByRaw))
+	}
+	return nil
+}
+
+func validateAdvisoryFixtureExpectation(fixture *Fixture) error {
+	expectation := fixture.Expectation
+	active, activeOK := fixture.insights[expectation.TerraObsolescence.ActiveInsightID]
+	obsolete, obsoleteOK := fixture.insights[expectation.TerraObsolescence.ObsoleteInsightID]
+	if !activeOK || !obsoleteOK {
+		return errors.New("fixture Terra obsolescence references missing Insights")
+	}
+	if active.LifecycleStatus != "active" || active.StateRevision != 7 {
+		return fmt.Errorf("fixture active Insight %q is not the rev-7 active assessment", active.InsightID)
+	}
+	if obsolete.LifecycleStatus != "obsolete" || obsolete.StateRevision != 9 || obsolete.SupersedesInsightID != active.InsightID {
+		return fmt.Errorf("fixture obsolete Insight %q is not the rev-9 superseding assessment", obsolete.InsightID)
+	}
+	recommendation, recommendationOK := fixture.recommendations[expectation.SolRequest.RecommendationID]
+	if !recommendationOK || recommendation.StateRevision != 7 {
+		return errors.New("fixture Sol request references a missing rev-7 Recommendation")
+	}
+	if expectation.SolRequest.RequestedBy == "" || expectation.SolRequest.BriefingID == "" {
+		return errors.New("fixture Sol request requires requested_by and briefing_id")
+	}
+	if _, ok := fixture.auditRecords[expectation.SolRequest.AuditRecordID]; !ok {
+		return fmt.Errorf("fixture Sol request audit %q is missing", expectation.SolRequest.AuditRecordID)
+	}
+	if expectation.SupervisorAction.RecommendationID != recommendation.RecommendationID {
+		return errors.New("fixture supervisor action targets a different Recommendation")
+	}
+	if _, ok := fixture.auditRecords[expectation.SupervisorAction.AuditRecordID]; !ok {
+		return fmt.Errorf("fixture supervisor audit %q is missing", expectation.SupervisorAction.AuditRecordID)
 	}
 	return nil
 }
