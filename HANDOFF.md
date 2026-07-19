@@ -49,7 +49,8 @@ mosaic/v0.1-foundation
 ├─ parcel/P27-advisory-composition                  (integrated)
 ├─ parcel/P28-advisory-acceptance                   (integrated)
 ├─ parcel/P29-local-feed-generation                 (integrated; candidate rejected, no freeze)
-└─ parcel/P30-corrected-feed-candidate               (integrated; candidate rejected, no freeze)
+├─ parcel/P30-corrected-feed-candidate               (integrated; candidate rejected, no freeze)
+└─ parcel/P31-template-feed-candidate                (claimed by coordinator)
 ```
 
 Do not reuse a prior P01–P20 worktree. Do not claim a row until all of its
@@ -69,7 +70,7 @@ prerequisites are marked `✅ Integrated` on this board.
 | P28 | Public advisory API/UI/Docker/runbook acceptance proof | P26, P27 | `tests/e2e/**`, `docs/runbook/**` | ✅ Integrated — `8d15b0b` |
 | P29 | Generate and inspect one rate-bounded Cerebras `gemma-4-31b` synthetic feed candidate for controlled demo playback; do not freeze it | P28 | `internal/datasetgen/**`, `cmd/datasetgen/**`, `localmodels/staging/domestic-disturbance-v2/**`, `docs/dataset-generation.md` | ✅ Integrated — `03d68a7`; candidate rejected by read-only schema validation and not frozen |
 | P30 | Create a new versioned synthetic-only prompt and, after the recorded authorization, generate and inspect one fresh Cerebras `gemma-4-31b` candidate; do not freeze it | P29 | `prompts/datasetgen/**`, `localmodels/staging/domestic-disturbance-v3/**`, `docs/dataset-generation.md` | ✅ Integrated — `72c5061`; candidate rejected by read-only schema validation and not frozen |
-| P31 | Add a versioned template-conditioned synthetic prompt and, only after explicit approval, generate and inspect one new Cerebras `gemma-4-31b` candidate; do not freeze it | P30 | `prompts/datasetgen/**`, `localmodels/staging/domestic-disturbance-v4/**`, `docs/dataset-generation.md` | ⛔ Blocked — awaits user authorization for one additional provider request |
+| P31 | Add a versioned template-conditioned synthetic prompt and, after the recorded authorization, generate and inspect one new Cerebras `gemma-4-31b` candidate; do not freeze it | P30 | `prompts/datasetgen/**`, `localmodels/staging/domestic-disturbance-v4/**`, `docs/dataset-generation.md` | 🔒 Claimed — coordinator; base `15c6799` |
 
 ## P22 builder brief — advisory-history contract
 
@@ -369,10 +370,11 @@ repaired, or frozen.
 ### Required behavior
 
 - Keep the v1 and v2 prompts unchanged. Add a new versioned prompt that embeds
-  a checked-in synthetic, schema-valid artifact structure as a constrained
-  reference. It must direct the model to retain unique `id_map` values and all
-  cross-artifact relationships while making only explicitly bounded synthetic
-  variations.
+  a checked-in synthetic, schema-valid artifact bundle as a constrained
+  reference. It must direct the model to preserve the reference exactly except
+  for the manifest's non-relational generator, model, prompt-version, seed, and
+  timestamp metadata; all `id_map` values and cross-artifact relationships stay
+  unchanged and unique.
 - Use a new ignored stage directory
   `localmodels/staging/domestic-disturbance-v4/`; never overwrite prior stages.
 - Use only Cerebras `gemma-4-31b`, one fixed seed, one candidate request, and
@@ -436,11 +438,11 @@ Wave B:  P26 dashboard (after P25) ∥ P27 executable composition (after P24/P25
 Wave C:  P28 end-to-end/Docker/runbook proof (after P26/P27) — completed
 Wave D:  P29 Cerebras synthetic feed candidate (after P28) — completed; candidate rejected, no freeze
 Wave E:  P30 corrected prompt and fresh candidate (after P29) — completed; candidate rejected, no freeze
-Wave F:  P31 template-conditioned candidate (after P30) — blocked pending explicit user request authorization
+Wave F:  P31 template-conditioned candidate (after P30) — in progress; authorized 2026-07-20
 ```
 
-P29 and P30 rejected stages are immutable ignored evidence. P31 must not be
-claimed or send a provider request until the coordinator records a new user authorization.
+P29 and P30 rejected stages are immutable ignored evidence. P31 is claimed by
+the coordinator under the recorded 2026-07-20 user authorization for one request.
 ## Notes
 
 Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
@@ -465,3 +467,4 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-20 P29 integrated by coordinator — `03d68a7`; added a one-shot, no-retry Cerebras `gemma-4-31b` generator, credential-safe remote provenance, and read-only `datasetgen validate-stage`, with focused tests and full quality passing. The no-data readiness smoke returned `READY`; the one candidate used seed `20260720` and staged response SHA-256 `56dfc808cbb94b99fb52b9d18f5230efa368dcb7f06550adc5d17302574f5dfe`. Provenance and layout spot checks passed (no credential/local identity; retry disabled), but `validate-stage` rejected the manifest because `schema_versions.audit-record.schema.json` was absent. The ignored stage remains unchanged; no repair, retry, freeze, or commit of generated content occurred. P30 is blocked pending a new explicit user authorization.
 - 2026-07-20 P30 claimed by coordinator — base `c35e7c5`, branch `parcel/P30-corrected-feed-candidate`, worktree `.worktrees/P30-corrected-feed-candidate`; user authorized one corrected-prompt Cerebras request, staging only, no retry or freeze.
 - 2026-07-20 P30 integrated by coordinator — `72c5061`; added prompt v2.0.0 with an explicit 17-schema manifest checklist, separate v3 staging, and the one-request runbook. Focused tests, static analysis, and full quality passed before generation. The one candidate used seed `20260721` and staged response SHA-256 `6938fe896f107b6aeafa9f8580dcbc2501e6a7599eae94c4ceb7021b0b90dda6`. Provenance and layout spot checks passed (Cerebras `gemma-4-31b`, no credential/local identity, retry disabled), but `validate-stage` rejected duplicate `id_map` values: `raw-001`–`raw-004` mapped to `RawEvent` and `can-001`–`can-004` mapped to `CanonicalEvent`. The ignored stage remains unchanged; no repair, retry, freeze, or commit of generated content occurred. P31 is blocked pending a new explicit user authorization.
+- 2026-07-20 P31 claimed by coordinator — base `15c6799`, branch `parcel/P31-template-feed-candidate`, worktree `.worktrees/P31-template-feed-candidate`; user authorized one template-conditioned Cerebras request, staging only, no retry or freeze.
