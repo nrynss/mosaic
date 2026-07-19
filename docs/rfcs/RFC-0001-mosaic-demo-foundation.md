@@ -1,9 +1,9 @@
 # RFC-0001: Mosaic Demo Foundation — Auditable Event-to-COP Pipeline
 
-- **Status:** Partially implemented — reconciled to integrated v0.1 foundation
+- **Status:** Implemented — reconciled through the public operations increment
 - **Owner:** Mosaic coordinator
 - **Decision date:** 2026-07-18
-- **Implementation snapshot:** P01–P16 integrated; the local Docker/E2E acceptance is complete
+- **Implementation snapshot:** P01–P20 integrated; public operations API/UI and Docker/E2E acceptance are complete
 - **Supersedes:** Nothing
 - **Input:** [Mosaic Architecture and Technical Specification](../../Mosaic_Architecture_and_Technical_Specification.md)
 
@@ -22,7 +22,7 @@ supervisor-reviewed Sol Recommendations. The structured Terra and Sol services
 are implemented as independently testable adapters, but no executable
 composition currently invokes a live model or connects that loop to the HTTP
 surface. The binding statements in this RFC distinguish integrated behavior
-from the next composition and acceptance parcels.
+from deferred production decisions.
 
 Mosaic never dispatches a resource, changes an external operational record,
 contacts a person, or makes an operational decision. The demo contains only
@@ -32,7 +32,7 @@ synthetic data.
 
 | Status | Scope |
 |---|---|
-| **Integrated** | P01–P16: schemas/contracts and generated mocks, local SQLite store, ingestion, deterministic projection/replay, fixture simulator, HTTP/SSE read surface, Svelte UI, structured Terra/Sol services, offline data generation, executable composition, and fresh-local Docker/E2E acceptance. |
+| **Integrated** | P01–P20: schemas/contracts and generated mocks, local SQLite store, ingestion, deterministic projection/replay, fixture simulator, public HTTP/SSE and bounded operations surfaces, Svelte UI, structured Terra/Sol services, offline data generation, executable composition, and fresh-local Docker/E2E acceptance. |
 | **Future** | Hosted Cloud Run/Cloud SQL, a shared broker, multi-instance coordination, production identity/privacy/retention, live operational integrations, live model-network adapters, and Experience Store retrieval. |
 
 ## 2. Binding v0.1 behavior that is implemented
@@ -116,7 +116,9 @@ its deterministic event loop.
 
 - P10 and P11 accept injected, least-privilege structured clients. Terra sees
   serialized committed COP data, a state revision, and permitted evidence;
-  Sol additionally sees active Insights and requires `supervisor-demo`.
+  Sol additionally sees active Insights and retains a fixture-level
+  `supervisor-demo` requester guard. It is not composed into the public HTTP
+  surface; a live advisory integration must revisit that boundary.
 - Candidate Insights and Recommendations are schema-validated, constrained to
   their requested state revision and permitted evidence, and persist a
   ModelRun containing provider/model/prompt/schema identity, inputs, outputs,
@@ -135,34 +137,49 @@ replay process are deterministic from accepted persisted artifacts. Model
 inference is not assumed deterministic; provenance records make an accepted
 model result auditable rather than reproducible by re-querying a model.
 
-### 2.5 Current /api/v1 and fixed demo identities
+### 2.5 Current public /api/v1 surface and pluggable access policy
 
-P08 is a local HTTP/SSE **read and audit-record surface**, not an event-ingest,
-scenario-control, or live-agent API. GET /api/v1/health and GET /api/v1/version
-are public. All other reads require the X-Mosaic-Demo-Identity header with
-exactly `viewer-demo` or `supervisor-demo`; this is a fixed demonstration
-control, not authentication.
+P17 retains a local HTTP/SSE **read and immutable-audit-record surface**, not an
+event-ingest, scenario-control, live-agent, or operational-action API. The
+injected API-local `PublicActorResolver` resolves every caller to `public-demo`,
+and `AllowDemoPolicy` permits the current demo routes. They are composition
+seams for a later identity-aware resolver and policy; no login, token, session,
+or configured access restriction exists in this demo.
+
+`X-Mosaic-Demo-Identity` is optional display metadata only. It is not a
+credential and never gates access. A no-header audit record uses the
+schema-valid `public-demo` / `viewer` display identity.
 
 | Route | Implemented behavior |
 |---|---|
+| GET /api/v1/health | Returns local health. |
+| GET /api/v1/version | Returns the API version. |
 | GET /api/v1/cop | Returns a recovered deterministic COP and its revision. |
 | GET /api/v1/evidence/{kind}/{id} | Resolves a state fact or one persisted evidence target. |
 | GET /api/v1/artifacts/{kind}/{id} | Resolves one persisted immutable artifact. |
 | GET /api/v1/stream | Sends an initial `cop.snapshot`, then best-effort locally published named events. |
-| POST /api/v1/briefings | `supervisor-demo` only; appends a `briefing_requested` Audit Record and responds with `executed: false`. It does not invoke Sol. |
-| POST /api/v1/audit-actions | `supervisor-demo` only; validates an existing Insight or Recommendation target, appends an acknowledgement/rejection/note Audit Record, and responds with `executed: false`. |
+| GET /api/v1/operations | Returns bounded aggregate record/lifecycle/model-run counts, same-request recovery facts, and local-stream metadata; it never returns raw payloads, checksums, prompts, or model responses. |
+| POST /api/v1/briefings | Appends a `briefing_requested` Audit Record and responds with `executed: false`. It does not invoke Sol. |
+| POST /api/v1/audit-actions | Validates an existing Insight or Recommendation target, appends an acknowledgement/rejection/note Audit Record, and responds with `executed: false`. |
 
 There is currently no /events, /insights, /scenarios/{id}/run, or
 Recommendation-producing HTTP endpoint. Apart from the initial `cop.snapshot`,
-event names and publishers are composition concerns; P08 alone does not attach
-the simulator or model services to the stream.
+event names and publishers are composition concerns. The broker remains
+process-local and best-effort; it is not shared multi-instance notification.
 
-### 2.6 Dashboard
+### 2.6 Dashboard and operations receipt
 
-P09 is a Svelte 5 runes application on Vite 8. It provides a deliberately local
-evidence-aware COP ledger with fixed viewer/supervisor identity controls,
-authenticated /api/v1 reads, SSE reconnect, claim-class labels, evidence
-resolution, and visibly non-operational review controls.
+P09/P18 is a Svelte 5 runes application on Vite 8. It provides a deliberately
+local evidence-aware COP ledger and a public operations receipt. It has no
+identity chooser or browser auth header: public review controls append only
+immutable records with `executed: false`.
+
+The receipt presents the observed/source timestamps, recovered COP revision,
+bounded durable and lifecycle counts, persisted model-run outcomes, local SSE
+metadata, and capability mode/status statements. It visibly distinguishes
+fixture, composed, recovered, degraded, and unavailable conditions. It names
+live Terra/Sol transport, durable reconciliation, and external operational
+action as unavailable rather than implying they run.
 
 The UI displays reported facts from the COP and does not infer a derived
 assessment from them. It leaves assessment/recommendation display unavailable
@@ -189,13 +206,13 @@ input.
 
 | Parcel | Status and acceptance boundary | Current limitation |
 |---|---|---|
-| **P14 — executable composition** | **Integrated.** `cmd/mosaicdemo` validates the frozen dataset, opens SQLite, seeds/replays the deterministic scenario, serves the P08 API, and hosts a prebuilt P09 dashboard. It deliberately includes no live model or operational-system integration. | The executable requires a separately prebuilt `ui/dist`; no dashboard build artifact is committed. It does not compose Terra/Sol or publish a live-model assessment stream. |
-| **P12 — Docker end-to-end acceptance** | **Integrated.** The multi-stage image builds the Vite dashboard and `mosaicdemo`; Compose initializes only the named SQLite volume, then runs the application nonroot and read-only. The E2E suite and a fresh Docker smoke prove dashboard delivery, COP revision 9, governed evidence resolution, SSE, and immutable `executed: false` audit behavior. | The standard image intentionally contains no GGUF, local model directory, live model client, or operational-system client. |
+| **P14/P19 — executable composition** | **Integrated.** `cmd/mosaicdemo` validates the frozen dataset, opens SQLite, seeds/replays the deterministic scenario, composes the public API and SQLite operations reader, and hosts the prebuilt dashboard. | The executable requires a separately prebuilt `ui/dist`; no dashboard build artifact is committed. It does not compose Terra/Sol or publish a live-model assessment stream. |
+| **P12/P20 — Docker and public acceptance** | **Integrated.** The multi-stage image builds the Vite dashboard and `mosaicdemo`; Compose initializes only the named SQLite volume, then runs the application nonroot and read-only. The E2E suite and fresh Docker smoke prove no-header dashboard delivery, COP revision 9, governed evidence resolution, bounded operations telemetry, SSE, and immutable `executed: false` audit behavior. | The standard image intentionally contains no GGUF, local model directory, live model client, reconciliation worker, PostgreSQL service, or operational-system client. |
 
 P10/P11 remain valid structured service parcels, but their live invocation,
 fixture composition, artifact read exposure, and any automatic Terra trigger
-remain outside P14 as currently scoped. A future parcel or RFC must make that
-integration decision explicitly.
+remain outside `mosaicdemo`. A future parcel or RFC must make that integration
+decision explicitly.
 
 ## 4. Acceptance evidence available now
 
@@ -208,7 +225,7 @@ The integrated package tests prove the following narrow boundaries:
 | Deterministic state | Canonical ordering, correction handling, idempotent projector retry, checkpoint rollback behavior, restart replay, and byte-identical fixture COP serialization. |
 | Scenario | Ten-beat fixture replay, repaired/quarantined/late/correction paths, final revision 9, and replay verification. |
 | Terra/Sol | Structured fixture clients; schema, evidence, revision, role, neutral-language, refusal/failure/timeout, lifecycle, and ModelRun-record checks. |
-| API/UI | Fixed-role HTTP/SSE and immutable audit endpoint tests; P14 composition tests seed the deterministic API and guard the static UI host. Svelte type/build checks are provided by the UI package. |
+| API/UI | Public no-header HTTP/SSE, bounded operations telemetry, immutable audit endpoint, and static-host tests; P19 composition tests seed the deterministic API and operations reader. Svelte 5/Vite 8 checks are provided by the UI package. |
 | Dataset generation | Local runner, staged bundle/provenance, validation, explicit freeze, and destination-safety tests. |
 
 Latency and throughput are observed only; they are not v0.1 release gates. The

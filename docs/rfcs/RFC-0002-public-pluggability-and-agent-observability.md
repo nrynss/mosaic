@@ -1,9 +1,10 @@
 # RFC-0002: Public Demo Pluggability and Agent Observability
 
-- **Status:** Draft — design contract for the next demo increment
+- **Status:** Implemented — P17–P20 public operations increment
 - **Owner:** Mosaic coordinator
 - **Decision date:** 2026-07-19
 - **Depends on:** [RFC-0001](RFC-0001-mosaic-demo-foundation.md)
+- **Implementation snapshot:** Public actor/policy seam, bounded operations API, Svelte operations receipt, executable composition, public E2E acceptance, and Docker smoke are integrated.
 
 ## 1. Decision
 
@@ -46,9 +47,10 @@ Out of scope:
 
 ### 3.1 Current policy
 
-The demo is public. The existing `X-Mosaic-Demo-Identity` value is a visible
-viewer/supervisor *mode selector*, not authentication and not a security
-boundary. Any client may choose either fixed demo mode.
+The demo is public. `X-Mosaic-Demo-Identity` is optional viewer/supervisor
+*display metadata*, not authentication and not a security boundary. Any client
+may omit it or choose either fixed mode; the public actor/policy defaults permit
+all current demo reads and immutable audit-record writes.
 
 ### 3.2 Required seam
 
@@ -135,21 +137,25 @@ prompts, model responses, secrets, or user data.
 | Human review | Records a non-operational review | immutable Audit Record, `executed: false` | Implemented |
 | Operational action | Dispatches or mutates an external system | none | Permanently unavailable in this demo |
 
-### 6.2 Minimum public telemetry
+### 6.2 Implemented public telemetry
 
-The first iteration should expose only current, bounded values:
+The current endpoint returns only bounded values for one observation:
 
-- service version, start time, uptime, and current COP revision;
-- canonical/raw/lifecycle/model-run/audit counts, grouped by stable outcome;
-- last successful projection and replay timestamps/revisions;
-- count and age of known unprojected work, when reconciliation exists;
-- active local SSE connections and latest published event name; and
-- clearly labelled component mode: fixture, composed, unavailable, failed, or
-  recovering.
+- service version, start time, uptime, observed time, latest source receipt,
+  and same-request recovered COP revision/projected time;
+- raw/canonical/projected/unprojected/checkpoint/insight/recommendation/audit
+  counts, Luna lifecycle counts, and Model Run outcomes grouped by agent and
+  validation status;
+- active local SSE connections plus latest published event name and timestamp;
+  and
+- exact capability mode/status records: fixture, composed, recovered,
+  unavailable, or permanently unavailable.
 
-Every value needs a timestamp and source reference. The UI should distinguish
-**healthy**, **degraded**, **recovering**, and **unavailable** from a claim that
-an agent made a judgment.
+The dashboard derives its compact recovered/degraded/unavailable presentation
+from those records. `unprojected_events` becomes a degraded observation; it is
+not evidence that a reconciliation worker exists. Raw payload bytes, checksums,
+prompts, model responses, secrets, and user data are excluded from the API and
+UI.
 
 ### 6.3 Self-healing language
 
@@ -173,16 +179,32 @@ deletion workflow, or privacy classification is implemented or implied. This is
 an explicit documentation boundary only; a real-data integration requires its
 own privacy, retention, access, and audit design before implementation.
 
-## 8. Acceptance criteria for the next increment
+## 8. Implementation evidence
 
-- Public access works without login or credentials.
-- The public actor/policy adapters can be replaced in composition without
-  editing domain services or persistence.
-- The agent operations view shows capability, status, bounded telemetry, and
-  source timestamps without raw payload exposure.
-- Startup/replay is labelled **recovered**, not self-healing.
-- Any future reconciliation is durable, deterministic, idempotent, and emits
-  a visible outcome record.
+The P17–P20 increment satisfies the present-demo acceptance criteria:
+
+- Public access works with no login, credential, or required header.
+- Public actor/policy adapters are injected API seams; tests prove a deny
+  policy can replace the public default without changing persistence or domain
+  services.
+- The operations endpoint and dashboard expose capability, status, bounded
+  telemetry, source timestamps, lifecycle/model outcomes, and local stream
+  facts without raw payload exposure.
+- Startup/replay is labelled **recovered**. A nonzero unprojected count is
+  labelled **degraded**, without claiming automatic reconciliation.
 - SQLite remains the local default; no PostgreSQL container is added.
-- Documentation states that multi-instance support additionally requires
-  durable dispatch, ownership, and shared notification.
+- The Docker runbook and E2E suite state that multi-instance support still
+  requires durable dispatch, projection ownership, shared notification, and
+  reconciliation design.
+- The complete Go quality gate, Svelte check/build, and fresh isolated Docker
+  smoke pass for the no-header dashboard, COP revision 9, and operations
+  receipt.
+
+## 9. Constraints that remain future work
+
+Any future reconciliation must be durable, deterministic, idempotent, and
+record a bounded outcome. A multi-instance deployment additionally requires a
+PostgreSQL-backed store adapter, durable outbox/work handling, projector
+ownership/lease semantics, and shared notification. Authentication, privacy,
+retention, live model transport, and all operational actions remain out of
+scope for this demo.

@@ -60,7 +60,7 @@ branch until the deterministic spine is integrated and stable.
 | P17 | Public actor/policy seam and evidence-backed agent-operations API | P08, P10, P11 | `internal/api/**`, `internal/stream/**` | ✅ Integrated — `3f054b8` |
 | P18 | Agent-operations dashboard panel | P17 | `ui/**` | ✅ Integrated — `df8895e` |
 | P19 | Local executable composition for agent operations | P14, P17 | `cmd/mosaicdemo/**` | ✅ Integrated — `0b60d68` |
-| P20 | Public operations API/UI acceptance and runbook proof | P17–P19 | `tests/e2e/**`, `docs/runbook/**` | 🔒 Claimed — `/root/p20_public_operations_acceptance` |
+| P20 | Public operations API/UI acceptance and runbook proof | P17–P19 | `tests/e2e/**`, `docs/runbook/**` | ✅ Integrated — `2604c92` |
 
 ## Waves
 
@@ -168,3 +168,4 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-19 P19 integrated by coordinator — `0b60d68`; executable composes the SQLite operations reader and package test proves public populated operations telemetry.
 - 2026-07-19 P18 integrated by coordinator — `df8895e`; Svelte 5 runes operations receipt builds on Vite 8 with bounded telemetry, explicit limitations, and public-demo review controls.
 - 2026-07-19 P20 claimed by `/root/p20_public_operations_acceptance` — base `df8895e`, branch `parcel/P20-public-operations-acceptance`, worktree `.worktrees/P20-public-operations-acceptance`; final public API, UI, Docker, and runbook proof.
+- 2026-07-19 P20 integrated by coordinator — `2604c92`; no-header public E2E/operations acceptance, full quality, Svelte/Vite checks, and isolated Docker smoke all passed. Docker cleanup used ordinary down with the SQLite volume retained.
