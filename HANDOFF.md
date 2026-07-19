@@ -66,7 +66,7 @@ prerequisites are marked `✅ Integrated` on this board.
 | P26 | Advisory-history dashboard cards, evidence links, and supersession presentation | P25 | `ui/**` | ✅ Integrated — `24c7d70` |
 | P27 | Local executable composition of fixture replay, advisory history, and public API | P24, P25 | `cmd/mosaicdemo/**` | ✅ Integrated — `3ecbefb` |
 | P28 | Public advisory API/UI/Docker/runbook acceptance proof | P26, P27 | `tests/e2e/**`, `docs/runbook/**` | ✅ Integrated — `8d15b0b` |
-| P29 | Generate and inspect one local-model synthetic feed candidate for controlled demo playback; do not freeze it yet | P28 | `internal/datasetgen/**`, `localmodels/staging/domestic-disturbance-v2/**`, `docs/dataset-generation.md` | 🔒 Claimed — coordinator; base `b050618` |
+| P29 | Generate and inspect one rate-bounded Cerebras `gemma-4-31b` synthetic feed candidate for controlled demo playback; do not freeze it yet | P28 | `internal/datasetgen/**`, `cmd/datasetgen/**`, `localmodels/staging/domestic-disturbance-v2/**`, `docs/dataset-generation.md` | 🔒 Claimed — coordinator; base `b050618` |
 
 ## P22 builder brief — advisory-history contract
 
@@ -280,25 +280,26 @@ modified unless the coordinator opens a dedicated Docker parcel.
   action claims.
 - Run Svelte check/build, `go run ./cmd/mosaic quality`, and a fresh isolated
   Docker build/start/smoke. Report each command verbatim.
-`r`n## P29 coordinator brief — local synthetic feed candidate
+
+
+## P29 coordinator brief — rate-bounded synthetic feed candidate
 
 ### Goal
 
-Generate one staged, local-model candidate for a future controlled playback
-demo. The model creates synthetic source-feed artifacts before the demo; a
-later parcel may replay a reviewed, frozen version through the normal
+Generate one staged Cerebras `gemma-4-31b` candidate for a future controlled
+playback demo. The model creates synthetic source-feed artifacts before the
+demo; a later parcel may replay a reviewed, frozen version through the normal
 ingestion path. P29 does not change the checked-in dataset, startup
 composition, public API, UI, or any live-model policy.
 
 ### Required behavior
 
-- Use the existing offline `datasetgen` command with a locally installed
-  llama.cpp executable and GGUF. The model and staging directory remain ignored
-  local artifacts; no model binary, generated candidate, credential, or real
-  record may enter Git.
-- Ensure the local llama invocation is explicitly single-turn/non-interactive,
-  with a focused regression test, so a valid JSON response exits rather than
-  waiting for console input.
+- Use Cerebras `gemma-4-31b` through an explicit runtime credential only. No
+  credential, provider response, generated candidate, or real record may enter
+  Git.
+- Respect the provider budget: one tiny no-data readiness smoke and at most one
+  fixed-seed candidate request, with no automatic retries. Stop on rate limit,
+  timeout, refusal, or invalid output.
 - Generate only into the initially empty
   `localmodels/staging/domestic-disturbance-v2/` directory, for scenario
   `domestic-disturbance` and a recorded fixed seed.
@@ -308,17 +309,18 @@ composition, public API, UI, or any live-model policy.
   expected temporal ordering, corrections, and internally consistent IDs.
 - Do not run `datasetgen freeze` until the coordinator and user have reviewed
   the staged candidate. Promotion is a separate, explicitly approved parcel.
-- Update the generation runbook's example to use the installed `llama-cli`
-  discovery path rather than a stale build-directory example.
+- Update the generation runbook with the provider selection, runtime-only
+  credential requirement, budget, and staging-only workflow.
 
 ### Acceptance
 
 - `go test ./internal/datasetgen/... -count=1` and
   `go run ./cmd/datasetgen validate` pass before generation.
-- A local-model smoke invocation produces exactly the documented stage layout
-  and valid provenance without writing under `datasets/`.
-- The coordinator records the model path, seed, staged response checksum, and
-  concise spot-check outcome in the P29 handoff note; no staged content is
+- The readiness smoke sends no repository or operational data. A successful
+  single candidate request produces exactly the documented stage layout and
+  valid provenance without writing under `datasets/`.
+- The coordinator records the requested model, seed, staged response checksum,
+  and concise spot-check outcome in the P29 handoff note; no staged content is
   committed.
 ## Shared-file mutexes
 
@@ -332,7 +334,7 @@ composition, public API, UI, or any live-model policy.
 | `ui/**` | P26 integrated; frozen unless the coordinator opens a dedicated parcel |
 | `cmd/mosaicdemo/**` | P27 integrated; frozen unless the coordinator opens a dedicated parcel |
 | `tests/e2e/**`, `docs/runbook/**` | P28 integrated; frozen unless the coordinator opens a dedicated parcel |
-| `internal/datasetgen/**`, `localmodels/staging/domestic-disturbance-v2/**`, `docs/dataset-generation.md` | P29 only while claimed; staged contents are ignored and never committed |
+| `internal/datasetgen/**`, `cmd/datasetgen/**`, `localmodels/staging/domestic-disturbance-v2/**`, `docs/dataset-generation.md` | P29 only while claimed; staged contents are ignored and never committed |
 | `ontology/**`, `internal/ontology/**`, `migrations/**`, `go.mod`, `go.sum`, `Taskfile.yml`, `Dockerfile`, `docker-compose.yml` | Frozen for P24–P28 unless the coordinator opens a dedicated parcel |
 
 ## Integration and external handoff template
