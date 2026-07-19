@@ -50,7 +50,7 @@ mosaic/v0.1-foundation
 ├─ parcel/P28-advisory-acceptance                   (integrated)
 ├─ parcel/P29-local-feed-generation                 (integrated; candidate rejected, no freeze)
 ├─ parcel/P30-corrected-feed-candidate               (integrated; candidate rejected, no freeze)
-└─ parcel/P31-template-feed-candidate                (claimed by coordinator)
+└─ parcel/P31-template-feed-candidate                (integrated; validated candidate staged, no freeze)
 ```
 
 Do not reuse a prior P01–P20 worktree. Do not claim a row until all of its
@@ -70,7 +70,8 @@ prerequisites are marked `✅ Integrated` on this board.
 | P28 | Public advisory API/UI/Docker/runbook acceptance proof | P26, P27 | `tests/e2e/**`, `docs/runbook/**` | ✅ Integrated — `8d15b0b` |
 | P29 | Generate and inspect one rate-bounded Cerebras `gemma-4-31b` synthetic feed candidate for controlled demo playback; do not freeze it | P28 | `internal/datasetgen/**`, `cmd/datasetgen/**`, `localmodels/staging/domestic-disturbance-v2/**`, `docs/dataset-generation.md` | ✅ Integrated — `03d68a7`; candidate rejected by read-only schema validation and not frozen |
 | P30 | Create a new versioned synthetic-only prompt and, after the recorded authorization, generate and inspect one fresh Cerebras `gemma-4-31b` candidate; do not freeze it | P29 | `prompts/datasetgen/**`, `localmodels/staging/domestic-disturbance-v3/**`, `docs/dataset-generation.md` | ✅ Integrated — `72c5061`; candidate rejected by read-only schema validation and not frozen |
-| P31 | Add a versioned template-conditioned synthetic prompt and, after the recorded authorization, generate and inspect one new Cerebras `gemma-4-31b` candidate; do not freeze it | P30 | `prompts/datasetgen/**`, `localmodels/staging/domestic-disturbance-v4/**`, `docs/dataset-generation.md` | 🔒 Claimed — coordinator; base `15c6799` |
+| P31 | Add a versioned template-conditioned synthetic prompt and, after the recorded authorization, generate and inspect one new Cerebras `gemma-4-31b` candidate; do not freeze it | P30 | `prompts/datasetgen/**`, `localmodels/staging/domestic-disturbance-v4/**`, `docs/dataset-generation.md` | ✅ Integrated — `41f501d`; candidate validates and awaits separate freeze approval |
+| P32 | Promote the exact validated P31 candidate to `datasets/domestic-disturbance-v4` only after explicit review/freeze approval | P31 | `datasets/domestic-disturbance-v4/**` | ⛔ Blocked — awaits user review and explicit freeze authorization |
 
 ## P22 builder brief — advisory-history contract
 
@@ -392,6 +393,33 @@ repaired, or frozen.
   without writing under `datasets/`.
 - The handoff note records model, seed, output checksum, validation result, and
   the decision not to freeze pending separate approval.
+
+## P32 coordinator brief — reviewed candidate promotion
+
+### Goal
+
+Promote only the exact, validated P31 stage into a new frozen dataset version
+once the user has reviewed the stage and explicitly authorized freezing. It is
+not a model request and must not alter P31's staging evidence.
+
+### Required behavior
+
+- Run `datasetgen validate-stage` against P31's canonical ignored v4 stage
+  immediately before promotion. Stop if it no longer validates.
+- Run `datasetgen freeze --input localmodels/staging/domestic-disturbance-v4
+  --output datasets/domestic-disturbance-v4` exactly once after approval.
+- Do not edit, recreate, or remove the staged candidate; freeze must leave its
+  model output, provenance, and extracted artifacts byte-for-byte unchanged.
+- Do not select the new dataset for a runtime demo in this parcel. Dataset
+  selection and replay composition require a separate approved parcel.
+
+### Acceptance
+
+- The frozen v4 dataset is schema-valid, a new direct child of `datasets/`, and
+  byte-for-byte matches the P31 artifacts.
+- Existing frozen datasets and P31 staging remain unchanged.
+- `go run ./cmd/datasetgen validate` and `go run ./cmd/mosaic quality` pass;
+  the handoff records the promotion SHA and exact validation results.
 ## Shared-file mutexes
 
 | Path | Owner / rule |
@@ -406,9 +434,10 @@ repaired, or frozen.
 | `tests/e2e/**`, `docs/runbook/**` | P28 integrated; frozen unless the coordinator opens a dedicated parcel |
 | `internal/datasetgen/**`, `cmd/datasetgen/**` | P29 integrated; frozen unless the coordinator opens a dedicated generator parcel |
 | `localmodels/staging/domestic-disturbance-v2/**` | P29 rejected candidate; immutable ignored evidence that must not be edited, frozen, or committed |
-| `prompts/datasetgen/**`, `docs/dataset-generation.md` | P30 integrated; frozen unless the coordinator opens P31 or another dedicated prompt parcel |
+| `prompts/datasetgen/**`, `docs/dataset-generation.md` | P31 integrated; frozen unless the coordinator opens another dedicated prompt parcel |
 | `localmodels/staging/domestic-disturbance-v3/**` | P30 rejected candidate; immutable ignored evidence that must not be edited, frozen, or committed |
-| `localmodels/staging/domestic-disturbance-v4/**` | Reserved for P31 only after it is explicitly authorized and claimed |
+| `localmodels/staging/domestic-disturbance-v4/**` | P31 validated candidate; immutable ignored evidence, held for P32 review/freeze only |
+| `datasets/domestic-disturbance-v4/**` | Reserved for P32 only after it is explicitly authorized and claimed |
 | `ontology/**`, `internal/ontology/**`, `migrations/**`, `go.mod`, `go.sum`, `Taskfile.yml`, `Dockerfile`, `docker-compose.yml` | Frozen for P24–P28 unless the coordinator opens a dedicated parcel |
 
 ## Integration and external handoff template
@@ -438,11 +467,12 @@ Wave B:  P26 dashboard (after P25) ∥ P27 executable composition (after P24/P25
 Wave C:  P28 end-to-end/Docker/runbook proof (after P26/P27) — completed
 Wave D:  P29 Cerebras synthetic feed candidate (after P28) — completed; candidate rejected, no freeze
 Wave E:  P30 corrected prompt and fresh candidate (after P29) — completed; candidate rejected, no freeze
-Wave F:  P31 template-conditioned candidate (after P30) — in progress; authorized 2026-07-20
+Wave F:  P31 template-conditioned candidate (after P30) — completed; validated, awaiting freeze approval
+Wave G:  P32 reviewed candidate promotion (after P31) — blocked pending explicit user review/freeze authorization
 ```
 
-P29 and P30 rejected stages are immutable ignored evidence. P31 is claimed by
-the coordinator under the recorded 2026-07-20 user authorization for one request.
+P29 and P30 rejected stages are immutable ignored evidence. P31's validated stage
+is immutable until the coordinator records separate user review/freeze authorization.
 ## Notes
 
 Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
@@ -468,3 +498,4 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-20 P30 claimed by coordinator — base `c35e7c5`, branch `parcel/P30-corrected-feed-candidate`, worktree `.worktrees/P30-corrected-feed-candidate`; user authorized one corrected-prompt Cerebras request, staging only, no retry or freeze.
 - 2026-07-20 P30 integrated by coordinator — `72c5061`; added prompt v2.0.0 with an explicit 17-schema manifest checklist, separate v3 staging, and the one-request runbook. Focused tests, static analysis, and full quality passed before generation. The one candidate used seed `20260721` and staged response SHA-256 `6938fe896f107b6aeafa9f8580dcbc2501e6a7599eae94c4ceb7021b0b90dda6`. Provenance and layout spot checks passed (Cerebras `gemma-4-31b`, no credential/local identity, retry disabled), but `validate-stage` rejected duplicate `id_map` values: `raw-001`–`raw-004` mapped to `RawEvent` and `can-001`–`can-004` mapped to `CanonicalEvent`. The ignored stage remains unchanged; no repair, retry, freeze, or commit of generated content occurred. P31 is blocked pending a new explicit user authorization.
 - 2026-07-20 P31 claimed by coordinator — base `15c6799`, branch `parcel/P31-template-feed-candidate`, worktree `.worktrees/P31-template-feed-candidate`; user authorized one template-conditioned Cerebras request, staging only, no retry or freeze.
+- 2026-07-20 P31 integrated by coordinator — `41f501d`; added prompt v3.0.0 containing the checked-in synthetic schema-valid bundle as an exact reference and a transparent v4 staging runbook. Focused tests, static analysis, and full quality passed before generation. The one candidate used seed `20260722` and staged response SHA-256 `23558b437f28ca5d7d1375809974d722533d33dddf115fd50d01a5638861feee`; `validate-stage` passed. Spot checks confirm Cerebras `gemma-4-31b` provenance with no credential/local identity and retry disabled, 17 manifest schema versions, 10 source-ordered raw events (10:00–10:10 UTC), correction outcomes, and byte-for-byte artifact equality with the checked-in synthetic reference. No freeze or generated-content commit occurred. P32 is blocked pending user review and explicit freeze authorization.
