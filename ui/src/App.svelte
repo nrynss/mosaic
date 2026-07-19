@@ -14,6 +14,9 @@
   let operations = $state(null);
   let operationsState = $state('idle');
   let operationsError = $state('');
+  let advisories = $state(null);
+  let advisoriesState = $state('idle');
+  let advisoriesError = $state('');
   let streamState = $state('idle');
   let streamDetail = $state('Not connected');
   let selectedEvidence = $state(null);
@@ -37,6 +40,8 @@
   let operationsPresentation = $derived(describeOperations(operations, operationsState));
   let operationsCapabilities = $derived(arrayOf(operations?.capabilities));
   let modelRunAgents = $derived(arrayOf(operations?.counts?.model_runs?.by_agent));
+  let hasCurrentInsight = $derived(arrayOf(advisories?.insights).some(ins => ins.status === 'current'));
+  let hasCurrentRecommendation = $derived(arrayOf(advisories?.recommendations).some(rec => rec.status === 'current'));
 
   onMount(() => {
     void refreshAll();
@@ -79,7 +84,7 @@
   }
 
   async function refreshAll() {
-    await Promise.all([loadPublicStatus(), loadCOP(), loadOperations()]);
+    await Promise.all([loadPublicStatus(), loadCOP(), loadOperations(), loadAdvisories()]);
     connectStream();
   }
 
@@ -123,6 +128,29 @@
       operations = null;
       operationsState = 'unavailable';
       operationsError = error.message;
+    }
+  }
+
+  async function loadAdvisories() {
+    advisoriesState = 'loading';
+    advisoriesError = '';
+    try {
+      advisories = await readEnvelope('advisories');
+      if (advisories?.status === 'unavailable') {
+        advisoriesState = 'unavailable';
+      } else {
+        const hasInsights = arrayOf(advisories?.insights).length > 0;
+        const hasRecs = arrayOf(advisories?.recommendations).length > 0;
+        if (!hasInsights && !hasRecs) {
+          advisoriesState = 'empty';
+        } else {
+          advisoriesState = 'ready';
+        }
+      }
+    } catch (error) {
+      advisories = null;
+      advisoriesState = 'unavailable';
+      advisoriesError = error.message;
     }
   }
 
@@ -287,12 +315,14 @@
       cop = payload;
       copState = 'ready';
       copError = '';
+      void loadAdvisories();
       return;
     }
     // P08's named event means the read model changed. Re-reading the COP keeps
     // the dashboard deterministic even when an event's payload is only a notice.
     void loadCOP();
     void loadOperations({ quiet: true });
+    void loadAdvisories();
   }
 
   function submitBriefing(event) {
@@ -593,18 +623,125 @@
       </ol>
     {/if}
 
-    <section class="withheld-claims" aria-label="Assessment and recommendation availability">
-      <div>
-        <p class="claim-class assessed">Derived assessment</p>
-        <h3>No assessment artifact is exposed by this read surface.</h3>
-        <p>The dashboard does not infer an assessment from reported facts. It will show a Terra artifact only when an evidence-resolvable API record is available.</p>
+    {#if advisoriesState === 'loading'}
+      <div class="empty-state" aria-live="polite">Loading advisories…</div>
+    {:else if advisoriesState === 'unavailable'}
+      <section class="advisory-composition" data-state="unavailable" aria-label="Advisory composition is unavailable">
+        <div class="advisory-column">
+          <p class="claim-class assessed">Derived assessment</p>
+          <div class="empty-advisory-state" data-state="unavailable">
+            <h3>Assessment unavailable</h3>
+            <p>Live Terra model transport is not composed, or structured fixture response was refused, invalid, or failed.</p>
+          </div>
+        </div>
+        <div class="advisory-column">
+          <p class="claim-class recommended">Human-review recommendation</p>
+          <div class="empty-advisory-state" data-state="unavailable">
+            <h3>Recommendation unavailable</h3>
+            <p>Live Sol model transport is not composed, or structured fixture response was refused, invalid, or failed.</p>
+          </div>
+        </div>
+      </section>
+    {:else if advisoriesState === 'empty'}
+      <section class="advisory-composition" data-state="empty" aria-label="No advisories are composed">
+        <div class="advisory-column">
+          <p class="claim-class assessed">Derived assessment</p>
+          <div class="empty-advisory-state" data-state="empty">
+            <h3>No assessment composed</h3>
+            <p>No local fixture is composed, or the advisory history is empty.</p>
+          </div>
+        </div>
+        <div class="advisory-column">
+          <p class="claim-class recommended">Human-review recommendation</p>
+          <div class="empty-advisory-state" data-state="empty">
+            <h3>No recommendation composed</h3>
+            <p>No local fixture is composed, or the advisory history is empty.</p>
+          </div>
+        </div>
+      </section>
+    {:else if advisoriesState === 'ready' && advisories}
+      <div class="advisories-header">
+        <p class="advisory-mode-badge" data-mode={advisories.status || 'unavailable'}>
+          Composition Mode: {(advisories.status || 'unavailable').replaceAll('_', ' ').replaceAll('-', ' ')}
+        </p>
       </div>
-      <div>
-        <p class="claim-class recommended">Human-review recommendation</p>
-        <h3>No recommendation artifact is exposed by this read surface.</h3>
-        <p>A public demo review may be recorded only against an existing recommendation or insight ID. This never executes an operational action.</p>
-      </div>
-    </section>
+
+      <section class="advisory-composition" data-state="ready" aria-label="Advisory assessment and recommendations">
+        <div class="advisory-column">
+          <p class="claim-class assessed">Derived assessment</p>
+          {#if hasCurrentInsight}
+            <!-- Current assessment rendered below -->
+          {:else}
+            <div class="empty-advisory-state" data-state="superseded">
+              <h3>No current assessment is active.</h3>
+              <p>The final road-opening correction has superseded the previous assessment.</p>
+            </div>
+          {/if}
+
+          {#each arrayOf(advisories.insights) as ins (ins.insight_id)}
+            <div class="advisory-card assessed-card" data-status={ins.status}>
+              <div class="card-header">
+                <strong>{ins.insight_id}</strong>
+                <span class="status-badge" data-status={ins.status}>{ins.status.replaceAll('_', ' ')}</span>
+              </div>
+              <div class="card-body">
+                <h4>Assertions</h4>
+                <ul>
+                  {#each arrayOf(ins.assertions) as assertion}
+                    <li>{assertion}</li>
+                  {/each}
+                </ul>
+                {#if ins.confidence}
+                  <div class="confidence-info">
+                    <strong>Confidence</strong>: {ins.confidence.basis} (Source: {ins.confidence.source_quality}, Reasoning: {ins.confidence.reasoning_support})
+                  </div>
+                {/if}
+              </div>
+              <div class="card-footer">
+                <button class="evidence-button" onclick={() => selectEvidence('insight', ins.insight_id, `Insight · ${ins.insight_id}`)}>
+                  Resolve evidence
+                </button>
+                <button class="prefill-button" onclick={() => { auditTargetID = ins.insight_id; auditTargetKind = 'insight'; }}>
+                  Review insight
+                </button>
+              </div>
+            </div>
+          {/each}
+        </div>
+
+        <div class="advisory-column">
+          <p class="claim-class recommended">Human-review recommendation</p>
+          {#if hasCurrentRecommendation}
+            <!-- Current recommendation rendered below -->
+          {:else}
+            <div class="empty-advisory-state" data-state="not-current">
+              <h3>No current recommendation is active.</h3>
+              <p>No current operational recommendation is active at this revision.</p>
+            </div>
+          {/if}
+
+          {#each arrayOf(advisories.recommendations) as rec (rec.recommendation_id)}
+            <div class="advisory-card recommended-card" data-status={rec.status}>
+              <div class="card-header">
+                <strong>{rec.recommendation_id}</strong>
+                <span class="status-badge" data-status={rec.status}>{rec.status.replaceAll('_', ' ')}</span>
+              </div>
+              <div class="card-body">
+                <p>{rec.text}</p>
+              </div>
+              <div class="card-footer">
+                <button class="evidence-button" onclick={() => selectEvidence('recommendation', rec.recommendation_id, `Recommendation · ${rec.recommendation_id}`)}>
+                  Resolve evidence
+                </button>
+                <button class="prefill-button" onclick={() => { auditTargetID = rec.recommendation_id; auditTargetKind = 'recommendation'; }}>
+                  Review recommendation
+                </button>
+              </div>
+            </div>
+          {/each}
+        </div>
+      </section>
+    {/if}
     <section class="operations-receipt" aria-labelledby="operations-title" data-state={operationsPresentation.state}>
       <div class="operations-heading">
         <div>
