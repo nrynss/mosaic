@@ -336,7 +336,25 @@ type operationsCapabilityStatus struct {
 	Detail     string `json:"detail"`
 }
 
-func operationsCapabilities() []operationsCapabilityStatus {
+func (s *Server) operationsCapabilities() []operationsCapabilityStatus {
+	terraMode := "unavailable"
+	terraStatus := "unavailable"
+	terraDetail := "The structured service exists but is not live-composed in this demo."
+	if s.advisoryMode == "fixture_composed" || s.advisoryMode == "fixture-composed" {
+		terraMode = "fixture_composed"
+		terraStatus = "available"
+		terraDetail = "Synthetic assessments are composed from local fixtures."
+	}
+
+	solMode := "unavailable"
+	solStatus := "unavailable"
+	solDetail := "The structured service exists but is not live-composed in this demo."
+	if s.advisoryMode == "fixture_composed" || s.advisoryMode == "fixture-composed" {
+		solMode = "fixture_composed"
+		solStatus = "available"
+		solDetail = "Synthetic recommendations are composed from local fixtures."
+	}
+
 	return []operationsCapabilityStatus{
 		{
 			Capability: "source_intake",
@@ -369,16 +387,16 @@ func operationsCapabilities() []operationsCapabilityStatus {
 		{
 			Capability: "terra_assessment",
 			Feature:    "Terra structured assessment",
-			Mode:       "unavailable",
-			Status:     "unavailable",
-			Detail:     "The structured service exists but is not live-composed in this demo.",
+			Mode:       terraMode,
+			Status:     terraStatus,
+			Detail:     terraDetail,
 		},
 		{
 			Capability: "sol_advisory",
 			Feature:    "Sol supervisor advisory",
-			Mode:       "unavailable",
-			Status:     "unavailable",
-			Detail:     "The structured service exists but is not live-composed in this demo.",
+			Mode:       solMode,
+			Status:     solStatus,
+			Detail:     solDetail,
 		},
 		{
 			Capability: "human_audit",

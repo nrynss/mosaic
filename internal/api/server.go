@@ -61,6 +61,7 @@ const (
 	ActionReadArtifact    Action = "read_artifact"
 	ActionReadStream      Action = "read_stream"
 	ActionReadOperations  Action = "read_operations"
+	ActionReadAdvisories  Action = "read_advisories"
 	ActionRequestBriefing Action = "record_briefing_request"
 	ActionRecordAudit     Action = "record_audit_action"
 )
@@ -110,7 +111,7 @@ type AllowDemoPolicy struct{}
 func (AllowDemoPolicy) Authorize(_ context.Context, _ Actor, action Action) (PolicyDecision, error) {
 	switch action {
 	case ActionReadCOP, ActionReadEvidence, ActionReadArtifact, ActionReadStream,
-		ActionReadOperations, ActionRequestBriefing, ActionRecordAudit:
+		ActionReadOperations, ActionRequestBriefing, ActionRecordAudit, ActionReadAdvisories:
 		return PolicyDecision{Allowed: true}, nil
 	default:
 		return PolicyDecision{Reason: "unknown demo capability"}, nil
@@ -120,32 +121,36 @@ func (AllowDemoPolicy) Authorize(_ context.Context, _ Actor, action Action) (Pol
 // Config supplies the already-wired deterministic replay and append-only
 // persistence seams. The composition root chooses concrete P03/P06 instances.
 type Config struct {
-	Recovery   RecoveryReader
-	Records    contracts.ImmutableRecordRepository
-	Evidence   EvidenceResolver
-	Operations OperationsReader
-	Stream     *stream.Broker
-	Actors     ActorResolver
-	Policy     ActionPolicy
-	Version    string
-	Clock      func() time.Time
-	NewID      func() string
+	Recovery        RecoveryReader
+	Records         contracts.ImmutableRecordRepository
+	Evidence        EvidenceResolver
+	Operations      OperationsReader
+	AdvisoryHistory contracts.AdvisoryHistoryReader
+	AdvisoryMode    string
+	Stream          *stream.Broker
+	Actors          ActorResolver
+	Policy          ActionPolicy
+	Version         string
+	Clock           func() time.Time
+	NewID           func() string
 }
 
 // Server composes the v0.1 HTTP handlers. It reads a COP only through the P06
 // recovery seam and writes only immutable audit records through P03.
 type Server struct {
-	recovery   RecoveryReader
-	records    contracts.ImmutableRecordRepository
-	evidence   EvidenceResolver
-	operations OperationsReader
-	stream     *stream.Broker
-	actors     ActorResolver
-	policy     ActionPolicy
-	version    string
-	startedAt  time.Time
-	clock      func() time.Time
-	newID      func() string
+	recovery        RecoveryReader
+	records         contracts.ImmutableRecordRepository
+	evidence        EvidenceResolver
+	operations      OperationsReader
+	advisoryHistory contracts.AdvisoryHistoryReader
+	advisoryMode    string
+	stream          *stream.Broker
+	actors          ActorResolver
+	policy          ActionPolicy
+	version         string
+	startedAt       time.Time
+	clock           func() time.Time
+	newID           func() string
 }
 
 // New rejects partial deterministic/evidence wiring while providing public
@@ -168,6 +173,9 @@ func New(config Config) (*Server, error) {
 	if config.Operations == nil {
 		config.Operations = unavailableOperationsReader{}
 	}
+	if config.AdvisoryHistory == nil {
+		config.AdvisoryHistory = unavailableAdvisoryHistoryReader{}
+	}
 	if config.Actors == nil {
 		config.Actors = PublicActorResolver{}
 	}
@@ -185,17 +193,19 @@ func New(config Config) (*Server, error) {
 	}
 	startedAt := config.Clock().UTC()
 	return &Server{
-		recovery:   config.Recovery,
-		records:    config.Records,
-		evidence:   config.Evidence,
-		operations: config.Operations,
-		stream:     config.Stream,
-		actors:     config.Actors,
-		policy:     config.Policy,
-		version:    config.Version,
-		startedAt:  startedAt,
-		clock:      config.Clock,
-		newID:      config.NewID,
+		recovery:        config.Recovery,
+		records:         config.Records,
+		evidence:        config.Evidence,
+		operations:      config.Operations,
+		advisoryHistory: config.AdvisoryHistory,
+		advisoryMode:    config.AdvisoryMode,
+		stream:          config.Stream,
+		actors:          config.Actors,
+		policy:          config.Policy,
+		version:         config.Version,
+		startedAt:       startedAt,
+		clock:           config.Clock,
+		newID:           config.NewID,
 	}, nil
 }
 
@@ -210,6 +220,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/artifacts/", s.handleArtifact)
 	mux.HandleFunc("/api/v1/stream", s.handleStream)
 	mux.HandleFunc("/api/v1/operations", s.handleOperations)
+	mux.HandleFunc("/api/v1/advisories", s.handleAdvisories)
 	mux.HandleFunc("/api/v1/briefings", s.handleBriefing)
 	mux.HandleFunc("/api/v1/audit-actions", s.handleAuditAction)
 	return mux
@@ -379,7 +390,7 @@ func (s *Server) handleOperations(w http.ResponseWriter, r *http.Request) {
 			LocalSubscriberCount: metadata.SubscriberCount,
 			LastPublished:        metadata.LastPublished,
 		},
-		Capabilities: operationsCapabilities(),
+		Capabilities: s.operationsCapabilities(),
 	}, nil)
 }
 
@@ -619,4 +630,135 @@ func randomID() string {
 		return ""
 	}
 	return hex.EncodeToString(bytes)
+}
+
+type advisoryInsight struct {
+	gen.Insight
+	Status string `json:"status"`
+}
+
+type advisoryRecommendation struct {
+	gen.Recommendation
+	Status string `json:"status"`
+}
+
+type unavailableAdvisoryHistoryReader struct{}
+
+func (unavailableAdvisoryHistoryReader) ReadAdvisoryHistory(context.Context) (contracts.AdvisoryHistory, error) {
+	return contracts.AdvisoryHistory{}, errors.New("advisory history reader is not composed")
+}
+
+func (s *Server) handleAdvisories(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) || !s.authorize(w, r, ActionReadAdvisories) {
+		return
+	}
+	result, recovered := s.recoverCOP(w, r)
+	if !recovered {
+		return
+	}
+	history, err := s.advisoryHistory.ReadAdvisoryHistory(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, nil, apiError{Code: "advisory_history_unavailable", Message: "advisory history is unavailable"})
+		return
+	}
+
+	// Filter Insights and Recommendations by recovered revision
+	var filteredInsights []gen.Insight
+	for _, ins := range history.Insights {
+		if ins.StateRevision <= result.StateRevision {
+			filteredInsights = append(filteredInsights, ins)
+		}
+	}
+
+	var filteredRecommendations []gen.Recommendation
+	for _, rec := range history.Recommendations {
+		if rec.StateRevision <= result.StateRevision {
+			filteredRecommendations = append(filteredRecommendations, rec)
+		}
+	}
+
+	supersededInsightIDs := make(map[string]bool)
+	for _, ins := range filteredInsights {
+		if ins.LifecycleStatus == "obsolete" {
+			supersededInsightIDs[ins.InsightID] = true
+		}
+		if ins.SupersedesInsightID != "" {
+			supersededInsightIDs[ins.SupersedesInsightID] = true
+		}
+	}
+
+	isInsightSuperseded := func(ins gen.Insight) bool {
+		return ins.LifecycleStatus == "obsolete" || supersededInsightIDs[ins.InsightID]
+	}
+
+	advisoriesInsights := make([]advisoryInsight, 0, len(filteredInsights))
+	for _, ins := range filteredInsights {
+		var status string
+		if isInsightSuperseded(ins) {
+			status = "superseded"
+		} else if ins.StateRevision == result.StateRevision {
+			status = "current"
+		} else if ins.StateRevision < result.StateRevision {
+			status = "historical"
+		} else {
+			status = "historical"
+		}
+		advisoriesInsights = append(advisoriesInsights, advisoryInsight{
+			Insight: ins,
+			Status:  status,
+		})
+	}
+
+	advisoriesRecommendations := make([]advisoryRecommendation, 0, len(filteredRecommendations))
+	for _, rec := range filteredRecommendations {
+		var status string
+		citedInsightSuperseded := false
+		for _, ev := range rec.Evidence {
+			if m, ok := ev.(map[string]any); ok {
+				kind, _ := m["target_kind"].(string)
+				id, _ := m["target_id"].(string)
+				if kind == "insight" {
+					var citedIns *gen.Insight
+					for i := range filteredInsights {
+						if filteredInsights[i].InsightID == id {
+							citedIns = &filteredInsights[i]
+							break
+						}
+					}
+					if citedIns != nil {
+						if isInsightSuperseded(*citedIns) {
+							citedInsightSuperseded = true
+						}
+					} else {
+						if supersededInsightIDs[id] {
+							citedInsightSuperseded = true
+						}
+					}
+				}
+			}
+		}
+
+		if rec.StateRevision < result.StateRevision || citedInsightSuperseded {
+			status = "not_current"
+		} else if rec.StateRevision == result.StateRevision {
+			status = "current"
+		} else {
+			status = "not_current"
+		}
+
+		advisoriesRecommendations = append(advisoriesRecommendations, advisoryRecommendation{
+			Recommendation: rec,
+			Status:         status,
+		})
+	}
+
+	advStatus := "unavailable"
+	if s.advisoryMode == "fixture_composed" || s.advisoryMode == "fixture-composed" {
+		advStatus = "fixture-composed"
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"insights":        advisoriesInsights,
+		"recommendations": advisoriesRecommendations,
+		"status":          advStatus,
+	}, nil)
 }
