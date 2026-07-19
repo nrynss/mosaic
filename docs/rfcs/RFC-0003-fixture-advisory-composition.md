@@ -1,13 +1,13 @@
 # RFC-0003: Fixture Advisory Composition
 
-- **Status:** Accepted — P21–P25 and P27 integrated; P26 and P28 planned
+- **Status:** Accepted — P21–P27 integrated; P28 planned
 - **Owner:** Mosaic coordinator
 - **Decision date:** 2026-07-19
 - **Depends on:** [RFC-0001](RFC-0001-mosaic-demo-foundation.md), [RFC-0002](RFC-0002-public-pluggability-and-agent-observability.md)
-- **Implementation snapshot:** P01–P25 and P27 are integrated. The fixture
-  advisory contract, deterministic SQLite reader, transactional fixture replay,
-  bounded public read API, and executable composition are complete; P26 and P28
-  remain planned parcels.
+- **Implementation snapshot:** P01–P27 are integrated. The fixture advisory
+  contract, deterministic SQLite reader, transactional fixture replay, bounded
+  public read API, dashboard presentation, and executable composition are
+  complete; P28 remains the final planned parcel.
 
 ## 1. Decision
 
@@ -123,7 +123,7 @@ inference should occur during a normal build or test.
 
 ## 7. Parcel plan and acceptance sequence
 
-P21–P25 and P27 are integrated. The remaining parcels are independently claimable only
+P21–P27 are integrated. The remaining parcel is independently claimable only
 when their listed prerequisites are integrated on `HANDOFF.md`.
 
 | Parcel | Purpose | Prereqs | Exclusive ownership | Acceptance boundary |

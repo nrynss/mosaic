@@ -46,9 +46,9 @@ mosaic/v0.1-foundation
 ├─ parcel/P23-advisory-history-store                (integrated)
 ├─ parcel/P24-fixture-advisory-replay               (integrated)
 ├─ parcel/P25-public-advisory-api                   (integrated)
-├─ parcel/P26-advisory-dashboard                    (claimed by coordinator)
+├─ parcel/P26-advisory-dashboard                    (integrated)
 ├─ parcel/P27-advisory-composition                  (integrated)
-└─ parcel/P28-advisory-acceptance                   (waits for P26/P27)
+└─ parcel/P28-advisory-acceptance                   (claimed by coordinator)
 ```
 
 Do not reuse a prior P01–P20 worktree. Do not claim a row until all of its
@@ -63,9 +63,9 @@ prerequisites are marked `✅ Integrated` on this board.
 | P23 | Implement deterministic SQLite reads for the P22 advisory history contract; no migration | P22 | `internal/store/**` | ✅ Integrated — `8cbc905` |
 | P24 | Deterministic fixture Terra/Sol replay with immutable lifecycle/audit history | P22, P23 | `internal/simulator/**` | ✅ Integrated — `e37c17a` |
 | P25 | Bounded public advisory API and truthful advisory capability status | P22, P23 | `internal/api/**` | ✅ Integrated — `8bde753` |
-| P26 | Advisory-history dashboard cards, evidence links, and supersession presentation | P25 | `ui/**` | 🔒 Claimed — coordinator completion of submitted `e08cdd7` |
+| P26 | Advisory-history dashboard cards, evidence links, and supersession presentation | P25 | `ui/**` | ✅ Integrated — `24c7d70` |
 | P27 | Local executable composition of fixture replay, advisory history, and public API | P24, P25 | `cmd/mosaicdemo/**` | ✅ Integrated — `3ecbefb` |
-| P28 | Public advisory API/UI/Docker/runbook acceptance proof | P26, P27 | `tests/e2e/**`, `docs/runbook/**` | ⬜ Not claimable until P26/P27 integrate |
+| P28 | Public advisory API/UI/Docker/runbook acceptance proof | P26, P27 | `tests/e2e/**`, `docs/runbook/**` | 🔒 Claimed — coordinator; base `24c7d70` |
 
 ## P22 builder brief — advisory-history contract
 
@@ -320,11 +320,8 @@ Wave B:  P26 dashboard (after P25) ∥ P27 executable composition (after P24/P25
 Wave C:  P28 end-to-end/Docker/runbook proof (after P26/P27)
 ```
 
-P24 and P25 are the only ready but unclaimed rows. They may be claimed in
-parallel by different builders after the coordinator records each branch,
-worktree, base SHA, and owner. P26–P28 must remain unclaimed until their stated
-prerequisites are `✅ Integrated`; no builder should pre-create a branch or edit
-its paths early.
+P28 is claimed by the coordinator because P26 and P27 are integrated. No other
+builder may edit its owned acceptance or runbook paths while that claim is active.
 ## Notes
 
 Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
@@ -342,3 +339,5 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-20 P27 claimed by coordinator — base `613929f`, branch `parcel/P27-advisory-composition`, worktree `.worktrees/P27-advisory-composition`; compose local fixture replay, history reader, and public advisory API only.
 - 2026-07-20 P27 integrated by coordinator — `3ecbefb`; local startup now composes P24 before the bounded API, exposes fixture-composed advisory history, avoids retained-volume duplicates, and visibly fails on partial history. Full quality passed.
 - 2026-07-20 P26 claimed by coordinator — completion review of submitted `e08cdd7` in `.worktrees/P26-advisory-dashboard`; add the missing explicit empty/unavailable advisory states before integration.
+- 2026-07-20 P26 integrated by coordinator — `24c7d70`; bounded advisory cards now cover loading, unavailable, empty, superseded, and not-current states with evidence resolution and immutable review prefill. Svelte check/build and full quality passed.
+- 2026-07-20 P28 claimed by coordinator — base `24c7d70`, branch `parcel/P28-advisory-acceptance`, worktree `.worktrees/P28-advisory-acceptance`; complete public API/UI/restart/runbook/Docker acceptance proof only.
