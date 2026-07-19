@@ -1,13 +1,15 @@
 # RFC-0003: Fixture Advisory Composition
 
-- **Status:** Accepted — P21–P27 integrated; P28 planned
+- **Status:** Implemented — P21–P28 integrated
 - **Owner:** Mosaic coordinator
 - **Decision date:** 2026-07-19
 - **Depends on:** [RFC-0001](RFC-0001-mosaic-demo-foundation.md), [RFC-0002](RFC-0002-public-pluggability-and-agent-observability.md)
-- **Implementation snapshot:** P01–P27 are integrated. The fixture advisory
+- **Implementation snapshot:** P01–P28 are integrated. The fixture advisory
   contract, deterministic SQLite reader, transactional fixture replay, bounded
-  public read API, dashboard presentation, and executable composition are
-  complete; P28 remains the final planned parcel.
+  public read API, dashboard presentation, executable composition, real-process
+  E2E/restart proof, and Docker/runbook acceptance are complete. On 2026-07-20,
+  the full quality gate, Svelte check/build, and isolated fresh Docker smoke
+  (including retained-volume restart) passed.
 
 ## 1. Decision
 
@@ -123,8 +125,8 @@ inference should occur during a normal build or test.
 
 ## 7. Parcel plan and acceptance sequence
 
-P21–P27 are integrated. The remaining parcel is independently claimable only
-when their listed prerequisites are integrated on `HANDOFF.md`.
+P21–P28 are integrated. The table remains the completed implementation record;
+new work requires a new coordinator-owned parcel on `HANDOFF.md`.
 
 | Parcel | Purpose | Prereqs | Exclusive ownership | Acceptance boundary |
 |---|---|---|---|---|
@@ -137,7 +139,7 @@ when their listed prerequisites are integrated on `HANDOFF.md`.
 | P27 | Compose P24/P25 into local executable startup. | P24, P25 | `cmd/mosaicdemo/**` | Fresh and retained-volume startup are idempotent and fixture-only. |
 | P28 | Prove the public API/UI/Docker/runbook boundary end-to-end. | P26, P27 | `tests/e2e/**`, `docs/runbook/**` | No-header public proof, supersession proof, restart proof, and Docker smoke. |
 
-The planned waves are:
+The completed execution waves were:
 
 ```text
 P21 → P22 → P23

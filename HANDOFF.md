@@ -31,8 +31,7 @@ to the coordinator for integration.
 ## Starting point and branch model
 
 The integration branch is `mosaic/v0.1-foundation`. The increment began at
-`c03ba39` after P01–P20; P21–P25, excluding the independently pending P26,
-are integrated through `e37c17a`.
+`c03ba39` after P01–P20; P21–P28 are integrated through `8d15b0b`.
 Every new claim bases from the latest integrated branch SHA recorded by the
 coordinator, never from an older parcel worktree.
 
@@ -48,7 +47,7 @@ mosaic/v0.1-foundation
 ├─ parcel/P25-public-advisory-api                   (integrated)
 ├─ parcel/P26-advisory-dashboard                    (integrated)
 ├─ parcel/P27-advisory-composition                  (integrated)
-└─ parcel/P28-advisory-acceptance                   (claimed by coordinator)
+└─ parcel/P28-advisory-acceptance                   (integrated)
 ```
 
 Do not reuse a prior P01–P20 worktree. Do not claim a row until all of its
@@ -65,7 +64,7 @@ prerequisites are marked `✅ Integrated` on this board.
 | P25 | Bounded public advisory API and truthful advisory capability status | P22, P23 | `internal/api/**` | ✅ Integrated — `8bde753` |
 | P26 | Advisory-history dashboard cards, evidence links, and supersession presentation | P25 | `ui/**` | ✅ Integrated — `24c7d70` |
 | P27 | Local executable composition of fixture replay, advisory history, and public API | P24, P25 | `cmd/mosaicdemo/**` | ✅ Integrated — `3ecbefb` |
-| P28 | Public advisory API/UI/Docker/runbook acceptance proof | P26, P27 | `tests/e2e/**`, `docs/runbook/**` | 🔒 Claimed — coordinator; base `24c7d70` |
+| P28 | Public advisory API/UI/Docker/runbook acceptance proof | P26, P27 | `tests/e2e/**`, `docs/runbook/**` | ✅ Integrated — `8d15b0b` |
 
 ## P22 builder brief — advisory-history contract
 
@@ -286,11 +285,11 @@ modified unless the coordinator opens a dedicated Docker parcel.
 | `AGENTS.md`, `HANDOFF.md`, `docs/rfcs/**`, `docs/archive/**` | Coordinator only; external builders do not edit coordination documents |
 | `internal/contracts/**` | P22 integrated; frozen unless a new dedicated contract parcel is approved |
 | `internal/store/**` | P23 integrated; frozen unless a new dedicated store parcel is approved |
-| `internal/simulator/**` | P24 only while claimed |
-| `internal/api/**` | P25 only while claimed |
-| `ui/**` | P26 only while claimed |
-| `cmd/mosaicdemo/**` | P27 only while claimed |
-| `tests/e2e/**`, `docs/runbook/**` | P28 only while claimed |
+| `internal/simulator/**` | P24 integrated; frozen unless the coordinator opens a dedicated parcel |
+| `internal/api/**` | P25 integrated; frozen unless the coordinator opens a dedicated parcel |
+| `ui/**` | P26 integrated; frozen unless the coordinator opens a dedicated parcel |
+| `cmd/mosaicdemo/**` | P27 integrated; frozen unless the coordinator opens a dedicated parcel |
+| `tests/e2e/**`, `docs/runbook/**` | P28 integrated; frozen unless the coordinator opens a dedicated parcel |
 | `ontology/**`, `internal/ontology/**`, `migrations/**`, `go.mod`, `go.sum`, `Taskfile.yml`, `Dockerfile`, `docker-compose.yml` | Frozen for P24–P28 unless the coordinator opens a dedicated parcel |
 
 ## Integration and external handoff template
@@ -315,13 +314,13 @@ the parcel, reruns the complete quality gate, then records `✅ Integrated`.
 ## Execution waves and claim rules
 
 ```text
-Wave A:  P24 fixture replay ∥ P25 public advisory API
-Wave B:  P26 dashboard (after P25) ∥ P27 executable composition (after P24/P25)
-Wave C:  P28 end-to-end/Docker/runbook proof (after P26/P27)
+Wave A:  P24 fixture replay ∥ P25 public advisory API — completed
+Wave B:  P26 dashboard (after P25) ∥ P27 executable composition (after P24/P25) — completed
+Wave C:  P28 end-to-end/Docker/runbook proof (after P26/P27) — completed
 ```
 
-P28 is claimed by the coordinator because P26 and P27 are integrated. No other
-builder may edit its owned acceptance or runbook paths while that claim is active.
+All P21–P28 parcels are integrated. There are no active parcel claims in this
+increment. New work begins only through a new coordinator-owned parcel row.
 ## Notes
 
 Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
@@ -341,3 +340,4 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-20 P26 claimed by coordinator — completion review of submitted `e08cdd7` in `.worktrees/P26-advisory-dashboard`; add the missing explicit empty/unavailable advisory states before integration.
 - 2026-07-20 P26 integrated by coordinator — `24c7d70`; bounded advisory cards now cover loading, unavailable, empty, superseded, and not-current states with evidence resolution and immutable review prefill. Svelte check/build and full quality passed.
 - 2026-07-20 P28 claimed by coordinator — base `24c7d70`, branch `parcel/P28-advisory-acceptance`, worktree `.worktrees/P28-advisory-acceptance`; complete public API/UI/restart/runbook/Docker acceptance proof only.
+- 2026-07-20 P28 integrated by coordinator — `8d15b0b`; real executable no-header E2E/restart proof, Svelte check/build, full quality, and a fresh isolated `mosaic-p28smoke` Docker build/public smoke/restart all passed. The disposable Compose volume was removed after the check.
