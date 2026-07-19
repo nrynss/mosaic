@@ -1,48 +1,64 @@
-# Offline synthetic dataset generation
+# Synthetic dataset generation
 
-`datasetgen` is a data-production tool, not part of the Mosaic runtime. It can
-invoke a local Gemma GGUF through a locally installed `llama.cpp` executable to
-produce a **staged candidate**. The demo, Docker image, Luna, Terra, and Sol do
-not load the GGUF or invoke this command.
+`datasetgen` is a data-production tool, not part of the Mosaic runtime. For the
+P29 demonstration candidate it uses Cerebras `gemma-4-31b` to produce one
+**staged candidate**. The demo, Docker image, Luna, Terra, and Sol do not call
+Cerebras, load a model, or invoke this command.
 
-The model can be kept in the repository's ignored `localmodels/` directory. It
-is intentionally not committed.
+Only the versioned synthetic prompt and read-only Mosaic schemas are sent to the
+provider. Do not place real operational records, personal data, credentials, or
+unreviewed model output in the repository. Generated candidates live only under
+ignored `localmodels/staging/` until a later, explicitly approved promotion.
 
-## Manual prerequisite
+## P29 provider and request budget
 
-Download the specified GGUF manually, outside CI and only to the ignored local
-model directory. The current Hugging Face CLI syntax is:
+P29 permits only the public Cerebras Chat Completions endpoint and the model
+`gemma-4-31b`. Its credential is read only from `CEREBRAS_API_KEY` in the
+current process; it is never accepted as a command-line flag, recorded in
+provenance, or written to disk.
 
-```powershell
-hf download unsloth/gemma-4-E2B-it-GGUF gemma-4-E2B-it-UD-Q8_K_XL.gguf --local-dir localmodels
-```
+The budget is deliberately small:
 
-This command is an optional human prerequisite. `datasetgen` has no downloader,
-no network code, and no credentials. Build or install `llama.cpp` separately;
-its executable path is supplied explicitly for each generation run.
+- one no-data readiness smoke;
+- at most one fixed-seed candidate request; and
+- no automatic retries.
+
+Stop after a rate limit, timeout, refusal, transport failure, or invalid model
+output. Start a new approved attempt instead of retrying in a loop. The command
+uses a 90-second request deadline and a maximum completion budget of 12,288
+tokens.
 
 ## Reproducible promotion workflow
 
 The model response itself can vary. The repeatable process is the recorded
-model/prompt identity, bounded command arguments, candidate validation, human
-review, and explicit freeze promotion.
+provider/model identity, versioned prompt, fixed seed, bounded request
+parameters, candidate validation, human review, and explicit freeze promotion.
 
-1. Generate only into a new or empty staging directory. Keeping staging under
-   `localmodels/staging/` makes it ignored with the local model.
+1. Open a terminal where `CEREBRAS_API_KEY` is available, without echoing or
+   committing it. Confirm the existing frozen fixture first:
 
    ```powershell
-   go run ./cmd/datasetgen generate `
-     --llama "E:\llama.cpp\build\bin\Release\llama-cli.exe" `
-     --model "localmodels\gemma-4-E2B-it-UD-Q8_K_XL.gguf" `
+   if ([string]::IsNullOrWhiteSpace($env:CEREBRAS_API_KEY)) {
+     throw 'CEREBRAS_API_KEY must be present in this terminal'
+   }
+   go run ./cmd/datasetgen validate
+   ```
+
+2. Make the one candidate request into a new or empty ignored staging directory.
+   `generate-cerebras` is deliberately fixed to `gemma-4-31b`; it exposes no
+   provider, endpoint, model, credential, or retry override.
+
+   ```powershell
+   go run ./cmd/datasetgen generate-cerebras `
      --prompt "prompts\datasetgen\v1.md" `
      --stage "localmodels\staging\domestic-disturbance-v2" `
      --scenario domestic-disturbance `
-     --seed 42
+     --seed 20260720
    ```
 
-   The command reads the versioned prompt and current read-only ontology schemas,
-   constrains llama.cpp with a context and completion limit, and accepts only a
-   strict JSON artifact bundle. It writes only under `--stage`:
+   The command compiles the current read-only schemas, builds a bounded
+   synthetic-only prompt, makes exactly one non-streaming request, and accepts
+   only one strict JSON artifact bundle. It writes only under `--stage`:
 
    ```text
    <stage>/
@@ -55,18 +71,21 @@ review, and explicit freeze promotion.
    └── provenance.json
    ```
 
-   `provenance.json` records the model and llama executable paths, SHA-256 values
-   and sizes; prompt path, SHA-256, and embedded version; scenario and seed;
-   sanitized command arguments; generation timestamp; prompt-input and raw-model-
-   response checksums; and the complete schema-version map. No token or secret is
-   accepted by the command or saved in provenance.
+   `provenance.json` records the Cerebras endpoint and model ID, prompt path and
+   checksum, scenario and seed, sanitized request parameters (including the
+   no-retry policy), generation timestamp, prompt-input and model-output
+   checksums, and schema versions. It does not contain an API key, authorization
+   header, full request prompt, or provider error body.
 
-2. Review the staged JSON. A candidate is intentionally not admitted to
-   `datasets/` merely because it parses. Invalid candidates remain in staging for
-   inspection.
+3. Review the staged JSON. A candidate is intentionally not admitted to
+   `datasets/` merely because it parses. Verify that it is synthetic-only and
+   that its manifest, scenario, event ordering, corrections, IDs, evidence, and
+   expected outcomes are internally consistent. Invalid candidates remain in
+   staging for inspection.
 
-3. Freeze exactly one reviewed candidate into a new, versioned direct child of
-   the repository `datasets/` directory. The target must not exist.
+4. Do not freeze without explicit coordinator and user approval. When approval
+   exists, freeze exactly one reviewed candidate into a new, versioned direct
+   child of the repository `datasets/` directory. The target must not exist.
 
    ```powershell
    go run ./cmd/datasetgen freeze `
@@ -81,7 +100,7 @@ review, and explicit freeze promotion.
    failure. It refuses a pre-existing target or any destination outside the
    repository `datasets/` root.
 
-4. Validate frozen datasets with the normal offline gate:
+5. Validate frozen datasets with the normal offline gate:
 
    ```powershell
    go run ./cmd/datasetgen validate

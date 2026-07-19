@@ -36,10 +36,12 @@ func run(args []string) error {
 	switch args[0] {
 	case "generate":
 		return runGenerate(root, args[1:], datasetgen.ExecRunner{})
+	case "generate-cerebras":
+		return runGenerateCerebras(root, args[1:])
 	case "freeze":
 		return runFreeze(root, args[1:])
 	default:
-		return errors.New("usage: datasetgen validate | datasetgen generate --llama <path> --stage <dir> --scenario <id> --seed <integer> [--model <path>] [--prompt <path>] | datasetgen freeze --input <stage> --output <datasets/<scenario>-vN>")
+		return errors.New("usage: datasetgen validate | datasetgen generate --llama <path> --stage <dir> --scenario <id> --seed <integer> [--model <path>] [--prompt <path>] | datasetgen generate-cerebras --stage <dir> --scenario <id> --seed <integer> [--prompt <path>] | datasetgen freeze --input <stage> --output <datasets/<scenario>-vN>")
 	}
 }
 
@@ -71,6 +73,34 @@ func runGenerate(root string, args []string, runner datasetgen.CommandRunner) er
 		return err
 	}
 	fmt.Printf("dataset candidate staged at %s (raw response sha256 %s)\n", *stageDir, provenance.RawResponseSHA256)
+	return nil
+}
+
+func runGenerateCerebras(root string, args []string) error {
+	flags := flag.NewFlagSet("generate-cerebras", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	promptPath := flags.String("prompt", datasetgen.DefaultPromptPath, "path to versioned prompt")
+	stageDir := flags.String("stage", "", "new or empty candidate staging directory")
+	scenarioID := flags.String("scenario", "", "lowercase synthetic scenario identifier")
+	seed := flags.Int64("seed", 0, "fixed remote generation seed")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("generate-cerebras accepts flags only")
+	}
+	provenance, err := datasetgen.GenerateCerebras(root, datasetgen.CerebrasGenerateConfig{
+		APIKey:     os.Getenv("CEREBRAS_API_KEY"),
+		Model:      datasetgen.CerebrasGemmaModel,
+		PromptPath: *promptPath,
+		StageDir:   *stageDir,
+		ScenarioID: *scenarioID,
+		Seed:       *seed,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Cerebras dataset candidate staged at %s (raw response sha256 %s)\n", *stageDir, provenance.RawResponseSHA256)
 	return nil
 }
 

@@ -44,7 +44,7 @@ func TestGenerateStagesOnlyCandidateAndCompleteProvenance(t *testing.T) {
 	if runner.executable != config.LlamaPath {
 		t.Fatalf("runner executable = %q, want %q", runner.executable, config.LlamaPath)
 	}
-	if !hasArgument(runner.args, "--ctx-size", llamaContextTokens) || !hasArgument(runner.args, "--n-predict", llamaPredictionTokens) || !hasArgument(runner.args, "--seed", "42") {
+	if !hasArgument(runner.args, "--ctx-size", llamaContextTokens) || !hasArgument(runner.args, "--n-predict", llamaPredictionTokens) || !hasArgument(runner.args, "--seed", "42") || !hasFlag(runner.args, "--single-turn") || !hasFlag(runner.args, "--simple-io") {
 		t.Fatalf("runner args do not contain bounded generation controls: %q", runner.args)
 	}
 	promptArgument := argumentValue(t, runner.args, "-p")
@@ -88,6 +88,24 @@ func TestGenerateStagesOnlyCandidateAndCompleteProvenance(t *testing.T) {
 	}
 }
 
+func TestGenerateExtractsJSONObjectFromLocalCLIOutput(t *testing.T) {
+	root := newTestRoot(t)
+	stage := filepath.Join(root, "localmodels", "staging", "console-output")
+	bundle := frozenBundle(t, repositoryRoot(t), nil)
+	runner := &fakeRunner{response: append(append([]byte("Loading model...\n"), bundle...), []byte("\n[ Prompt: 10.0 t/s ]\n")...)}
+	config := generationConfig(t, root, stage, runner)
+
+	provenance, err := Generate(root, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provenance.RawResponseSHA256 != sha256Hex(bundle) {
+		t.Fatalf("staged JSON checksum = %q, want %q", provenance.RawResponseSHA256, sha256Hex(bundle))
+	}
+	if got := mustReadFile(t, filepath.Join(stage, StageModelOutputFile)); string(got) != string(bundle) {
+		t.Fatalf("staged model output = %s, want extracted JSON only", got)
+	}
+}
 func TestGenerateRejectsMalformedModelOutputWithoutArtifacts(t *testing.T) {
 	root := newTestRoot(t)
 	stage := filepath.Join(root, "localmodels", "staging", "malformed")
@@ -321,6 +339,15 @@ func repositoryRoot(t *testing.T) string {
 func hasArgument(args []string, flag, want string) bool {
 	for index := 0; index+1 < len(args); index++ {
 		if args[index] == flag && args[index+1] == want {
+			return true
+		}
+	}
+	return false
+}
+
+func hasFlag(args []string, want string) bool {
+	for _, argument := range args {
+		if argument == want {
 			return true
 		}
 	}
