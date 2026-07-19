@@ -48,7 +48,7 @@ mosaic/v0.1-foundation
 ├─ parcel/P26-advisory-dashboard                    (integrated)
 ├─ parcel/P27-advisory-composition                  (integrated)
 ├─ parcel/P28-advisory-acceptance                   (integrated)
-└─ parcel/P29-local-feed-generation                 (claimed by coordinator)
+└─ parcel/P29-local-feed-generation                 (integrated; candidate rejected, no freeze)
 ```
 
 Do not reuse a prior P01–P20 worktree. Do not claim a row until all of its
@@ -66,7 +66,8 @@ prerequisites are marked `✅ Integrated` on this board.
 | P26 | Advisory-history dashboard cards, evidence links, and supersession presentation | P25 | `ui/**` | ✅ Integrated — `24c7d70` |
 | P27 | Local executable composition of fixture replay, advisory history, and public API | P24, P25 | `cmd/mosaicdemo/**` | ✅ Integrated — `3ecbefb` |
 | P28 | Public advisory API/UI/Docker/runbook acceptance proof | P26, P27 | `tests/e2e/**`, `docs/runbook/**` | ✅ Integrated — `8d15b0b` |
-| P29 | Generate and inspect one rate-bounded Cerebras `gemma-4-31b` synthetic feed candidate for controlled demo playback; do not freeze it yet | P28 | `internal/datasetgen/**`, `cmd/datasetgen/**`, `localmodels/staging/domestic-disturbance-v2/**`, `docs/dataset-generation.md` | 🔒 Claimed — coordinator; base `b050618` |
+| P29 | Generate and inspect one rate-bounded Cerebras `gemma-4-31b` synthetic feed candidate for controlled demo playback; do not freeze it | P28 | `internal/datasetgen/**`, `cmd/datasetgen/**`, `localmodels/staging/domestic-disturbance-v2/**`, `docs/dataset-generation.md` | ✅ Integrated — `03d68a7`; candidate rejected by read-only schema validation and not frozen |
+| P30 | Create a new versioned synthetic-only prompt and, only after explicit approval, generate and inspect one fresh Cerebras `gemma-4-31b` candidate; do not freeze it | P29 | `prompts/datasetgen/**`, `localmodels/staging/domestic-disturbance-v3/**`, `docs/dataset-generation.md` | ⛔ Blocked — awaits user authorization for one additional provider request |
 
 ## P22 builder brief — advisory-history contract
 
@@ -322,6 +323,37 @@ composition, public API, UI, or any live-model policy.
 - The coordinator records the requested model, seed, staged response checksum,
   and concise spot-check outcome in the P29 handoff note; no staged content is
   committed.
+
+## P30 coordinator brief — corrected synthetic feed candidate
+
+### Goal
+
+Produce one fresh, staged, synthetic-only candidate after P29's recorded
+schema-validation failure. P29's rejected candidate is immutable evidence and
+must not be edited, repaired, or frozen.
+
+### Required behavior
+
+- Keep `prompts/datasetgen/v1.md` unchanged. Add a new versioned prompt that
+  explicitly requires every supplied schema version to appear in the manifest
+  and directs the model to self-check the complete bundle before returning it.
+- Use a new ignored stage directory
+  `localmodels/staging/domestic-disturbance-v3/`; never overwrite P29's stage.
+- Use only Cerebras `gemma-4-31b`, one fixed seed, one candidate request, and
+  no automatic retries. A coordinator must obtain explicit user authorization
+  before making that new provider request.
+- Run `datasetgen validate-stage` after generation. On any failure, preserve
+  the staged response, record the exact error, and make no repair or freeze.
+
+### Acceptance
+
+- The new prompt has a semantic version distinct from P29's v1 prompt and its
+  checksum is recorded in staged provenance.
+- The one approved request yields a candidate that passes `validate-stage`, is
+  manually spot-checked for synthetic-only content and temporal consistency,
+  and remains outside `datasets/`.
+- The handoff note records model, seed, output checksum, validation result, and
+  the decision not to freeze pending separate approval.
 ## Shared-file mutexes
 
 | Path | Owner / rule |
@@ -334,7 +366,9 @@ composition, public API, UI, or any live-model policy.
 | `ui/**` | P26 integrated; frozen unless the coordinator opens a dedicated parcel |
 | `cmd/mosaicdemo/**` | P27 integrated; frozen unless the coordinator opens a dedicated parcel |
 | `tests/e2e/**`, `docs/runbook/**` | P28 integrated; frozen unless the coordinator opens a dedicated parcel |
-| `internal/datasetgen/**`, `cmd/datasetgen/**`, `localmodels/staging/domestic-disturbance-v2/**`, `docs/dataset-generation.md` | P29 only while claimed; staged contents are ignored and never committed |
+| `internal/datasetgen/**`, `cmd/datasetgen/**` | P29 integrated; frozen unless the coordinator opens a dedicated generator parcel |
+| `localmodels/staging/domestic-disturbance-v2/**` | P29 rejected candidate; immutable ignored evidence that must not be edited, frozen, or committed |
+| `prompts/datasetgen/**`, `localmodels/staging/domestic-disturbance-v3/**`, `docs/dataset-generation.md` | Reserved for P30 only after it is explicitly authorized and claimed |
 | `ontology/**`, `internal/ontology/**`, `migrations/**`, `go.mod`, `go.sum`, `Taskfile.yml`, `Dockerfile`, `docker-compose.yml` | Frozen for P24–P28 unless the coordinator opens a dedicated parcel |
 
 ## Integration and external handoff template
@@ -362,11 +396,12 @@ the parcel, reruns the complete quality gate, then records `✅ Integrated`.
 Wave A:  P24 fixture replay ∥ P25 public advisory API — completed
 Wave B:  P26 dashboard (after P25) ∥ P27 executable composition (after P24/P25) — completed
 Wave C:  P28 end-to-end/Docker/runbook proof (after P26/P27) — completed
-Wave D:  P29 local synthetic feed candidate (after P28) — in progress
+Wave D:  P29 Cerebras synthetic feed candidate (after P28) — completed; candidate rejected, no freeze
+Wave E:  P30 corrected prompt and fresh candidate (after P29) — blocked pending explicit user request authorization
 ```
 
-P29 is claimed by the coordinator. No other builder may edit its staged
-candidate or dataset-generation runbook path while the claim is active.
+P29's rejected stage is immutable ignored evidence. P30 must not be claimed or
+send a provider request until the coordinator records a new user authorization.
 ## Notes
 
 Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
@@ -388,3 +423,4 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-20 P28 claimed by coordinator — base `24c7d70`, branch `parcel/P28-advisory-acceptance`, worktree `.worktrees/P28-advisory-acceptance`; complete public API/UI/restart/runbook/Docker acceptance proof only.
 - 2026-07-20 P28 integrated by coordinator — `8d15b0b`; real executable no-header E2E/restart proof, Svelte check/build, full quality, and a fresh isolated `mosaic-p28smoke` Docker build/public smoke/restart all passed. The disposable Compose volume was removed after the check.
 - 2026-07-20 P29 claimed by coordinator — base `b050618`, branch `parcel/P29-local-feed-generation`, worktree `.worktrees/P29-local-feed-generation`; generate one ignored local-model candidate and inspect it before any promotion.
+- 2026-07-20 P29 integrated by coordinator — `03d68a7`; added a one-shot, no-retry Cerebras `gemma-4-31b` generator, credential-safe remote provenance, and read-only `datasetgen validate-stage`, with focused tests and full quality passing. The no-data readiness smoke returned `READY`; the one candidate used seed `20260720` and staged response SHA-256 `56dfc808cbb94b99fb52b9d18f5230efa368dcb7f06550adc5d17302574f5dfe`. Provenance and layout spot checks passed (no credential/local identity; retry disabled), but `validate-stage` rejected the manifest because `schema_versions.audit-record.schema.json` was absent. The ignored stage remains unchanged; no repair, retry, freeze, or commit of generated content occurred. P30 is blocked pending a new explicit user authorization.
