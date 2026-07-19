@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"mosaic.local/mosaic/internal/api"
+	"mosaic.local/mosaic/internal/ontology/gen"
 	"mosaic.local/mosaic/internal/simulator"
 	"mosaic.local/mosaic/internal/store"
 )
@@ -35,6 +37,7 @@ func TestNewApplicationSeedsFixtureOnlyOnce(t *testing.T) {
 	}
 	assertFixtureCOP(t, first.handler)
 	assertFixtureOperations(t, first.handler)
+	assertFixtureAdvisories(t, first.handler)
 	if err := first.close(); err != nil {
 		t.Fatalf("close first application: %v", err)
 	}
@@ -44,6 +47,7 @@ func TestNewApplicationSeedsFixtureOnlyOnce(t *testing.T) {
 		t.Fatalf("compose second application: %v", err)
 	}
 	assertFixtureCOP(t, second.handler)
+	assertFixtureAdvisories(t, second.handler)
 	if err := second.close(); err != nil {
 		t.Fatalf("close second application: %v", err)
 	}
@@ -60,8 +64,67 @@ func TestNewApplicationSeedsFixtureOnlyOnce(t *testing.T) {
 	if len(events) != 9 {
 		t.Fatalf("canonical event count after two starts = %d, want 9", len(events))
 	}
+	history, err := durable.ReadAdvisoryHistory(context.Background())
+	if err != nil {
+		t.Fatalf("read durable advisory history: %v", err)
+	}
+	if len(history.Insights) != 2 || len(history.Recommendations) != 1 || len(history.ModelRuns) != 3 || len(history.AuditRecords) != 2 {
+		t.Fatalf("advisory history after two starts = %#v", history)
+	}
 }
 
+func TestNewApplicationRejectsPartialAdvisoryHistory(t *testing.T) {
+	ctx := context.Background()
+	root := repositoryRoot(t)
+	databasePath := filepath.Join(t.TempDir(), "mosaic.db")
+	durable, err := store.Open(ctx, databasePath)
+	if err != nil {
+		t.Fatalf("open durable store: %v", err)
+	}
+	scenario, err := simulator.New(simulator.Config{
+		Store:      durable,
+		SchemaDir:  filepath.Join(root, "ontology"),
+		FixtureDir: filepath.Join(root, "datasets", simulator.DomesticDisturbance),
+	})
+	if err != nil {
+		_ = durable.Close()
+		t.Fatalf("compose scenario: %v", err)
+	}
+	if _, err := scenario.Run(ctx); err != nil {
+		_ = durable.Close()
+		t.Fatalf("seed scenario: %v", err)
+	}
+	if err := durable.AppendModelRun(ctx, gen.ModelRun{
+		SchemaVersion:       "1.0.0",
+		ModelRunID:          "modelrun-fixture-terra-insight-domestic-access-001",
+		Agent:               "terra",
+		Provider:            "mosaic-fixture",
+		Model:               "mosaic-fixture-terra-v1",
+		PromptVersion:       "domestic-disturbance-fixture-v1",
+		OutputSchemaVersion: "1.0.0",
+		StateRevision:       7,
+		OutputIds:           []any{"insight-domestic-access-001"},
+		ValidationStatus:    "valid",
+		StartedAt:           "2026-07-18T10:05:00Z",
+		CompletedAt:         "2026-07-18T10:05:01Z",
+	}); err != nil {
+		_ = durable.Close()
+		t.Fatalf("seed partial advisory Model Run: %v", err)
+	}
+	if err := durable.Close(); err != nil {
+		t.Fatalf("close seeded store: %v", err)
+	}
+
+	_, err = newApplication(ctx, config{
+		ListenAddress: "127.0.0.1:0",
+		DatabasePath:  databasePath,
+		UIDirectory:   makeDashboard(t),
+		AssetRoot:     root,
+	})
+	if !errors.Is(err, simulator.ErrPartialAdvisoryStage) {
+		t.Fatalf("partial advisory startup error = %v, want %v", err, simulator.ErrPartialAdvisoryStage)
+	}
+}
 func TestComposeHandlerNeverFallsBackForAPI(t *testing.T) {
 	apiHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
@@ -192,6 +255,41 @@ func assertFixtureOperations(t *testing.T, handler http.Handler) {
 	}
 	if body.Data.Counts.UnprojectedEvents != 0 || body.Data.Counts.Checkpoints != 9 {
 		t.Fatalf("operations projection counts = %#v", body.Data.Counts)
+	}
+}
+func assertFixtureAdvisories(t *testing.T, handler http.Handler) {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "http://mosaic.test/api/v1/advisories", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("advisories status = %d: %s", response.Code, response.Body.String())
+	}
+
+	var body struct {
+		Data struct {
+			Status   string `json:"status"`
+			Insights []struct {
+				InsightID string `json:"insight_id"`
+				Status    string `json:"status"`
+			} `json:"insights"`
+			Recommendations []struct {
+				RecommendationID string `json:"recommendation_id"`
+				Status           string `json:"status"`
+			} `json:"recommendations"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode advisory response: %v", err)
+	}
+	if body.Data.Status != "fixture-composed" {
+		t.Fatalf("advisory composition status = %q, want fixture-composed", body.Data.Status)
+	}
+	if len(body.Data.Insights) != 2 || body.Data.Insights[0].Status != "superseded" || body.Data.Insights[1].Status != "superseded" {
+		t.Fatalf("advisory insight lifecycle = %#v", body.Data.Insights)
+	}
+	if len(body.Data.Recommendations) != 1 || body.Data.Recommendations[0].Status != "not_current" {
+		t.Fatalf("advisory recommendation lifecycle = %#v", body.Data.Recommendations)
 	}
 }
 func makeDashboard(t *testing.T) string {

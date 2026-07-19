@@ -163,9 +163,28 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 	// startup. P05's durable source idempotency returns existing results, so a
 	// later start verifies and recovers the original scenario without appending
 	// a second event, model-run, or checkpoint history.
-	if _, err := scenario.Run(ctx); err != nil {
+	run, err := scenario.Run(ctx)
+	if err != nil {
 		_ = closeDatabase()
 		return nil, fmt.Errorf("seed frozen scenario: %w", err)
+	}
+	advisoryReplay, err := simulator.NewAdvisoryReplay(simulator.AdvisoryReplayConfig{
+		Store:      database,
+		SchemaDir:  filepath.Join(configuration.AssetRoot, "ontology"),
+		FixtureDir: filepath.Join(configuration.AssetRoot, "datasets", simulator.DomesticDisturbance),
+	})
+	if err != nil {
+		_ = closeDatabase()
+		return nil, fmt.Errorf("compose fixture advisory replay: %w", err)
+	}
+	timeline, err := advisoryTimeline(ctx, configuration, run)
+	if err != nil {
+		_ = closeDatabase()
+		return nil, fmt.Errorf("prepare fixture advisory timeline: %w", err)
+	}
+	if _, err := advisoryReplay.Replay(ctx, timeline); err != nil {
+		_ = closeDatabase()
+		return nil, fmt.Errorf("compose fixture advisory history: %w", err)
 	}
 
 	resolver, err := api.NewSQLiteEvidenceResolver(database)
@@ -179,12 +198,14 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 		return nil, fmt.Errorf("compose SQLite operations reader: %w", err)
 	}
 	apiServer, err := api.New(api.Config{
-		Recovery:   scenario,
-		Records:    database,
-		Evidence:   resolver,
-		Operations: operations,
-		Stream:     stream.NewBroker(),
-		Version:    "v0.1",
+		Recovery:        scenario,
+		Records:         database,
+		Evidence:        resolver,
+		Operations:      operations,
+		AdvisoryHistory: database,
+		AdvisoryMode:    "fixture_composed",
+		Stream:          stream.NewBroker(),
+		Version:         "v0.1",
 	})
 	if err != nil {
 		_ = closeDatabase()
@@ -197,6 +218,47 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 	}, nil
 }
 
+// advisoryTimeline preserves the frozen rev-7/rev-9 snapshots required by P24
+// when a retained main database makes P05 deliveries idempotent. The fallback
+// uses a transient local SQLite store and the same checked-in scenario; it
+// never changes the retained database or invokes a model/network client.
+func advisoryTimeline(ctx context.Context, configuration config, run simulator.RunResult) ([]simulator.TimelineEntry, error) {
+	if timelineHasRevision(run.Timeline, 7) && timelineHasRevision(run.Timeline, 9) {
+		return run.Timeline, nil
+	}
+
+	temporary, err := store.Open(ctx, ":memory:")
+	if err != nil {
+		return nil, fmt.Errorf("open transient fixture timeline store: %w", err)
+	}
+	defer temporary.Close()
+
+	shadow, err := simulator.New(simulator.Config{
+		Store:      temporary,
+		SchemaDir:  filepath.Join(configuration.AssetRoot, "ontology"),
+		FixtureDir: filepath.Join(configuration.AssetRoot, "datasets", simulator.DomesticDisturbance),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("compose transient fixture timeline: %w", err)
+	}
+	result, err := shadow.Run(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("run transient fixture timeline: %w", err)
+	}
+	if !timelineHasRevision(result.Timeline, 7) || !timelineHasRevision(result.Timeline, 9) {
+		return nil, errors.New("transient fixture timeline is missing required revisions")
+	}
+	return result.Timeline, nil
+}
+
+func timelineHasRevision(timeline []simulator.TimelineEntry, revision int64) bool {
+	for _, entry := range timeline {
+		if entry.StateRevision == revision {
+			return true
+		}
+	}
+	return false
+}
 func normalizeConfig(configuration config) (config, error) {
 	configuration.ListenAddress = strings.TrimSpace(configuration.ListenAddress)
 	configuration.DatabasePath = strings.TrimSpace(configuration.DatabasePath)
