@@ -1,6 +1,6 @@
 // Package api implements Mosaic's local v0.1 HTTP and SSE read surface.
-// It has no external authentication or operational-action client: the two
-// fixed demo identities exist only to demonstrate the human decision boundary.
+// It is public by default for the synthetic demo; the injectable actor and
+// policy seams are composition points, not a production auth implementation.
 package api
 
 import (
@@ -21,8 +21,8 @@ import (
 )
 
 const (
-	// IdentityHeader selects one of the two synthetic, local demo identities.
-	// It is intentionally not a production authentication mechanism.
+	// IdentityHeader selects optional public display metadata. It is not
+	// authentication and never gates a request in the demo.
 	IdentityHeader = "X-Mosaic-Demo-Identity"
 
 	viewerIdentity     = "viewer-demo"
@@ -36,32 +36,122 @@ type RecoveryReader interface {
 	Recover(context.Context) (contracts.ProjectionResult, error)
 }
 
+// Actor is the resolved, provider-neutral HTTP caller description. It carries
+// no credential or token material. Role remains schema-valid when it is used
+// to create an immutable audit record.
+type Actor struct {
+	ID     string
+	Role   string
+	Labels map[string]string
+	Source string
+}
+
+// ActorResolver supplies a provider-neutral actor for an HTTP request. A later
+// identity-aware deployment can replace this adapter in composition.
+type ActorResolver interface {
+	ResolveActor(context.Context, *http.Request) (Actor, error)
+}
+
+// Action identifies one public API capability for the configurable policy.
+type Action string
+
+const (
+	ActionReadCOP         Action = "read_cop"
+	ActionReadEvidence    Action = "read_evidence"
+	ActionReadArtifact    Action = "read_artifact"
+	ActionReadStream      Action = "read_stream"
+	ActionReadOperations  Action = "read_operations"
+	ActionRequestBriefing Action = "record_briefing_request"
+	ActionRecordAudit     Action = "record_audit_action"
+)
+
+// PolicyDecision is intentionally small: the API can distinguish a configured
+// denial from a resolver or policy outage without exposing implementation data.
+type PolicyDecision struct {
+	Allowed bool
+	Reason  string
+}
+
+// ActionPolicy decides whether a resolved actor may use one demo capability.
+// It is a seam for future composition, not an authorization implementation.
+type ActionPolicy interface {
+	Authorize(context.Context, Actor, Action) (PolicyDecision, error)
+}
+
+// PublicActorResolver is the open-demo default. The optional identity header
+// changes only display metadata and the schema-valid audit display role; every
+// caller is still the same public actor and every request remains public.
+type PublicActorResolver struct{}
+
+// ResolveActor returns the stable public demo actor for every request.
+func (PublicActorResolver) ResolveActor(_ context.Context, request *http.Request) (Actor, error) {
+	mode := viewerIdentity
+	if request != nil && request.Header.Get(IdentityHeader) == supervisorIdentity {
+		mode = supervisorIdentity
+	}
+	role := "viewer"
+	if mode == supervisorIdentity {
+		role = "supervisor"
+	}
+	return Actor{
+		ID:     "public-demo",
+		Role:   role,
+		Labels: map[string]string{"demo_mode": mode},
+		Source: "public-demo-default",
+	}, nil
+}
+
+// AllowDemoPolicy permits every known demo read and immutable audit-record
+// write. It never authorizes an operational action because no such route or
+// action client exists in this demo.
+type AllowDemoPolicy struct{}
+
+// Authorize returns the open-demo decision for a recognised API capability.
+func (AllowDemoPolicy) Authorize(_ context.Context, _ Actor, action Action) (PolicyDecision, error) {
+	switch action {
+	case ActionReadCOP, ActionReadEvidence, ActionReadArtifact, ActionReadStream,
+		ActionReadOperations, ActionRequestBriefing, ActionRecordAudit:
+		return PolicyDecision{Allowed: true}, nil
+	default:
+		return PolicyDecision{Reason: "unknown demo capability"}, nil
+	}
+}
+
 // Config supplies the already-wired deterministic replay and append-only
 // persistence seams. The composition root chooses concrete P03/P06 instances.
 type Config struct {
-	Recovery RecoveryReader
-	Records  contracts.ImmutableRecordRepository
-	Evidence EvidenceResolver
-	Stream   *stream.Broker
-	Version  string
-	Clock    func() time.Time
-	NewID    func() string
+	Recovery   RecoveryReader
+	Records    contracts.ImmutableRecordRepository
+	Evidence   EvidenceResolver
+	Operations OperationsReader
+	Stream     *stream.Broker
+	Actors     ActorResolver
+	Policy     ActionPolicy
+	Version    string
+	Clock      func() time.Time
+	NewID      func() string
 }
 
 // Server composes the v0.1 HTTP handlers. It reads a COP only through the P06
 // recovery seam and writes only immutable audit records through P03.
 type Server struct {
-	recovery RecoveryReader
-	records  contracts.ImmutableRecordRepository
-	evidence EvidenceResolver
-	stream   *stream.Broker
-	version  string
-	clock    func() time.Time
-	newID    func() string
+	recovery   RecoveryReader
+	records    contracts.ImmutableRecordRepository
+	evidence   EvidenceResolver
+	operations OperationsReader
+	stream     *stream.Broker
+	actors     ActorResolver
+	policy     ActionPolicy
+	version    string
+	startedAt  time.Time
+	clock      func() time.Time
+	newID      func() string
 }
 
-// New rejects partial wiring so an endpoint cannot silently omit evidence or
-// audit persistence.
+// New rejects partial deterministic/evidence wiring while providing public
+// actor and policy defaults. An operations reader is optional until a
+// composition root selects the local SQLite adapter; its endpoint then reports
+// an explicit unavailable read model rather than silently inventing telemetry.
 func New(config Config) (*Server, error) {
 	if config.Recovery == nil {
 		return nil, errors.New("recovery reader is required")
@@ -75,6 +165,15 @@ func New(config Config) (*Server, error) {
 	if config.Stream == nil {
 		config.Stream = stream.NewBroker()
 	}
+	if config.Operations == nil {
+		config.Operations = unavailableOperationsReader{}
+	}
+	if config.Actors == nil {
+		config.Actors = PublicActorResolver{}
+	}
+	if config.Policy == nil {
+		config.Policy = AllowDemoPolicy{}
+	}
 	if config.Version == "" {
 		config.Version = "v0.1"
 	}
@@ -84,19 +183,24 @@ func New(config Config) (*Server, error) {
 	if config.NewID == nil {
 		config.NewID = randomID
 	}
+	startedAt := config.Clock().UTC()
 	return &Server{
-		recovery: config.Recovery,
-		records:  config.Records,
-		evidence: config.Evidence,
-		stream:   config.Stream,
-		version:  config.Version,
-		clock:    config.Clock,
-		newID:    config.NewID,
+		recovery:   config.Recovery,
+		records:    config.Records,
+		evidence:   config.Evidence,
+		operations: config.Operations,
+		stream:     config.Stream,
+		actors:     config.Actors,
+		policy:     config.Policy,
+		version:    config.Version,
+		startedAt:  startedAt,
+		clock:      config.Clock,
+		newID:      config.NewID,
 	}, nil
 }
 
 // Handler returns the versioned HTTP surface. No route is an operational
-// command: supervisor POSTs only append immutable audit records.
+// command: public POSTs only append immutable audit records.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/health", s.handleHealth)
@@ -105,6 +209,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/evidence/", s.handleEvidence)
 	mux.HandleFunc("/api/v1/artifacts/", s.handleArtifact)
 	mux.HandleFunc("/api/v1/stream", s.handleStream)
+	mux.HandleFunc("/api/v1/operations", s.handleOperations)
 	mux.HandleFunc("/api/v1/briefings", s.handleBriefing)
 	mux.HandleFunc("/api/v1/audit-actions", s.handleAuditAction)
 	return mux
@@ -134,7 +239,7 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCOP(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodGet) || !s.requireReadIdentity(w, r) {
+	if !requireMethod(w, r, http.MethodGet) || !s.authorize(w, r, ActionReadCOP) {
 		return
 	}
 	result, ok := s.recoverCOP(w, r)
@@ -145,7 +250,7 @@ func (s *Server) handleCOP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleEvidence(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodGet) || !s.requireReadIdentity(w, r) {
+	if !requireMethod(w, r, http.MethodGet) || !s.authorize(w, r, ActionReadEvidence) {
 		return
 	}
 	kind, id, ok := tailPair(r.URL.Path, "/api/v1/evidence/")
@@ -175,7 +280,7 @@ func (s *Server) handleEvidence(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleArtifact(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodGet) || !s.requireReadIdentity(w, r) {
+	if !requireMethod(w, r, http.MethodGet) || !s.authorize(w, r, ActionReadArtifact) {
 		return
 	}
 	kind, id, ok := tailPair(r.URL.Path, "/api/v1/artifacts/")
@@ -196,7 +301,7 @@ func (s *Server) handleArtifact(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodGet) || !s.requireReadIdentity(w, r) {
+	if !requireMethod(w, r, http.MethodGet) || !s.authorize(w, r, ActionReadStream) {
 		return
 	}
 	flusher, ok := w.(http.Flusher)
@@ -236,11 +341,53 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handleOperations(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) || !s.authorize(w, r, ActionReadOperations) {
+		return
+	}
+	result, recovered := s.recoverCOP(w, r)
+	if !recovered {
+		return
+	}
+	snapshot, err := s.operations.ReadOperations(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, nil, apiError{Code: "operations_unavailable", Message: "bounded operations telemetry is unavailable"})
+		return
+	}
+
+	observedAt := s.clock().UTC()
+	uptime := observedAt.Sub(s.startedAt)
+	if uptime < 0 {
+		uptime = 0
+	}
+	metadata := s.stream.Metadata()
+	writeJSON(w, http.StatusOK, operationsResponse{
+		ObservedAt:             observedAt,
+		LatestSourceReceivedAt: snapshot.LatestSourceReceivedAt,
+		Service: operationsService{
+			Version:       s.version,
+			StartedAt:     s.startedAt,
+			UptimeSeconds: int64(uptime / time.Second),
+		},
+		Recovery: operationsRecovery{
+			Status:        "recovered",
+			StateRevision: result.StateRevision,
+			ProjectedAt:   result.ProjectedAt.UTC(),
+		},
+		Counts: snapshot.Counts,
+		Stream: operationsStream{
+			LocalSubscriberCount: metadata.SubscriberCount,
+			LastPublished:        metadata.LastPublished,
+		},
+		Capabilities: operationsCapabilities(),
+	}, nil)
+}
+
 func (s *Server) handleBriefing(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	identity, ok := s.requireSupervisor(w, r)
+	caller, ok := s.resolveAndAuthorize(w, r, ActionRequestBriefing)
 	if !ok {
 		return
 	}
@@ -256,7 +403,7 @@ func (s *Server) handleBriefing(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	audit, err := s.appendAudit(r.Context(), identity, "briefing_requested", "briefing", request.BriefingID, request.Note)
+	audit, err := s.appendAudit(r.Context(), caller, "briefing_requested", "briefing", request.BriefingID, request.Note)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, nil, apiError{Code: "audit_append_failed", Message: "could not record briefing request"})
 		return
@@ -272,7 +419,7 @@ func (s *Server) handleAuditAction(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	identity, ok := s.requireSupervisor(w, r)
+	caller, ok := s.resolveAndAuthorize(w, r, ActionRecordAudit)
 	if !ok {
 		return
 	}
@@ -294,7 +441,7 @@ func (s *Server) handleAuditAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	audit, err := s.appendAudit(r.Context(), identity, request.Action, request.TargetKind, request.TargetID, request.Note)
+	audit, err := s.appendAudit(r.Context(), caller, request.Action, request.TargetKind, request.TargetID, request.Note)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, nil, apiError{Code: "audit_append_failed", Message: "could not record review action"})
 		return
@@ -311,44 +458,33 @@ func (s *Server) recoverCOP(w http.ResponseWriter, r *http.Request) (contracts.P
 	return result, true
 }
 
-type identity struct {
-	ID   string
-	Role string
-}
-
-func (s *Server) requireReadIdentity(w http.ResponseWriter, r *http.Request) bool {
-	_, ok := demoIdentity(r)
-	if !ok {
-		writeJSON(w, http.StatusUnauthorized, nil, apiError{Code: "demo_identity_required", Message: "a fixed demo identity is required"})
-	}
+func (s *Server) authorize(w http.ResponseWriter, r *http.Request, action Action) bool {
+	_, ok := s.resolveAndAuthorize(w, r, action)
 	return ok
 }
 
-func (s *Server) requireSupervisor(w http.ResponseWriter, r *http.Request) (identity, bool) {
-	caller, ok := demoIdentity(r)
-	if !ok {
-		writeJSON(w, http.StatusUnauthorized, nil, apiError{Code: "demo_identity_required", Message: "a fixed supervisor identity is required"})
-		return identity{}, false
+func (s *Server) resolveAndAuthorize(w http.ResponseWriter, r *http.Request, action Action) (Actor, bool) {
+	caller, err := s.actors.ResolveActor(r.Context(), r)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, nil, apiError{Code: "actor_unavailable", Message: "public actor resolution is unavailable"})
+		return Actor{}, false
 	}
-	if caller.Role != "supervisor" {
-		writeJSON(w, http.StatusForbidden, nil, apiError{Code: "supervisor_required", Message: "only supervisor-demo may record a review action"})
-		return identity{}, false
+	decision, err := s.policy.Authorize(r.Context(), caller, action)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, nil, apiError{Code: "policy_unavailable", Message: "public action policy is unavailable"})
+		return Actor{}, false
+	}
+	if !decision.Allowed {
+		writeJSON(w, http.StatusForbidden, nil, apiError{Code: "action_denied", Message: "the configured demo policy denied this request"})
+		return Actor{}, false
 	}
 	return caller, true
 }
 
-func demoIdentity(r *http.Request) (identity, bool) {
-	switch r.Header.Get(IdentityHeader) {
-	case viewerIdentity:
-		return identity{ID: viewerIdentity, Role: "viewer"}, true
-	case supervisorIdentity:
-		return identity{ID: supervisorIdentity, Role: "supervisor"}, true
-	default:
-		return identity{}, false
+func (s *Server) appendAudit(ctx context.Context, caller Actor, action, targetKind, targetID, note string) (gen.AuditRecord, error) {
+	if strings.TrimSpace(caller.ID) == "" || !validAuditRole(caller.Role) {
+		return gen.AuditRecord{}, errors.New("resolved actor cannot create a schema-valid audit record")
 	}
-}
-
-func (s *Server) appendAudit(ctx context.Context, caller identity, action, targetKind, targetID, note string) (gen.AuditRecord, error) {
 	recordID := "audit-" + s.newID()
 	if recordID == "audit-" {
 		return gen.AuditRecord{}, errors.New("audit identity generator returned an empty value")
@@ -368,6 +504,10 @@ func (s *Server) appendAudit(ctx context.Context, caller identity, action, targe
 		return gen.AuditRecord{}, err
 	}
 	return record, nil
+}
+
+func validAuditRole(role string) bool {
+	return role == "viewer" || role == "supervisor" || role == "system"
 }
 
 type briefingRequest struct {
