@@ -26,15 +26,11 @@ import (
 	"mosaic.local/mosaic/internal/terra"
 )
 
-const (
-	viewerDemo     = "viewer-demo"
-	supervisorDemo = "supervisor-demo"
-)
-
 // TestDomesticDisturbanceHTTPAuditAndAdvisoryBoundaries starts the real P07
-// fixture spine and P08 HTTP handlers in-process. The only advisory responses
-// are checked-in P04 fixture artifacts returned by tiny test doubles: no model
-// transport, network call, or operational action is present in this test.
+// fixture spine and public P17 HTTP handlers in-process. The only advisory
+// responses are checked-in P04 fixture artifacts returned by tiny test doubles:
+// no model transport, network call, or operational action is present in this
+// test.
 func TestDomesticDisturbanceHTTPAuditAndAdvisoryBoundaries(t *testing.T) {
 	ctx := context.Background()
 	root := repositoryRoot(t)
@@ -69,15 +65,20 @@ func TestDomesticDisturbanceHTTPAuditAndAdvisoryBoundaries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compose persisted evidence resolver: %v", err)
 	}
+	operations, err := api.NewSQLiteOperationsReader(database)
+	if err != nil {
+		t.Fatalf("compose bounded operations reader: %v", err)
+	}
 	activeInsight, recommendation := appendFixtureAdvisories(t, ctx, root, database, resolver, run)
 
 	broker := stream.NewBroker()
 	server, err := api.New(api.Config{
-		Recovery: scenario,
-		Records:  database,
-		Evidence: resolver,
-		Stream:   broker,
-		Version:  "e2e",
+		Recovery:   scenario,
+		Records:    database,
+		Evidence:   resolver,
+		Operations: operations,
+		Stream:     broker,
+		Version:    "e2e",
 	})
 	if err != nil {
 		t.Fatalf("compose API server: %v", err)
@@ -85,11 +86,12 @@ func TestDomesticDisturbanceHTTPAuditAndAdvisoryBoundaries(t *testing.T) {
 	httpServer := httptest.NewServer(server.Handler())
 	t.Cleanup(httpServer.Close)
 
-	assertAuthenticatedRead(t, httpServer.URL, "/api/v1/cop")
+	assertPublicCOPRead(t, httpServer.URL, "/api/v1/cop")
 	assertResolvableEvidence(t, httpServer.URL, "canonical_event", "canonical-domestic-009-road-open")
 	assertResolvableEvidence(t, httpServer.URL, "raw_event", "raw-domestic-001-call")
 	assertBoundedSSE(t, httpServer, server)
 	assertAuditBoundary(t, httpServer.URL, activeInsight, recommendation)
+	assertPublicOperations(t, httpServer.URL)
 	assertDurableCount(t, database, "model_runs", 12)
 	assertDurableCount(t, database, "insights", 1)
 	assertDurableCount(t, database, "recommendations", 1)
@@ -190,9 +192,9 @@ func appendFixtureAdvisories(
 	return active, recommendation
 }
 
-func assertAuthenticatedRead(t *testing.T, baseURL, path string) {
+func assertPublicCOPRead(t *testing.T, baseURL, path string) {
 	t.Helper()
-	response := request(t, http.DefaultClient, http.MethodGet, baseURL+path, viewerDemo, "")
+	response := request(t, http.DefaultClient, http.MethodGet, baseURL+path, "", "")
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("GET %s status = %d", path, response.StatusCode)
@@ -205,7 +207,7 @@ func assertAuthenticatedRead(t *testing.T, baseURL, path string) {
 
 func assertResolvableEvidence(t *testing.T, baseURL, kind, id string) {
 	t.Helper()
-	response := request(t, http.DefaultClient, http.MethodGet, baseURL+"/api/v1/evidence/"+kind+"/"+id, viewerDemo, "")
+	response := request(t, http.DefaultClient, http.MethodGet, baseURL+"/api/v1/evidence/"+kind+"/"+id, "", "")
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("GET evidence %s/%s status = %d", kind, id, response.StatusCode)
@@ -227,7 +229,6 @@ func assertBoundedSSE(t *testing.T, testServer *httptest.Server, server *api.Ser
 	if err != nil {
 		t.Fatalf("create SSE request: %v", err)
 	}
-	req.Header.Set(api.IdentityHeader, viewerDemo)
 	response, err := testServer.Client().Do(req)
 	if err != nil {
 		t.Fatalf("open SSE stream: %v", err)
@@ -259,33 +260,230 @@ func assertBoundedSSE(t *testing.T, testServer *httptest.Server, server *api.Ser
 
 func assertAuditBoundary(t *testing.T, baseURL string, active gen.Insight, recommendation gen.Recommendation) {
 	t.Helper()
-	viewer := request(t, http.DefaultClient, http.MethodPost, baseURL+"/api/v1/briefings", viewerDemo, `{"briefing_id":"briefing-p12-viewer"}`)
-	defer viewer.Body.Close()
-	if viewer.StatusCode != http.StatusForbidden {
-		t.Fatalf("viewer briefing status = %d, want %d", viewer.StatusCode, http.StatusForbidden)
-	}
-
-	briefing := request(t, http.DefaultClient, http.MethodPost, baseURL+"/api/v1/briefings", supervisorDemo, `{"briefing_id":"briefing-p12-supervisor","note":"Synthetic fixture briefing review."}`)
+	briefing := request(t, http.DefaultClient, http.MethodPost, baseURL+"/api/v1/briefings", "", "{\"briefing_id\":\"briefing-p20-public\",\"note\":\"Synthetic fixture briefing review.\"}")
 	defer briefing.Body.Close()
 	if briefing.StatusCode != http.StatusAccepted {
-		t.Fatalf("supervisor briefing status = %d", briefing.StatusCode)
+		t.Fatalf("public briefing status = %d", briefing.StatusCode)
 	}
-	if executed, _ := responseData(t, briefing)["executed"].(bool); executed {
+	briefingData := responseData(t, briefing)
+	if executed, _ := briefingData["executed"].(bool); executed {
 		t.Fatal("briefing endpoint reported an executed action")
 	}
+	assertPublicAuditActor(t, briefingData)
 
-	body := fmt.Sprintf(`{"action":"acknowledged","target_kind":"recommendation","target_id":%q,"note":"Synthetic fixture recommendation reviewed."}`, recommendation.RecommendationID)
-	action := request(t, http.DefaultClient, http.MethodPost, baseURL+"/api/v1/audit-actions", supervisorDemo, body)
+	body := fmt.Sprintf("{\"action\":\"acknowledged\",\"target_kind\":\"recommendation\",\"target_id\":%q,\"note\":\"Synthetic fixture recommendation reviewed.\"}", recommendation.RecommendationID)
+	action := request(t, http.DefaultClient, http.MethodPost, baseURL+"/api/v1/audit-actions", "", body)
 	defer action.Body.Close()
 	if action.StatusCode != http.StatusCreated {
-		t.Fatalf("supervisor audit action status = %d", action.StatusCode)
+		t.Fatalf("public audit action status = %d", action.StatusCode)
 	}
-	if executed, _ := responseData(t, action)["executed"].(bool); executed {
+	actionData := responseData(t, action)
+	if executed, _ := actionData["executed"].(bool); executed {
 		t.Fatal("audit action endpoint reported an executed action")
 	}
+	assertPublicAuditActor(t, actionData)
 	if active.InsightID != "insight-domestic-access-001" || recommendation.RecommendationID != "recommendation-domestic-001" {
 		t.Fatalf("unexpected fixture advisory identifiers: %q / %q", active.InsightID, recommendation.RecommendationID)
 	}
+}
+
+func assertPublicAuditActor(t *testing.T, data map[string]any) {
+	t.Helper()
+	audit, ok := data["audit_record"].(map[string]any)
+	if !ok {
+		t.Fatalf("audit response does not include an audit record: %#v", data)
+	}
+	if actor, _ := audit["actor_id"].(string); actor != "public-demo" {
+		t.Fatalf("audit actor = %q, want public-demo", actor)
+	}
+	if role, _ := audit["actor_role"].(string); role != "viewer" {
+		t.Fatalf("no-header audit role = %q, want viewer display mode", role)
+	}
+}
+
+func assertPublicOperations(t *testing.T, baseURL string) {
+	t.Helper()
+	response := request(t, http.DefaultClient, http.MethodGet, baseURL+"/api/v1/operations", "", "")
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("public operations status = %d", response.StatusCode)
+	}
+
+	encoded, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read operations response: %v", err)
+	}
+	for _, field := range []string{
+		"\"payload\"",
+		"\"payload_bytes_b64\"",
+		"\"raw_sha256\"",
+		"\"prompt\"",
+		"\"prompt_version\"",
+		"\"response\"",
+		"\"response_id\"",
+		"\"model_response\"",
+	} {
+		if strings.Contains(string(encoded), field) {
+			t.Fatalf("operations response disclosed forbidden field %s: %s", field, encoded)
+		}
+	}
+
+	var envelope map[string]any
+	if err := json.Unmarshal(encoded, &envelope); err != nil {
+		t.Fatalf("decode operations response: %v", err)
+	}
+	data := mapValue(t, envelope, "data")
+	assertTimestamp(t, data, "observed_at")
+	assertTimestamp(t, data, "latest_source_received_at")
+
+	service := mapValue(t, data, "service")
+	if version, _ := service["version"].(string); version != "e2e" {
+		t.Fatalf("operations service version = %q, want e2e", version)
+	}
+	recovery := mapValue(t, data, "recovery")
+	if status, _ := recovery["status"].(string); status != "recovered" || countValue(t, recovery, "state_revision") != 9 {
+		t.Fatalf("operations recovery = %#v", recovery)
+	}
+
+	counts := mapValue(t, data, "counts")
+	for key, want := range map[string]int{
+		"raw_events": 10, "canonical_events": 9, "projected_events": 9,
+		"unprojected_events": 0, "checkpoints": 9, "insights": 1,
+		"recommendations": 1, "audit_records": 2,
+	} {
+		if got := countValue(t, counts, key); got != want {
+			t.Fatalf("operations %s = %d, want %d", key, got, want)
+		}
+	}
+	lifecycle := mapValue(t, counts, "luna_lifecycle")
+	for key, want := range map[string]int{"accepted": 8, "repaired": 1, "quarantined": 1, "rejected": 0} {
+		if got := countValue(t, lifecycle, key); got != want {
+			t.Fatalf("operations Luna %s = %d, want %d", key, got, want)
+		}
+	}
+	modelRuns := mapValue(t, counts, "model_runs")
+	if countValue(t, modelRuns, "total") != 12 {
+		t.Fatalf("operations model-run count = %d, want 12", countValue(t, modelRuns, "total"))
+	}
+	assertAgentCounts(t, modelRuns["by_agent"])
+
+	streamData := mapValue(t, data, "stream")
+	published := mapValue(t, streamData, "last_published")
+	if name, _ := published["name"].(string); name != "system.status" {
+		t.Fatalf("operations last stream event = %q, want system.status", name)
+	}
+	assertTimestamp(t, published, "published_at")
+	assertCapabilities(t, data["capabilities"])
+}
+
+func mapValue(t *testing.T, parent map[string]any, key string) map[string]any {
+	t.Helper()
+	value, ok := parent[key].(map[string]any)
+	if !ok {
+		t.Fatalf("operations %s = %#v, want object", key, parent[key])
+	}
+	return value
+}
+
+func countValue(t *testing.T, parent map[string]any, key string) int {
+	t.Helper()
+	value, ok := parent[key].(float64)
+	if !ok {
+		t.Fatalf("operations %s = %#v, want JSON number", key, parent[key])
+	}
+	return int(value)
+}
+
+func assertTimestamp(t *testing.T, parent map[string]any, key string) {
+	t.Helper()
+	value, ok := parent[key].(string)
+	if !ok {
+		t.Fatalf("operations %s = %#v, want timestamp", key, parent[key])
+	}
+	if parsed, err := time.Parse(time.RFC3339Nano, value); err != nil || parsed.IsZero() {
+		t.Fatalf("operations %s = %q, want non-zero RFC3339 timestamp: %v", key, value, err)
+	}
+}
+
+func assertAgentCounts(t *testing.T, value any) {
+	t.Helper()
+	items, ok := value.([]any)
+	if !ok {
+		t.Fatalf("operations model by_agent = %#v, want array", value)
+	}
+	want := map[string]map[string]int{
+		"luna":  {"valid": 10, "invalid": 0, "refused": 0, "failed": 0, "timed_out": 0},
+		"sol":   {"valid": 1, "invalid": 0, "refused": 0, "failed": 0, "timed_out": 0},
+		"terra": {"valid": 1, "invalid": 0, "refused": 0, "failed": 0, "timed_out": 0},
+	}
+	if len(items) != len(want) {
+		t.Fatalf("operations model agent count = %d, want %d", len(items), len(want))
+	}
+	seen := make(map[string]bool, len(items))
+	for _, item := range items {
+		agent := objectValue(t, item, "model by_agent item")
+		name, _ := agent["agent"].(string)
+		statuses, known := want[name]
+		if !known || seen[name] {
+			t.Fatalf("unexpected operations model agent %#v", agent)
+		}
+		seen[name] = true
+		if got := countValue(t, agent, "total"); got != statuses["valid"] {
+			t.Fatalf("operations model agent %q total = %d, want %d", name, got, statuses["valid"])
+		}
+		validation := mapValue(t, agent, "validation_statuses")
+		for status, expected := range statuses {
+			if got := countValue(t, validation, status); got != expected {
+				t.Fatalf("operations model agent %q %s = %d, want %d", name, status, got, expected)
+			}
+		}
+	}
+}
+
+func assertCapabilities(t *testing.T, value any) {
+	t.Helper()
+	items, ok := value.([]any)
+	if !ok {
+		t.Fatalf("operations capabilities = %#v, want array", value)
+	}
+	want := map[string]struct{ mode, status string }{
+		"source_intake":           {"fixture", "available"},
+		"luna_normalization":      {"fixture", "available"},
+		"deterministic_projector": {"composed", "available"},
+		"startup_recovery":        {"composed", "recovered"},
+		"terra_assessment":        {"unavailable", "unavailable"},
+		"sol_advisory":            {"unavailable", "unavailable"},
+		"human_audit":             {"composed", "available"},
+		"reconciliation":          {"unavailable", "unavailable"},
+		"operational_action":      {"permanently_unavailable", "unavailable"},
+	}
+	if len(items) != len(want) {
+		t.Fatalf("operations capability count = %d, want %d", len(items), len(want))
+	}
+	seen := make(map[string]bool, len(items))
+	for _, item := range items {
+		capability := objectValue(t, item, "capability item")
+		name, _ := capability["capability"].(string)
+		expected, ok := want[name]
+		if !ok || seen[name] {
+			t.Fatalf("unexpected operations capability %#v", capability)
+		}
+		seen[name] = true
+		mode, _ := capability["mode"].(string)
+		status, _ := capability["status"].(string)
+		if mode != expected.mode || status != expected.status {
+			t.Fatalf("operations capability %q = mode %q status %q, want mode %q status %q", name, mode, status, expected.mode, expected.status)
+		}
+	}
+}
+
+func objectValue(t *testing.T, value any, label string) map[string]any {
+	t.Helper()
+	object, ok := value.(map[string]any)
+	if !ok {
+		t.Fatalf("operations %s = %#v, want object", label, value)
+	}
+	return object
 }
 
 type sseEvent struct {
@@ -327,7 +525,9 @@ func request(t *testing.T, client *http.Client, method, url, identity, body stri
 		req.Body = io.NopCloser(strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 	}
-	req.Header.Set(api.IdentityHeader, identity)
+	if strings.TrimSpace(identity) != "" {
+		req.Header.Set(api.IdentityHeader, identity)
+	}
 	response, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("%s %s: %v", method, url, err)
