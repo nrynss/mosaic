@@ -10,34 +10,34 @@
 Mosaic gains an interactive, operator-driven demo lifecycle on top of the
 existing deterministic foundation. Three things are made explicit:
 
-1. **The operator is real; the world is synthetic.** A logged-in human operator
-   drives the session. Only the incoming call/events, environmental data, and
-   the reference scenario are synthetic. The operator presses **Analyze**,
-   reviews findings, annotates, and approves or prepares recipient handoffs.
-2. **Live models are opt-in, server-side, and bounded.** Luna/Terra/Sol may run
-   against real OpenAI models (`gpt-5.6` family) behind their existing structured
-   client seams. The live path is opt-in; the deterministic fixture path remains
-   the default and the safe fallback. The API key is a server-only runtime
-   secret and never enters the browser, Git, image, or committed compose file.
+1. **The operator is real; the world is synthetic.** A human operator drives the
+   open session — no login, no accounts. Only the incoming call/events,
+   environmental data, and the reference scenario are synthetic. The operator
+   presses **Analyze**, reviews findings, annotates, and approves or prepares
+   recipient handoffs. Operator writes keep the existing open public actor.
+2. **Live models are opt-in and server-side.** Luna/Terra/Sol may run against
+   real OpenAI models (`gpt-5.6` family) behind their existing structured client
+   seams. The live path is opt-in; the deterministic fixture path remains the
+   default and the safe fallback. The API key is a server-only runtime secret and
+   never enters the browser, Git, image, or committed compose file. Spend is
+   bounded by the key's own provider-side limit; the app adds no separate budget
+   enforcement.
 3. **Recurrence awareness is deterministic and reviewable.** When a later call
    arrives for the same configured area, Mosaic surfaces prior recorded handoffs
    and, after a configurable window, prepares a reviewable note. It never
    autonomously contacts an external party and it is not LLM self-healing.
 
 This increment does not add real operational feeds, real dispatch/maintenance
-delivery, autonomous action, or multi-tenant identity. Every operator action
+delivery, autonomous action, login, or identity management. Every operator action
 remains an immutable audit record with `executed: false`.
 
 ## Operator model
 
-The operator is a server-side session actor (identity + display role) created at
-login. This replaces the fixed public actor for operator-driven writes: audit
-records carry the real operator's identity and role, not a fixed demo token. The
-existing `api.ActorResolver` seam (RFC-0004) is the injection point; the public
-read surface and its policy defaults are preserved.
-
-Login for the demo is a lightweight operator session (name/role), not a real
-identity provider. No password, PII, or external auth is introduced.
+There is no login. The demo is open, and the person using it is the operator: a
+human who drives the synthetic session by pressing Analyze, reviewing, annotating,
+and recording handoffs. Operator writes use the existing open public actor and
+policy defaults (RFC-0002/RFC-0004) unchanged — this increment adds no accounts,
+sessions, passwords, PII, or external auth.
 
 ## Interactive simulation lifecycle
 
@@ -67,10 +67,9 @@ the beat schedule. Timing is configuration, not a hardcoded delay.
   live selection and a present server secret, each agent uses its deterministic
   fixture client. Invalid, refused, or unavailable live output is recorded as a
   ModelRun and produces no state mutation, exactly as today.
-- A budget governor enforces an application budget cap, per-response output-token
-  caps, and per-session model-call limits, and writes usage/audit records. The
-  demo target is a small per-session cost; caching is treated as a bonus, never a
-  budget assumption.
+- Spend is bounded by the provider-side limit on the supplied key. The app adds
+  no separate budget governor. Token usage may be recorded as ModelRun metadata
+  for provenance, but it is observability, not enforcement.
 
 ## Recurrence awareness
 
@@ -95,8 +94,6 @@ outside this increment.
 
 - The deterministic fixture demo continues to pass unchanged with no live secret.
 - With a live secret and explicit opt-in, operator-triggered Analyze/briefing run
-  against real models, bounded by the budget governor, with usage recorded.
-- Operator identity appears in audit actors; the public read surface and policy
-  defaults are preserved.
+  against real models; the public read surface and policy defaults are preserved.
 - Every operator action is an immutable `executed: false` record; recurrence
   prepares reviewable notes, never autonomous contact.

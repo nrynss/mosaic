@@ -93,16 +93,17 @@ The current startup-only fixture composition is sufficient for Docker proof but 
 ## The operator is real; the world is synthetic
 
 Only the incoming call/events, environmental data, and the reference scenario are
-simulated. The operator is a real logged-in user who drives the session:
+simulated. There is no login — the demo is open, and the person using it is the
+operator who drives the session:
 
 - **Synthetic:** the intake call, source events, environment, and reference COP.
-- **Real:** the logged-in operator presses **Analyze**, reviews findings, adds a
-  note, approves or prepares a dispatch/maintenance handoff, and records why.
+- **Real:** the operator presses **Analyze**, reviews findings, adds a note,
+  approves or prepares a dispatch/maintenance handoff, and records why.
 - **Safe:** the system records a proposed handoff; it does not autonomously
   contact any real department.
 
-Operator identity flows into the audit trail: each recorded action carries the
-real operator's identity and role, not a fixed demo token.
+Every operator action becomes an immutable audit record (`executed: false`) using
+the existing open public actor. No accounts or identity management are added.
 
 ## Live models: opt-in, server-side, bounded
 
@@ -115,10 +116,10 @@ The demo can run Luna/Terra/Sol against real OpenAI models, opt-in:
   server secret, each agent uses its deterministic fixture client. Invalid,
   refused, or unavailable live output is recorded as a ModelRun and mutates
   nothing — exactly as the fixture path.
-- **Budget:** an application budget cap, per-response output-token caps, and
-  per-session call limits, with usage recorded. A typical operator-triggered
-  session (one Terra analysis plus an optional Sol briefing) stays well within a
-  small budget; prompt caching is a bonus, never a budget assumption.
+- **Budget:** bounded by the provider-side spend limit on the supplied key. The
+  app adds no separate budget enforcement. A typical operator-triggered session
+  (one Terra analysis plus an optional Sol briefing) is inexpensive; token usage
+  may be shown for provenance, but it is not a control.
 - **Key handling:** the OpenAI key is a server-only runtime secret
   (`OPENAI_API_KEY`). It never enters the browser, Git history, the Docker image,
   or a committed compose file. The live path is opt-in; the fixture path is the
