@@ -520,3 +520,5 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-20 P37 ready for integration — 572cec5; beat schedule exposed and validated.
 - 2026-07-20 P39 claimed by external builder — base 19bec75, branch parcel/P39-recurrence-awareness; implementing recurrence awareness.
 - 2026-07-20 P39 ready for integration — a7631a7; recurrence detector implemented and verified.
+- 2026-07-20 P37 integrated by coordinator — `33f344f`; domesticdisturbance profile now implements contracts.SimulationSchedule and exposes the configured-timing beats.
+- 2026-07-20 P39 integrated by coordinator — `aa0c3b0`; recurrence package added with configurable-window detector, area matching, and prepared note linkage.
