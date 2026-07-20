@@ -3,6 +3,7 @@ package contracts
 import (
 	"context"
 	"testing"
+	"time"
 
 	"mosaic.local/mosaic/internal/ontology/gen"
 )
@@ -45,5 +46,57 @@ func TestAdvisoryHistoryReaderRemainsBoundedDomainSnapshot(t *testing.T) {
 
 	if len(history.Insights) != 1 || len(history.Recommendations) != 1 || len(history.ModelRuns) != 1 || len(history.AuditRecords) != 1 {
 		t.Fatal("advisory history must retain each persisted advisory record class")
+	}
+}
+
+type simulationScheduleFixture struct{}
+
+func (simulationScheduleFixture) Beats() []ScheduledBeat {
+	return []ScheduledBeat{
+		{
+			BeatID:     "beat-001",
+			Order:      1,
+			RawEventID: "raw-001",
+			Delay:      100 * time.Millisecond,
+		},
+	}
+}
+
+func TestSimulationContracts(t *testing.T) {
+	var _ SimulationSchedule = simulationScheduleFixture{}
+
+	session := SimulationSession{
+		SessionID: "session-001",
+		Status:    SessionRunning,
+		Beats: []ScheduledBeat{
+			{
+				BeatID:     "beat-001",
+				Order:      1,
+				RawEventID: "raw-001",
+				Delay:      100 * time.Millisecond,
+			},
+		},
+	}
+
+	if session.Status != "running" {
+		t.Errorf("session status mismatch: got %v, want running", session.Status)
+	}
+
+	event := SimulationStreamEvent{
+		SessionID: "session-001",
+		Sequence:  1,
+		Timestamp: time.Now(),
+		Type:      "beat",
+	}
+
+	if event.Type != "beat" {
+		t.Errorf("event type mismatch: got %s, want beat", event.Type)
+	}
+
+	providerFixture := ProviderFixture
+	providerLive := ProviderLive
+
+	if providerFixture != "fixture" || providerLive != "live" {
+		t.Errorf("provider value mismatch: fixture=%s, live=%s", providerFixture, providerLive)
 	}
 }

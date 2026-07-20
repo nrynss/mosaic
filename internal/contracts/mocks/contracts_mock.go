@@ -587,3 +587,41 @@ func (mr *MockSolAdapterMockRecorder) Brief(arg0, arg1 any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Brief", reflect.TypeOf((*MockSolAdapter)(nil).Brief), arg0, arg1)
 }
+
+// MockSimulationSchedule is a mock of SimulationSchedule interface.
+type MockSimulationSchedule struct {
+	ctrl     *gomock.Controller
+	recorder *MockSimulationScheduleMockRecorder
+	isgomock struct{}
+}
+
+// MockSimulationScheduleMockRecorder is the mock recorder for MockSimulationSchedule.
+type MockSimulationScheduleMockRecorder struct {
+	mock *MockSimulationSchedule
+}
+
+// NewMockSimulationSchedule creates a new mock instance.
+func NewMockSimulationSchedule(ctrl *gomock.Controller) *MockSimulationSchedule {
+	mock := &MockSimulationSchedule{ctrl: ctrl}
+	mock.recorder = &MockSimulationScheduleMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockSimulationSchedule) EXPECT() *MockSimulationScheduleMockRecorder {
+	return m.recorder
+}
+
+// Beats mocks base method.
+func (m *MockSimulationSchedule) Beats() []contracts.ScheduledBeat {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Beats")
+	ret0, _ := ret[0].([]contracts.ScheduledBeat)
+	return ret0
+}
+
+// Beats indicates an expected call of Beats.
+func (mr *MockSimulationScheduleMockRecorder) Beats() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Beats", reflect.TypeOf((*MockSimulationSchedule)(nil).Beats))
+}

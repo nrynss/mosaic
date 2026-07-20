@@ -131,3 +131,49 @@ type SolOutput struct {
 	Recommendation gen.Recommendation
 	ModelRun       gen.ModelRun
 }
+
+// ModelProvider represents the choice between fixture and live model responses.
+type ModelProvider string
+
+const (
+	ProviderFixture ModelProvider = "fixture"
+	ProviderLive    ModelProvider = "live"
+)
+
+// SessionStatus represents the current lifecycle status of an interactive simulation session.
+type SessionStatus string
+
+const (
+	SessionPending SessionStatus = "pending"
+	SessionRunning SessionStatus = "running"
+	SessionEnded   SessionStatus = "ended"
+)
+
+// ScheduledBeat represents a single event beat in the simulation schedule.
+type ScheduledBeat struct {
+	BeatID     string        `json:"beat_id"`
+	Order      int           `json:"order"`
+	RawEventID string        `json:"raw_event_id"`
+	Delay      time.Duration `json:"delay"`
+}
+
+// SimulationSession represents the configuration and status of an interactive simulation session.
+type SimulationSession struct {
+	SessionID string          `json:"session_id"`
+	Status    SessionStatus   `json:"status"`
+	Beats     []ScheduledBeat `json:"beats"`
+}
+
+// SimulationSchedule exposes the ordered beats for a simulation session.
+type SimulationSchedule interface {
+	Beats() []ScheduledBeat
+}
+
+// SimulationStreamEvent represents a session-scoped stream event payload.
+type SimulationStreamEvent struct {
+	SessionID string    `json:"session_id"`
+	Sequence  int64     `json:"sequence"`
+	Timestamp time.Time `json:"timestamp"`
+	Type      string    `json:"type"` // e.g., "beat", "status_change", "workspace_clear"
+	Payload   any       `json:"payload,omitempty"`
+}
