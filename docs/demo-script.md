@@ -77,3 +77,15 @@ The primary screen becomes an incident command workspace:
 5. a provenance/actions tab for the full audit trail.
 
 Keep API connection, health, version, stream, and recovery indicators in a compact status drawer or developer view.
+
+## Simulation lifecycle
+
+The primary UI action is **Start simulation**.
+
+1. It creates a new synthetic simulation session and clears only the visible incident workspace.
+2. The session replays the declared source events in configured timing order.
+3. The UI shows intake, elapsed simulation time, current state, analysis availability, recipient-specific handoffs, and provenance as each beat arrives.
+4. The session ends explicitly after the final event and remains reviewable in the provenance/actions tab.
+5. A new start creates a new session; it does not truncate or rewrite immutable event, insight, recommendation, handoff, or audit history.
+
+The current startup-only fixture composition is sufficient for Docker proof but is not this interactive lifecycle. Implementing it requires a dedicated synthetic simulation-session API and stream contract, scoped separately from the read/audit API.
