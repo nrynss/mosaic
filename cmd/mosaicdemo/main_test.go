@@ -15,7 +15,9 @@ import (
 	"time"
 
 	"mosaic.local/mosaic/internal/api"
+	"mosaic.local/mosaic/internal/contracts"
 	"mosaic.local/mosaic/internal/ontology/gen"
+	"mosaic.local/mosaic/internal/openaimodel"
 	"mosaic.local/mosaic/internal/reference/domesticdisturbance/simulator"
 	"mosaic.local/mosaic/internal/store"
 )
@@ -188,6 +190,14 @@ func TestParseConfigUsesRuntimeEnvironment(t *testing.T) {
 			return ui
 		case "MOSAIC_ASSET_ROOT":
 			return root
+		case "OPENAI_API_KEY":
+			return "should-not-appear-in-flags"
+		case "MOSAIC_TERRA_PROVIDER":
+			return "live"
+		case "MOSAIC_RECURRENCE_AREA":
+			return "bridge-7"
+		case "MOSAIC_RECURRENCE_WINDOW":
+			return "24h"
 		default:
 			return ""
 		}
@@ -198,6 +208,106 @@ func TestParseConfigUsesRuntimeEnvironment(t *testing.T) {
 	if configuration.ListenAddress != ":8080" || configuration.DatabasePath != filepath.Join(root, "mosaic.db") || configuration.UIDirectory != ui || configuration.AssetRoot != root {
 		t.Fatalf("runtime configuration = %#v", configuration)
 	}
+	if configuration.ModelEnv.APIKey != "should-not-appear-in-flags" {
+		t.Fatalf("server-only key not loaded: %#v", configuration.ModelEnv)
+	}
+	if configuration.ModelEnv.Terra != contracts.ProviderLive {
+		t.Fatalf("terra provider = %s, want live", configuration.ModelEnv.Terra)
+	}
+	if configuration.RecurrenceArea != "bridge-7" || configuration.RecurrenceWindow != 24*time.Hour {
+		t.Fatalf("recurrence config = area=%q window=%s", configuration.RecurrenceArea, configuration.RecurrenceWindow)
+	}
+}
+
+func TestNewApplicationWiresSimulationModelsAndRecurrence(t *testing.T) {
+	root := repositoryRoot(t)
+	ui := makeDashboard(t)
+	database := filepath.Join(t.TempDir(), "mosaic.db")
+	app, err := newApplication(context.Background(), config{
+		ListenAddress: "127.0.0.1:0",
+		DatabasePath:  database,
+		UIDirectory:   ui,
+		AssetRoot:     root,
+	})
+	if err != nil {
+		t.Fatalf("compose application: %v", err)
+	}
+	t.Cleanup(func() { _ = app.close() })
+
+	if app.simulation == nil {
+		t.Fatal("simulation controller was not wired")
+	}
+	if app.recurrence == nil {
+		t.Fatal("recurrence detector was not wired")
+	}
+	if app.modelProviders[openaimodel.AgentTerra] != contracts.ProviderFixture {
+		t.Fatalf("default terra provider = %s, want fixture", app.modelProviders[openaimodel.AgentTerra])
+	}
+
+	// Simulation status is available over the composed API.
+	statusReq := httptest.NewRequest(http.MethodGet, "http://mosaic.test/api/v1/simulation/status", nil)
+	statusResp := httptest.NewRecorder()
+	app.handler.ServeHTTP(statusResp, statusReq)
+	if statusResp.Code != http.StatusOK {
+		t.Fatalf("simulation status = %d: %s", statusResp.Code, statusResp.Body.String())
+	}
+
+	// Fixture startup COP remains revision 9.
+	assertFixtureCOP(t, app.handler)
+	assertFixtureAdvisories(t, app.handler)
+}
+
+func TestNewApplicationLiveSelectionOnlyWithSecret(t *testing.T) {
+	root := repositoryRoot(t)
+	ui := makeDashboard(t)
+
+	// Explicit live without secret → fixture effective selection.
+	fallback, err := newApplication(context.Background(), config{
+		ListenAddress: "127.0.0.1:0",
+		DatabasePath:  filepath.Join(t.TempDir(), "fallback.db"),
+		UIDirectory:   ui,
+		AssetRoot:     root,
+		ModelEnv: modelEnv{
+			APIKey: "",
+			Luna:   contracts.ProviderLive,
+			Terra:  contracts.ProviderLive,
+			Sol:    contracts.ProviderLive,
+		},
+	})
+	if err != nil {
+		t.Fatalf("compose fallback application: %v", err)
+	}
+	t.Cleanup(func() { _ = fallback.close() })
+	for _, agent := range []string{openaimodel.AgentLuna, openaimodel.AgentTerra, openaimodel.AgentSol} {
+		if fallback.modelProviders[agent] != contracts.ProviderFixture {
+			t.Fatalf("fallback %s = %s, want fixture", agent, fallback.modelProviders[agent])
+		}
+	}
+
+	// Explicit live with secret → live effective selection (no network call at startup).
+	live, err := newApplication(context.Background(), config{
+		ListenAddress: "127.0.0.1:0",
+		DatabasePath:  filepath.Join(t.TempDir(), "live.db"),
+		UIDirectory:   ui,
+		AssetRoot:     root,
+		ModelEnv: modelEnv{
+			APIKey: "test-key",
+			Luna:   contracts.ProviderLive,
+			Terra:  contracts.ProviderLive,
+			Sol:    contracts.ProviderLive,
+		},
+	})
+	if err != nil {
+		t.Fatalf("compose live application: %v", err)
+	}
+	t.Cleanup(func() { _ = live.close() })
+	for _, agent := range []string{openaimodel.AgentLuna, openaimodel.AgentTerra, openaimodel.AgentSol} {
+		if live.modelProviders[agent] != contracts.ProviderLive {
+			t.Fatalf("live %s = %s, want live", agent, live.modelProviders[agent])
+		}
+	}
+	// Deterministic fixture COP seed is unchanged even when live models are selected.
+	assertFixtureCOP(t, live.handler)
 }
 
 func assertFixtureCOP(t *testing.T, handler http.Handler) {

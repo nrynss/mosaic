@@ -1,7 +1,7 @@
-// Command mosaicdemo composes Mosaic's local, synthetic v0.1 demonstration.
-// It deliberately wires only the frozen P07 fixture, deterministic replay, the
-// P08/P17 public read surfaces, and the checked-in static dashboard. No live model client
-// or operational-system client is present in this executable.
+// Command mosaicdemo composes Mosaic's local synthetic demonstration.
+// It wires the frozen fixture seed, interactive simulation controller,
+// optional live model transport (server-only key), recurrence detector,
+// public API, and the checked-in static dashboard.
 package main
 
 import (
@@ -23,15 +23,20 @@ import (
 	"time"
 
 	"mosaic.local/mosaic/internal/api"
+	"mosaic.local/mosaic/internal/contracts"
+	"mosaic.local/mosaic/internal/recurrence"
 	"mosaic.local/mosaic/internal/reference/registry"
+	"mosaic.local/mosaic/internal/simsession"
 	"mosaic.local/mosaic/internal/store"
 	"mosaic.local/mosaic/internal/stream"
 )
 
 const (
-	defaultListenAddress = "127.0.0.1:8080"
-	defaultUIDirectory   = "ui/dist"
-	defaultAssetRoot     = "."
+	defaultListenAddress    = "127.0.0.1:8080"
+	defaultUIDirectory      = "ui/dist"
+	defaultAssetRoot        = "."
+	defaultRecurrenceArea   = "road"
+	defaultRecurrenceWindow = 72 * time.Hour
 )
 
 type config struct {
@@ -39,11 +44,22 @@ type config struct {
 	DatabasePath  string
 	UIDirectory   string
 	AssetRoot     string
+	// ModelEnv is server-only runtime model selection (never flags).
+	ModelEnv modelEnv
+	// RecurrenceArea is the configured area key for deterministic recurrence.
+	RecurrenceArea string
+	// RecurrenceWindow is how far back prior handoffs are considered.
+	RecurrenceWindow time.Duration
 }
 
 type application struct {
 	handler http.Handler
 	close   func() error
+
+	// Composed surfaces exposed for package tests (not HTTP).
+	modelProviders contracts.AgentProviderSelection
+	simulation     *simsession.Controller
+	recurrence     *recurrence.Detector
 }
 
 func parseConfig(args []string, getenv func(string) string) (config, error) {
@@ -62,11 +78,25 @@ func parseConfig(args []string, getenv func(string) string) (config, error) {
 	if flags.NArg() != 0 {
 		return config{}, fmt.Errorf("unexpected argument %q", flags.Arg(0))
 	}
+	// OPENAI_API_KEY and MOSAIC_*_PROVIDER are environment-only (no CLI flags)
+	// so the secret never appears in process argument lists.
+	area := valueOrDefault(getenv("MOSAIC_RECURRENCE_AREA"), defaultRecurrenceArea)
+	window := defaultRecurrenceWindow
+	if raw := strings.TrimSpace(getenv("MOSAIC_RECURRENCE_WINDOW")); raw != "" {
+		parsed, err := time.ParseDuration(raw)
+		if err != nil {
+			return config{}, fmt.Errorf("parse MOSAIC_RECURRENCE_WINDOW: %w", err)
+		}
+		window = parsed
+	}
 	return normalizeConfig(config{
-		ListenAddress: *listen,
-		DatabasePath:  *database,
-		UIDirectory:   *ui,
-		AssetRoot:     *assets,
+		ListenAddress:    *listen,
+		DatabasePath:     *database,
+		UIDirectory:      *ui,
+		AssetRoot:        *assets,
+		ModelEnv:         parseModelEnv(getenv),
+		RecurrenceArea:   area,
+		RecurrenceWindow: window,
 	})
 }
 
@@ -132,10 +162,10 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 }
 
 // newApplication composes exactly one internal domain profile and one
-// separately configured UI asset directory. It deliberately holds no direct
-// reference to a domestic-domain fixture, event identifier, or reducer; the
-// selected profile owns deterministic startup, recovery, and state-fact
-// evidence, while this host owns only generic persistence and API plumbing.
+// separately configured UI asset directory. The selected profile owns
+// deterministic startup, recovery, and state-fact evidence. This host owns
+// generic persistence, interactive simulation, model selection, recurrence,
+// and API plumbing. Live models are opt-in and require a server-only key.
 func newApplication(ctx context.Context, configuration config) (*application, error) {
 	configuration, err := normalizeConfig(configuration)
 	if err != nil {
@@ -173,22 +203,59 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 		return nil, fmt.Errorf("seed domain profile %q: %w", selected.ID(), err)
 	}
 
+	schedule, ok := domainRuntime.(contracts.SimulationSchedule)
+	if !ok {
+		_ = closeDatabase()
+		return nil, fmt.Errorf("domain profile %q does not expose a simulation beat schedule", selected.ID())
+	}
+	simController, err := simsession.New(simsession.Config{Schedule: schedule})
+	if err != nil {
+		_ = closeDatabase()
+		return nil, fmt.Errorf("compose simulation controller: %w", err)
+	}
+
+	schemaDir := filepath.Join(configuration.AssetRoot, "ontology")
+	fixtureDir := filepath.Join(configuration.AssetRoot, "datasets", selected.ID())
+	identities := selected.Identities()
+	models, err := composeModels(ctx, database, configuration.AssetRoot, fixtureDir, schemaDir, identities.Supervisor, configuration.ModelEnv)
+	if err != nil {
+		_ = closeDatabase()
+		return nil, fmt.Errorf("compose model adapters: %w", err)
+	}
+
+	// Recurrence is deterministic and reviewable; composition constructs the
+	// detector for later surfaces. It never contacts external parties.
+	area := strings.TrimSpace(configuration.RecurrenceArea)
+	if area == "" {
+		area = defaultRecurrenceArea
+	}
+	window := configuration.RecurrenceWindow
+	if window <= 0 {
+		window = defaultRecurrenceWindow
+	}
+	detector := recurrence.NewDetector(area, window, time.Now)
+
 	operations, err := api.NewSQLiteOperationsReader(database)
 	if err != nil {
 		_ = closeDatabase()
 		return nil, fmt.Errorf("compose SQLite operations reader: %w", err)
 	}
-	identities := selected.Identities()
 	apiServer, err := api.New(api.Config{
-		Recovery:        domainRuntime,
-		Records:         database,
-		Evidence:        domainRuntime,
-		Operations:      operations,
-		AdvisoryHistory: database,
-		AdvisoryMode:    "fixture_composed",
-		Stream:          stream.NewBroker(),
-		Actors:          api.PublicActorResolver{ViewerIdentity: identities.Viewer, SupervisorIdentity: identities.Supervisor},
-		Version:         "v0.1",
+		Recovery:          domainRuntime,
+		Records:           database,
+		Evidence:          domainRuntime,
+		Operations:        operations,
+		AdvisoryHistory:   database,
+		AdvisoryMode:      "fixture_composed",
+		Stream:            stream.NewBroker(),
+		Actors:            api.PublicActorResolver{ViewerIdentity: identities.Viewer, SupervisorIdentity: identities.Supervisor},
+		Version:           "v0.1",
+		Simulation:        simController,
+		Terra:             models.Terra,
+		Sol:               models.Sol,
+		Luna:              models.Luna,
+		ProviderSelection: models.ProviderSelection,
+		BriefingRequester: models.BriefingRequester,
 	})
 	if err != nil {
 		_ = closeDatabase()
@@ -196,8 +263,11 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 	}
 
 	return &application{
-		handler: composeHandler(apiServer.Handler(), dashboard),
-		close:   closeDatabase,
+		handler:        composeHandler(apiServer.Handler(), dashboard),
+		close:          closeDatabase,
+		modelProviders: models.ProviderSelection,
+		simulation:     simController,
+		recurrence:     detector,
 	}, nil
 }
 
@@ -213,6 +283,7 @@ func normalizeConfig(configuration config) (config, error) {
 	configuration.DatabasePath = strings.TrimSpace(configuration.DatabasePath)
 	configuration.UIDirectory = strings.TrimSpace(configuration.UIDirectory)
 	configuration.AssetRoot = strings.TrimSpace(configuration.AssetRoot)
+	configuration.RecurrenceArea = strings.TrimSpace(configuration.RecurrenceArea)
 	if configuration.ListenAddress == "" {
 		return config{}, errors.New("listen address is required")
 	}
@@ -224,6 +295,22 @@ func normalizeConfig(configuration config) (config, error) {
 	}
 	if configuration.AssetRoot == "" {
 		return config{}, errors.New("asset root containing ontology and datasets is required")
+	}
+	if configuration.RecurrenceArea == "" {
+		configuration.RecurrenceArea = defaultRecurrenceArea
+	}
+	if configuration.RecurrenceWindow <= 0 {
+		configuration.RecurrenceWindow = defaultRecurrenceWindow
+	}
+	// Default unset agent providers to fixture without requiring parseConfig.
+	if configuration.ModelEnv.Luna == "" {
+		configuration.ModelEnv.Luna = contracts.ProviderFixture
+	}
+	if configuration.ModelEnv.Terra == "" {
+		configuration.ModelEnv.Terra = contracts.ProviderFixture
+	}
+	if configuration.ModelEnv.Sol == "" {
+		configuration.ModelEnv.Sol = contracts.ProviderFixture
 	}
 
 	assetRoot, err := filepath.Abs(configuration.AssetRoot)
