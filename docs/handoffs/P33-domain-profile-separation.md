@@ -18,7 +18,8 @@ Use the existing P33 worktree rather than recreating work:
 - Branch: `parcel/P33-domain-profile-separation`
 - Current committed HEAD: `1686eed` (its documentation changes are already
   integrated on `main`); the code changes below are intentionally uncommitted.
-- Current integration branch: `mosaic/v0.1-foundation` at `0ae01fe`.
+- Current integration branch: `mosaic/v0.1-foundation`; fetch it before
+  resuming so the coordinator documentation is current.
 
 Start by inspecting `git status --short`, `git diff --cached`, and `git diff`
 in that worktree. Preserve the existing changes and complete them there. Do
