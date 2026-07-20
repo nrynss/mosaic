@@ -1,5 +1,8 @@
 # Mosaic Hackathon Demo Script
 
+For the **&lt;3 minute public YouTube** cut (structure, tooling VO for Codex +
+GPT-5.6, beat→visual map), see [`demo-video.md`](demo-video.md).
+
 ## DevWeek positioning (say this first)
 
 Mosaic is a **developer framework** for putting generative agents next to a

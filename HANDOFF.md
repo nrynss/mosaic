@@ -95,7 +95,7 @@ demo video of the interactive walkthrough.
 The actual project next steps are:
 * **End-to-End Run with Paid API Key**: Execute a full live model test run (with active credits) to verify generative Terra, Sol, and Luna responses and outputs.
 * **UI Refinement & Polish**: Final visual pass; freeze labels/selectors before any automated capture.
-* **Demo Preparation**: Walkthrough + end VO are in [`docs/demo-script.md`](docs/demo-script.md); record when UI is stable (manual or planned Playwright tool above).
+* **Demo Preparation**: Walkthrough + end VO are in [`docs/demo-script.md`](docs/demo-script.md); **YouTube &lt;3 min plan** (what we show, Codex + GPT-5.6 VO, beat map) is in [`docs/demo-video.md`](docs/demo-video.md). Record when UI is stable (manual or planned Playwright tool above).
 * **Playwright demo-recorder** (planned): Beat/SSE-aware automated capture — see section above; build only after UI freeze.
 * **Project Details Page**: Author and publish a dedicated project description page on the **nryn.dev** site detailing the architecture, constraints, and results.
 * **(Future) Durable Cloud Run parcel**: Litestream restore+replicate to GCS, or Cloud SQL, with Secret Manager for the API key and budget alerts — see the runbook.

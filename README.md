@@ -240,6 +240,7 @@ gcloud run deploy mosaic-demo \
 | Doc | Purpose |
 |-----|---------|
 | [`docs/demo-script.md`](docs/demo-script.md) | DevWeek pitch + walkthrough + end VO |
+| [`docs/demo-video.md`](docs/demo-video.md) | YouTube &lt;3 min video plan (working product + Codex / GPT-5.6 VO) |
 | [`docs/live-models.md`](docs/live-models.md) | Fixture vs live agent configuration |
 | [`docs/runbook/local-docker-demo.md`](docs/runbook/local-docker-demo.md) | Local Docker verification |
 | [`HANDOFF.md`](HANDOFF.md) | Integration board, live deploy, planned Playwright capture |
