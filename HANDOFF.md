@@ -532,3 +532,5 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-20 P45 claimed by coordinator/agent — base c2bc5a509549dda5c934082e89a43c31845dac95, branch parcel/P45-ui-recurrence-surface; implementing UI recurrence alerts and mode indicators.
 - 2026-07-20 P44 integrated by coordinator — `f1fb49a`; UI provenance and action trail tab view implemented. Exposes replayed beats, model run details, operator decision nodes, and evidence targets.
 - 2026-07-20 P45 integrated by coordinator — `f1fb49a`; UI recurrence surface alert banner and pre-fill note logic added; model capability mode indicators integrated in workspace header.
+- 2026-07-20 P46 integrated by coordinator — `d6acd61` (merge `31b745f`); wired the sim controller, live/fixture model selection, and recurrence into main cmd/mosaicdemo composition startup.
+- 2026-07-20 P47 integrated by coordinator — `97f4d99`; created interactive simulation E2E test, updated Docker local runbook, and documented opt-in live model path in live-models.md. Fixed a validation issue in mapping operator evidence by populating created_at.
