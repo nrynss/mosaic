@@ -10,17 +10,40 @@ P33 deliberately has no visible UI redesign. It makes the forthcoming
 operator workspace safe to build without binding the reusable host or API to
 the reference domain.
 
-## Clean starting point
+## Resume the preserved worktree
 
-- Base integration commit: `d239387`.
-- Create a new isolated branch/worktree from the current
-  `mosaic/v0.1-foundation` integration branch. Suggested branch:
-  `parcel/P33-domain-profile-completion`.
-- Do **not** use `parcel/P33-domain-profile-separation` as a code base. That
-  abandoned coordinator worktree contains incomplete, uncommitted moves and
-  failed tests. It is not accepted work and must not be merged or copied from.
-- Read `AGENTS.md`, RFC-0001 through RFC-0004, `HANDOFF.md`, and this file in
-  full before editing.
+Use the existing P33 worktree rather than recreating work:
+
+- Worktree: `E:\work\mosaic\.worktrees\P33-domain-profile-separation`
+- Branch: `parcel/P33-domain-profile-separation`
+- Current committed HEAD: `1686eed` (its documentation changes are already
+  integrated on `main`); the code changes below are intentionally uncommitted.
+- Current integration branch: `mosaic/v0.1-foundation` at `0ae01fe`.
+
+Start by inspecting `git status --short`, `git diff --cached`, and `git diff`
+in that worktree. Preserve the existing changes and complete them there. Do
+not reset, clean, stash, delete, or recreate the moved paths.
+
+The pre-existing work includes staged moves from `internal/dataset`,
+`internal/simulator`, and `internal/state` into
+`internal/reference/domesticdisturbance`; partially updated command/E2E
+imports; and untracked `internal/profile`, reference-profile, and registry
+packages. `internal/api/evidence.go` has a partial state-fact seam and needs
+to be completed, not discarded.
+
+The last recorded `go test ./...` failure is limited to this unfinished work:
+the moved package tests still use two-parent fixture paths, and the new
+reference profile is missing its advisory-timeline helpers/composition wiring.
+The original command/API/E2E packages still pass. Re-run the suite before
+making assumptions.
+
+Do not rebase this dirty branch. Finish P33 and make one focused **code-only**
+commit (do not include documentation). Return that commit SHA to the
+coordinator. The coordinator will cherry-pick it onto the current integration
+branch, whose P33 documentation is already present.
+
+Read `AGENTS.md`, RFC-0001 through RFC-0004, `HANDOFF.md`, and this file in
+full before editing.
 
 ## Exclusive ownership
 
