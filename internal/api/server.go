@@ -64,6 +64,11 @@ const (
 	ActionRecordAudit       Action = "record_audit_action"
 	ActionControlSimulation Action = "control_simulation"
 	ActionReadSimulation    Action = "read_simulation"
+	// Operator-driven model and decision routes (P41).
+	ActionOperatorAnalyze   Action = "operator_analyze"
+	ActionOperatorBrief     Action = "operator_brief"
+	ActionOperatorInterpret Action = "operator_interpret"
+	ActionOperatorDecide    Action = "operator_decide"
 )
 
 // PolicyDecision is intentionally small: the API can distinguish a configured
@@ -117,7 +122,8 @@ func (AllowDemoPolicy) Authorize(_ context.Context, _ Actor, action Action) (Pol
 	switch action {
 	case ActionReadCOP, ActionReadEvidence, ActionReadArtifact, ActionReadStream,
 		ActionReadOperations, ActionRequestBriefing, ActionRecordAudit, ActionReadAdvisories,
-		ActionControlSimulation, ActionReadSimulation:
+		ActionControlSimulation, ActionReadSimulation,
+		ActionOperatorAnalyze, ActionOperatorBrief, ActionOperatorInterpret, ActionOperatorDecide:
 		return PolicyDecision{Allowed: true}, nil
 	default:
 		return PolicyDecision{Reason: "unknown demo capability"}, nil
@@ -127,6 +133,8 @@ func (AllowDemoPolicy) Authorize(_ context.Context, _ Actor, action Action) (Pol
 // Config supplies the already-wired deterministic replay and append-only
 // persistence seams. The composition root chooses concrete P03/P06 instances.
 // Simulation is optional until composition (P46) wires the P36 controller.
+// Terra/Sol/Luna adapters are optional; operator model routes return 503 when
+// the corresponding adapter is not composed.
 type Config struct {
 	Recovery        RecoveryReader
 	Records         contracts.ImmutableRecordRepository
@@ -138,30 +146,46 @@ type Config struct {
 	// Simulation is the optional interactive session controller (P36).
 	// When nil, simulation routes return a structured 503.
 	Simulation SimulationController
-	Actors     ActorResolver
-	Policy     ActionPolicy
-	Version    string
-	Clock      func() time.Time
-	NewID      func() string
+	// Terra/Sol/Luna are optional operator model adapters (P41). Composition
+	// selects fixture or live clients; this package never dials a network.
+	Terra contracts.TerraAdapter
+	Sol   contracts.SolAdapter
+	Luna  contracts.LunaAdapter
+	// ProviderSelection is optional capability metadata (fixture vs live) for
+	// operator responses. It never contains secrets.
+	ProviderSelection contracts.AgentProviderSelection
+	// BriefingRequester is the RequestedBy identity passed to Sol. Composition
+	// should match the Sol service RequiredRequester when Sol is wired.
+	BriefingRequester string
+	Actors            ActorResolver
+	Policy            ActionPolicy
+	Version           string
+	Clock             func() time.Time
+	NewID             func() string
 }
 
 // Server composes the v0.1 HTTP handlers. It reads a COP only through the P06
 // recovery seam and writes only immutable audit records through P03.
 type Server struct {
-	recovery        RecoveryReader
-	records         contracts.ImmutableRecordRepository
-	evidence        EvidenceResolver
-	operations      OperationsReader
-	advisoryHistory contracts.AdvisoryHistoryReader
-	advisoryMode    string
-	stream          *stream.Broker
-	simulation      SimulationController
-	actors          ActorResolver
-	policy          ActionPolicy
-	version         string
-	startedAt       time.Time
-	clock           func() time.Time
-	newID           func() string
+	recovery          RecoveryReader
+	records           contracts.ImmutableRecordRepository
+	evidence          EvidenceResolver
+	operations        OperationsReader
+	advisoryHistory   contracts.AdvisoryHistoryReader
+	advisoryMode      string
+	stream            *stream.Broker
+	simulation        SimulationController
+	terra             contracts.TerraAdapter
+	sol               contracts.SolAdapter
+	luna              contracts.LunaAdapter
+	providerSelection contracts.AgentProviderSelection
+	briefingRequester string
+	actors            ActorResolver
+	policy            ActionPolicy
+	version           string
+	startedAt         time.Time
+	clock             func() time.Time
+	newID             func() string
 }
 
 // New rejects partial deterministic/evidence wiring while providing public
@@ -204,20 +228,25 @@ func New(config Config) (*Server, error) {
 	}
 	startedAt := config.Clock().UTC()
 	return &Server{
-		recovery:        config.Recovery,
-		records:         config.Records,
-		evidence:        config.Evidence,
-		operations:      config.Operations,
-		advisoryHistory: config.AdvisoryHistory,
-		advisoryMode:    config.AdvisoryMode,
-		stream:          config.Stream,
-		simulation:      config.Simulation,
-		actors:          config.Actors,
-		policy:          config.Policy,
-		version:         config.Version,
-		startedAt:       startedAt,
-		clock:           config.Clock,
-		newID:           config.NewID,
+		recovery:          config.Recovery,
+		records:           config.Records,
+		evidence:          config.Evidence,
+		operations:        config.Operations,
+		advisoryHistory:   config.AdvisoryHistory,
+		advisoryMode:      config.AdvisoryMode,
+		stream:            config.Stream,
+		simulation:        config.Simulation,
+		terra:             config.Terra,
+		sol:               config.Sol,
+		luna:              config.Luna,
+		providerSelection: config.ProviderSelection,
+		briefingRequester: config.BriefingRequester,
+		actors:            config.Actors,
+		policy:            config.Policy,
+		version:           config.Version,
+		startedAt:         startedAt,
+		clock:             config.Clock,
+		newID:             config.NewID,
 	}, nil
 }
 
@@ -240,6 +269,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/simulation/status", s.handleSimulationStatus)
 	mux.HandleFunc("/api/v1/simulation/end", s.handleSimulationEnd)
 	mux.HandleFunc("/api/v1/simulation/stream", s.handleSimulationStream)
+	mux.HandleFunc("/api/v1/operator/analyze", s.handleOperatorAnalyze)
+	mux.HandleFunc("/api/v1/operator/brief", s.handleOperatorBrief)
+	mux.HandleFunc("/api/v1/operator/interpret", s.handleOperatorInterpret)
+	mux.HandleFunc("/api/v1/operator/approve", s.handleOperatorApprove)
+	mux.HandleFunc("/api/v1/operator/annotate", s.handleOperatorAnnotate)
+	mux.HandleFunc("/api/v1/operator/prepare-handoff", s.handleOperatorPrepareHandoff)
 	return mux
 }
 
