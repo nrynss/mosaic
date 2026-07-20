@@ -518,3 +518,5 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-20 P35 integrated by coordinator — `3d03614`; additive contracts for simulation sessions, stream events, and agent providers now compile and pass all quality checks.
 - 2026-07-20 P37 claimed by external builder — base 19bec75, branch parcel/P37-domain-beat-schedule; exposing domesticdisturbance beat schedule.
 - 2026-07-20 P37 ready for integration — 572cec5; beat schedule exposed and validated.
+- 2026-07-20 P39 claimed by external builder — base 19bec75, branch parcel/P39-recurrence-awareness; implementing recurrence awareness.
+- 2026-07-20 P39 ready for integration — a7631a7; recurrence detector implemented and verified.
