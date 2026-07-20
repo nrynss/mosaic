@@ -69,4 +69,7 @@ gcloud run deploy mosaic-demo \
   --region=us-central1
 ```
 
+The active, live demonstration service is hosted on Google Cloud Run:
+* **Live Service URL**: **[https://mosaic-demo-358513274447.us-central1.run.app](https://mosaic-demo-358513274447.us-central1.run.app)**
+
 *Note: In the Cloud Run environment, the database is hosted at `/tmp/mosaic.db` (in-memory/tmpfs), which is ephemeral. For a permanent production persistence layer, configure a shared database (like Cloud SQL PostgreSQL) or set up Litestream WAL synchronization to a GCS bucket as outlined in the [Cloud Run Deployment Runbook](docs/runbook/cloud-run-deployment-analysis.md).*

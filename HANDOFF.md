@@ -36,6 +36,9 @@ The detailed parcel breakdowns and logs for completed increments are preserved i
 The detailed evaluation and implementation path for running this demo on GCP's free tier (scale-to-zero compute, single-writer Litestream replication for SQLite persistence, and horizontal concurrency constraints) is documented in:
 * **[Cloud Run Deployment Analysis Runbook](docs/runbook/cloud-run-deployment-analysis.md)**
 
+The active, live demonstration service is hosted on Google Cloud Run:
+* **Live Service URL**: **[https://mosaic-demo-358513274447.us-central1.run.app](https://mosaic-demo-358513274447.us-central1.run.app)**
+
 ---
 
 ## Next Steps
