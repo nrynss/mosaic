@@ -7,7 +7,8 @@
     auditTargetID = $bindable(''),
     auditTargetKind = $bindable('recommendation'),
     actionState = $bindable('idle'),
-    actionMessage = $bindable('')
+    actionMessage = $bindable(''),
+    maintenanceNote = $bindable('Operator road condition notes.')
   } = $props();
 
   // Local state for Dispatch Handoff
@@ -16,7 +17,6 @@
   let dispatchError = $state('');
 
   // Local state for Maintenance Handoff
-  let maintenanceNote = $state('Operator road condition notes.');
   let maintenanceResult = $state(null);
   let maintenanceError = $state('');
 

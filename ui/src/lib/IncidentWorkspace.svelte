@@ -1,4 +1,7 @@
 <script>
+  import RecurrenceSurface from './RecurrenceSurface.svelte';
+  import ModelModeIndicator from './ModelModeIndicator.svelte';
+
   let {
     cop,
     copState,
@@ -10,7 +13,8 @@
     loadAdvisories,
     selectEvidence,
     auditTargetID = $bindable(),
-    auditTargetKind = $bindable()
+    auditTargetKind = $bindable(),
+    onPrefillMaintenance
   } = $props();
 
   let activeIncident = $derived(arrayOf(cop?.cop?.incidents || cop?.incidents)[0]);
@@ -132,6 +136,7 @@
       </div>
     </div>
     <div class="analyze-action">
+      <ModelModeIndicator providers={advisories?.providers} />
       <button class="analyze-button" onclick={loadAdvisories} disabled={advisoriesState === 'loading'}>
         {#if advisoriesState === 'loading'}
           Analyzing...
@@ -141,6 +146,8 @@
       </button>
     </div>
   </div>
+
+  <RecurrenceSurface {cop} {advisories} {onPrefillMaintenance} />
 
   <!-- Main Ledger content split layout (Facts vs Advisories) -->
   <div class="workspace-grid">

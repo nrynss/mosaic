@@ -4,6 +4,7 @@
   import IncidentWorkspace from './lib/IncidentWorkspace.svelte';
   import StatusDrawer from './lib/StatusDrawer.svelte';
   import ActionCards from './lib/ActionCards.svelte';
+  import ProvenanceTab from './lib/ProvenanceTab.svelte';
 
   const defaultAPIBase = import.meta.env.VITE_MOSAIC_API_BASE_URL || '/api/v1';
   const hiddenArtifactFields = new Set(['payload_bytes_b64', 'raw_sha256']);
@@ -34,6 +35,12 @@
   // Simulation Session State
   let session = $state(null);
   let elapsedSeconds = $state(0);
+  let activeTab = $state('workspace'); // 'workspace' | 'provenance'
+  let maintenanceNote = $state('Operator road condition notes.');
+
+  function prefillMaintenance(noteText) {
+    maintenanceNote = noteText;
+  }
 
   let streamController;
   let reconnectTimer;
@@ -577,20 +584,41 @@
       bind:actionMessage
     />
 
-    <!-- Incident Workspace in the middle -->
-    <IncidentWorkspace
-      {cop}
-      {copState}
-      {copError}
-      {advisories}
-      {advisoriesState}
-      {advisoriesError}
-      {elapsedSeconds}
-      {loadAdvisories}
-      {selectEvidence}
-      bind:auditTargetID
-      bind:auditTargetKind
-    />
+    <!-- Tab switcher navigation -->
+    <div class="workspace-tabs-nav">
+      <button class="tab-nav-btn" class:active={activeTab === 'workspace'} onclick={() => activeTab = 'workspace'}>
+        Incident Command Workspace
+      </button>
+      <button class="tab-nav-btn" class:active={activeTab === 'provenance'} onclick={() => activeTab = 'provenance'}>
+        Provenance & Action Trail
+      </button>
+    </div>
+
+    {#if activeTab === 'workspace'}
+      <!-- Incident Workspace in the middle -->
+      <IncidentWorkspace
+        {cop}
+        {copState}
+        {copError}
+        {advisories}
+        {advisoriesState}
+        {advisoriesError}
+        {elapsedSeconds}
+        {loadAdvisories}
+        {selectEvidence}
+        bind:auditTargetID
+        bind:auditTargetKind
+        onPrefillMaintenance={prefillMaintenance}
+      />
+    {:else}
+      <!-- Provenance Tab View -->
+      <ProvenanceTab
+        {session}
+        {advisories}
+        {selectEvidence}
+        {readEnvelope}
+      />
+    {/if}
   </div>
 
   <aside class="evidence-rail" aria-label="Evidence and review">
@@ -624,6 +652,7 @@
       bind:auditTargetKind
       bind:actionState
       bind:actionMessage
+      bind:maintenanceNote={maintenanceNote}
     />
   </aside>
 </main>

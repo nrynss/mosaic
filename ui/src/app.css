@@ -1544,3 +1544,533 @@ pre { max-height: 30rem; margin: 0; padding: 0.7rem; overflow: auto; color: #dbe
   text-transform: capitalize;
 }
 
+/* --- Workspace Tabs Navigation --- */
+.workspace-tabs-nav {
+  display: flex;
+  background: #173342;
+  border-bottom: 2px solid #9eb8c0;
+  padding: 0 1rem;
+  gap: 0.5rem;
+}
+
+.tab-nav-btn {
+  background: transparent;
+  color: #c7dce2;
+  border: none;
+  padding: 0.75rem 1.25rem;
+  font-weight: 700;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.tab-nav-btn:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.tab-nav-btn.active {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.tab-nav-btn.active::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: #c9872f;
+}
+
+/* --- Model Mode Indicators --- */
+.model-modes-container {
+  display: inline-flex;
+  gap: 0.6rem;
+  margin-right: 1rem;
+}
+
+.mode-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: rgba(23, 51, 66, 0.06);
+  border: 1px solid rgba(23, 51, 66, 0.12);
+  padding: 0.2rem 0.4rem;
+  font-size: 0.7rem;
+  border-radius: 2px;
+}
+
+.agent-label {
+  font-weight: bold;
+  color: #5d6d7e;
+  font-family: "Cascadia Code", ui-monospace, monospace;
+}
+
+.mode-badge {
+  font-family: "Cascadia Code", ui-monospace, monospace;
+  font-size: 0.6rem;
+  font-weight: bold;
+  text-transform: uppercase;
+  padding: 0.05rem 0.25rem;
+  border-radius: 1px;
+}
+
+.mode-badge[data-mode="live"] {
+  background: #27ae60;
+  color: #ffffff;
+}
+
+.mode-badge[data-mode="fixture_composed"], .mode-badge[data-mode="fixture-composed"], .mode-badge[data-mode="fixture"] {
+  background: #7f8c8d;
+  color: #ffffff;
+}
+
+.mode-badge[data-mode="unavailable"] {
+  background: #c0392b;
+  color: #ffffff;
+}
+
+/* --- Recurrence Alert Banner --- */
+.recurrence-alert-banner {
+  background: #fef9e7;
+  border: 1px solid #f9e79f;
+  border-left: 4px solid #f1c40f;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+  display: grid;
+  gap: 0.6rem;
+}
+
+.recurrence-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.recurrence-header strong {
+  color: #7d6608;
+  font-size: 0.88rem;
+}
+
+.alert-icon {
+  font-size: 1.1rem;
+}
+
+.maint-badge {
+  font-family: "Cascadia Code", ui-monospace, monospace;
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  background: rgba(125, 102, 8, 0.1);
+  color: #7d6608;
+  padding: 0.1rem 0.4rem;
+  font-weight: bold;
+  margin-left: auto;
+}
+
+.recurrence-body {
+  font-size: 0.8rem;
+  color: #515a5a;
+  line-height: 1.4;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.recurrence-body p {
+  margin: 0;
+}
+
+.prior-records {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  font-size: 0.72rem;
+  color: #7f8c8d;
+}
+
+.prior-badge {
+  background: #fdf2e9;
+  border: 1px solid #f5cba7;
+  color: #e67e22;
+  padding: 0.05rem 0.3rem;
+  border-radius: 2px;
+}
+
+.prefill-action-bar {
+  margin-top: 0.2rem;
+}
+
+.prefill-maint-btn {
+  background: #f39c12;
+  color: #ffffff;
+  border: none;
+  font-weight: 700;
+  padding: 0.4rem 0.8rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  box-shadow: 0 1px 3px rgba(243, 156, 18, 0.2);
+}
+
+.prefill-maint-btn:hover {
+  background: #d68910;
+}
+
+.recurrence-footer {
+  font-size: 0.65rem;
+  color: #979a9a;
+  font-style: italic;
+  border-top: 1px solid rgba(249, 231, 159, 0.5);
+  padding-top: 0.4rem;
+}
+
+/* --- Provenance Timeline & Layout --- */
+.provenance-container {
+  display: grid;
+  gap: 1.5rem;
+  padding: 1.5rem;
+  background: #ffffff;
+  border: 1px solid #9eb8c0;
+}
+
+.provenance-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 2px solid #173342;
+  padding-bottom: 0.75rem;
+}
+
+.provenance-header h2 {
+  font-size: 1.5rem;
+  margin: 0;
+  color: #173342;
+}
+
+.boundary-badge {
+  background: #f9ebea;
+  border: 1px solid #f2d7d5;
+  padding: 0.3rem 0.6rem;
+  border-radius: 2px;
+}
+
+.badge-status {
+  font-family: "Cascadia Code", ui-monospace, monospace;
+  font-size: 0.65rem;
+  font-weight: bold;
+  color: #c0392b;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.provenance-copy {
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: #566573;
+  margin: 0;
+}
+
+.provenance-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 2.5rem;
+  margin-top: 1rem;
+}
+
+.provenance-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.provenance-section h3 {
+  font-size: 1.1rem;
+  color: #173342;
+  border-bottom: 1px solid rgba(23, 51, 66, 0.15);
+  padding-bottom: 0.4rem;
+  margin: 0;
+}
+
+.empty-trace {
+  font-size: 0.85rem;
+  color: #7f8c8d;
+  font-style: italic;
+  padding: 1.5rem;
+  text-align: center;
+  background: #fafbfc;
+  border: 1px dashed #bdc3c7;
+}
+
+/* Timeline Layout */
+.timeline {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  position: relative;
+}
+
+.timeline::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 15px;
+  width: 2px;
+  background: #d5dbdb;
+}
+
+.timeline-item {
+  position: relative;
+  padding-left: 45px;
+  margin-bottom: 1.5rem;
+}
+
+.timeline-item:last-child {
+  margin-bottom: 0;
+}
+
+.timeline-badge {
+  position: absolute;
+  top: 2px;
+  left: 5px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #bdc3c7;
+  border: 4px solid #ffffff;
+  box-shadow: 0 0 0 2px #d5dbdb;
+  z-index: 2;
+}
+
+.timeline-badge.action-badge {
+  background: #3498db;
+}
+
+.timeline-badge.action-badge[data-action="acknowledged"] {
+  background: #27ae60;
+}
+
+.timeline-badge.action-badge[data-action="rejected"] {
+  background: #e74c3c;
+}
+
+.timeline-badge.model-badge {
+  background: #8e44ad;
+}
+
+.timeline-badge.model-badge[data-agent="terra"] {
+  background: #216273;
+}
+
+.timeline-badge.model-badge[data-agent="sol"] {
+  background: #c9872f;
+}
+
+.timeline-badge.beat-badge {
+  background: #f39c12;
+}
+
+.timeline-time {
+  font-size: 0.7rem;
+  font-family: "Cascadia Code", ui-monospace, monospace;
+  color: #7f8c8d;
+  margin-bottom: 0.25rem;
+}
+
+.timeline-content {
+  background: #fdfefe;
+  border: 1px solid #d5dbdb;
+  padding: 0.85rem;
+  border-radius: 4px;
+}
+
+.timeline-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.timeline-top strong {
+  font-size: 0.88rem;
+  color: #2c3e50;
+}
+
+.actor-tag {
+  font-size: 0.65rem;
+  font-family: "Cascadia Code", ui-monospace, monospace;
+  color: #7f8c8d;
+  background: #f2f4f4;
+  padding: 0.1rem 0.35rem;
+  border-radius: 2px;
+}
+
+.record-note {
+  font-size: 0.82rem;
+  color: #515a5a;
+  margin: 0 0 0.6rem 0;
+  line-height: 1.45;
+}
+
+.record-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.72rem;
+  border-top: 1px dashed #eaeded;
+  padding-top: 0.5rem;
+  color: #7f8c8d;
+}
+
+.record-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.small-evidence-btn {
+  background: transparent;
+  border: none;
+  color: #216273;
+  font-weight: bold;
+  cursor: pointer;
+  padding: 0;
+  font-size: 0.72rem;
+}
+
+.small-evidence-btn:hover {
+  text-decoration: underline;
+}
+
+.safety-indicator {
+  font-family: "Cascadia Code", ui-monospace, monospace;
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  font-weight: bold;
+  background: #fdf2f2;
+  color: #c0392b;
+  border: 1px solid #f5b7b1;
+  padding: 0.05rem 0.3rem;
+  border-radius: 1px;
+}
+
+.validation-badge {
+  font-family: "Cascadia Code", ui-monospace, monospace;
+  font-size: 0.6rem;
+  font-weight: bold;
+  text-transform: uppercase;
+  padding: 0.1rem 0.35rem;
+  border-radius: 2px;
+  background: #ebf5fb;
+  color: #2980b9;
+}
+
+.validation-badge[data-status="valid"] {
+  background: #e8f8f5;
+  color: #117864;
+}
+
+.validation-badge[data-status="refused"] {
+  background: #fef9e7;
+  color: #b7950b;
+}
+
+.validation-badge[data-status="failed"] {
+  background: #fdf2f2;
+  color: #922b21;
+}
+
+.model-run-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  margin-bottom: 0.6rem;
+  background: #fcfcfc;
+  padding: 0.5rem;
+  border-left: 2px solid #8e44ad;
+}
+
+.detail-lbl {
+  color: #7f8c8d;
+}
+
+.detail-val {
+  font-weight: bold;
+  color: #2c3e50;
+}
+
+.model-relations {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  border-top: 1px solid #f2f4f4;
+  padding-top: 0.5rem;
+}
+
+.relation-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.7rem;
+}
+
+.relation-lbl {
+  color: #7f8c8d;
+  font-weight: 500;
+  width: 50px;
+}
+
+.relation-tags {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+
+.tag-btn {
+  background: #f4f6f7;
+  border: 1px solid #d5dbdb;
+  font-family: "Cascadia Code", ui-monospace, monospace;
+  font-size: 0.65rem;
+  padding: 0.05rem 0.3rem;
+  border-radius: 2px;
+  cursor: pointer;
+  color: #2c3e50;
+  transition: all 0.15s;
+}
+
+.tag-btn:hover {
+  background: #eaeaea;
+  border-color: #bdc3c7;
+}
+
+.delay-tag {
+  font-family: "Cascadia Code", ui-monospace, monospace;
+  font-size: 0.65rem;
+  color: #7f8c8d;
+  background: #fdf2e9;
+  border: 1px solid #fdf2e9;
+  padding: 0.05rem 0.25rem;
+}
+
+.beat-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.2rem;
+  font-size: 0.75rem;
+  color: #515a5a;
+  margin-bottom: 0.5rem;
+}
+
+.beat-actions {
+  border-top: 1px solid #f2f4f4;
+  padding-top: 0.4rem;
+}
+
+
