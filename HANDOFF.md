@@ -517,3 +517,4 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-20 P35 claimed by coordinator — base `0afbf55`, branch `parcel/P35-interactive-contracts`; additive interactive contracts (session types, stream event, and model provider selection).
 - 2026-07-20 P35 integrated by coordinator — `3d03614`; additive contracts for simulation sessions, stream events, and agent providers now compile and pass all quality checks.
 - 2026-07-20 P39 claimed by external builder — base 19bec75, branch parcel/P39-recurrence-awareness; implementing recurrence awareness.
+- 2026-07-20 P39 ready for integration — a7631a7; recurrence detector implemented and verified.
