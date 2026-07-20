@@ -87,11 +87,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .connection-pill[data-state="reconnecting"] span { background: #c9872f; }
 
 .folio {
-  width: min(1600px, 100%);
+  width: 100%;
+  max-width: 100%;
   min-height: calc(100vh - 62px);
-  margin: 0 auto;
+  margin: 0;
   display: grid;
-  grid-template-columns: minmax(230px, 0.72fr) minmax(440px, 1.75fr) minmax(280px, 0.85fr);
+  grid-template-columns: minmax(260px, 0.8fr) minmax(0, 3fr) minmax(320px, 1.2fr);
   align-items: start;
 }
 
@@ -117,7 +118,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   text-transform: uppercase;
 }
 
-h1, h2, h3, p { overflow-wrap: anywhere; }
+h1, h2, h3, p { overflow-wrap: break-word; }
 
 h1, h2, h3 {
   margin: 0;
@@ -162,7 +163,7 @@ textarea { resize: vertical; }
 .service-status { margin: 1rem 0 0; display: grid; gap: 0.45rem; }
 .service-status div, .resolution-meta div { display: grid; grid-template-columns: 4.8rem 1fr; gap: 0.5rem; }
 .service-status dt, .resolution-meta dt { color: #60737b; font-family: "Cascadia Code", ui-monospace, monospace; font-size: 0.65rem; text-transform: uppercase; }
-.service-status dd, .resolution-meta dd { margin: 0; color: #24343e; font-size: 0.75rem; overflow-wrap: anywhere; }
+.service-status dd, .resolution-meta dd { margin: 0; color: #24343e; font-size: 0.75rem; overflow-wrap: break-word; }
 [data-state="error"], [data-state="reconnecting"] { color: #943a32 !important; }
 [data-state="ready"], [data-state="live"] { color: #216273 !important; }
 
@@ -189,11 +190,11 @@ textarea { resize: vertical; }
 
 .claim-ledger { position: relative; margin: 0; padding: 1.4rem 0 0; list-style: none; }
 .claim-ledger::before { content: ""; position: absolute; top: 1.7rem; bottom: 0; left: 0.4rem; width: 1px; background: #9eb8c0; }
-.claim-item { position: relative; display: grid; grid-template-columns: minmax(8rem, 0.48fr) minmax(0, 1.52fr); gap: 1rem; padding: 0 0 1.55rem 2rem; }
+.claim-item { position: relative; display: block; padding: 0 0 1.55rem 2rem; }
 .ledger-pin { position: absolute; left: 0; top: 0.2rem; z-index: 1; width: 0.82rem; height: 0.82rem; border: 2px solid #edf3f2; transform: rotate(45deg); background: #477889; }
 .claim-item.derived_assessment .ledger-pin { background: #7d5266; }
 .claim-item.supervisor_recommendation .ledger-pin { background: #c9872f; }
-.claim-time { padding-top: 0.12rem; color: #60737b; font-family: "Cascadia Code", ui-monospace, monospace; font-size: 0.65rem; line-height: 1.35; }
+.claim-time { display: block; margin-bottom: 0.35rem; color: #60737b; font-family: "Cascadia Code", ui-monospace, monospace; font-size: 0.65rem; line-height: 1.35; }
 .claim-item article { min-width: 0; padding-bottom: 0.3rem; border-bottom: 1px solid rgba(158, 184, 192, 0.55); }
 .claim-topline { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
 .claim-class { margin: 0 0 0.3rem; color: #477889; font-family: "Cascadia Code", ui-monospace, monospace; font-size: 0.62rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
@@ -202,7 +203,7 @@ textarea { resize: vertical; }
 .entity-kind { color: #5d6f79; font-size: 0.7rem; font-weight: 700; }
 .claim-item article > p { margin: 0.45rem 0 0.75rem; }
 .claim-footer { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; }
-code { color: #2a5c6a; font-family: "Cascadia Code", ui-monospace, monospace; font-size: 0.68rem; overflow-wrap: anywhere; }
+code { color: #2a5c6a; font-family: "Cascadia Code", ui-monospace, monospace; font-size: 0.68rem; overflow-wrap: break-word; }
 .evidence-button { padding: 0.32rem 0; flex: none; color: #173342; background: transparent; border: 0; border-bottom: 1px solid #c9872f; font-size: 0.7rem; font-weight: 700; }
 .evidence-button:hover { color: #a56816; }
 .missing-evidence { color: #943a32; font-size: 0.7rem; }
@@ -249,9 +250,7 @@ pre { max-height: 30rem; margin: 0; padding: 0.7rem; overflow: auto; color: #dbe
   .evidence-panel + .review-panel { margin-top: 2.35rem; }
   .ledger-heading { align-items: start; flex-direction: column; }
   .revision-meta { text-align: left; }
-  .claim-item { grid-template-columns: 1fr; gap: 0.35rem; padding-left: 1.6rem; }
-  .claim-time { grid-row: 1; }
-  .claim-item article { grid-row: 2; }
+  .claim-item { padding-left: 1.6rem; }
   .withheld-claims { grid-template-columns: 1fr; }
 }
 
