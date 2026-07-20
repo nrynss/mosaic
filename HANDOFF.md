@@ -31,6 +31,13 @@ The detailed parcel breakdowns and logs for completed increments are preserved i
 
 ---
 
+## Cloud Run Deployment Analysis
+
+The detailed evaluation and implementation path for running this demo on GCP's free tier (scale-to-zero compute, Standard GCS FUSE bucket mounts for SQLite persistence) is documented in:
+* **[Cloud Run Deployment Analysis Runbook](docs/runbook/cloud-run-deployment-analysis.md)**
+
+---
+
 ## Next Steps
 
 The next increment will focus on deploying the interactive operator demo to **Google Cloud Run** for free (within the permanent GCP Free Tier):
