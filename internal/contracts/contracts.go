@@ -140,6 +140,9 @@ const (
 	ProviderLive    ModelProvider = "live"
 )
 
+// AgentProviderSelection maps agent keys (e.g., "luna", "terra", "sol") to their chosen ModelProvider.
+type AgentProviderSelection map[string]ModelProvider
+
 // SessionStatus represents the current lifecycle status of an interactive simulation session.
 type SessionStatus string
 
@@ -169,11 +172,20 @@ type SimulationSchedule interface {
 	Beats() []ScheduledBeat
 }
 
+// StreamEventType represents the type of a simulation stream event.
+type StreamEventType string
+
+const (
+	StreamEventBeat           StreamEventType = "beat"
+	StreamEventStatusChange   StreamEventType = "status_change"
+	StreamEventWorkspaceClear StreamEventType = "workspace_clear"
+)
+
 // SimulationStreamEvent represents a session-scoped stream event payload.
 type SimulationStreamEvent struct {
-	SessionID string    `json:"session_id"`
-	Sequence  int64     `json:"sequence"`
-	Timestamp time.Time `json:"timestamp"`
-	Type      string    `json:"type"` // e.g., "beat", "status_change", "workspace_clear"
-	Payload   any       `json:"payload,omitempty"`
+	SessionID string          `json:"session_id"`
+	Sequence  int64           `json:"sequence"`
+	Timestamp time.Time       `json:"timestamp"`
+	Type      StreamEventType `json:"type"`
+	Payload   any             `json:"payload,omitempty"`
 }

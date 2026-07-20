@@ -86,7 +86,7 @@ func TestSimulationContracts(t *testing.T) {
 		SessionID: "session-001",
 		Sequence:  1,
 		Timestamp: time.Now(),
-		Type:      "beat",
+		Type:      StreamEventBeat,
 	}
 
 	if event.Type != "beat" {
@@ -98,5 +98,18 @@ func TestSimulationContracts(t *testing.T) {
 
 	if providerFixture != "fixture" || providerLive != "live" {
 		t.Errorf("provider value mismatch: fixture=%s, live=%s", providerFixture, providerLive)
+	}
+
+	selection := AgentProviderSelection{
+		"luna":  ProviderFixture,
+		"terra": ProviderLive,
+	}
+
+	if selection["luna"] != ProviderFixture || selection["terra"] != ProviderLive {
+		t.Errorf("AgentProviderSelection mismatch")
+	}
+
+	if StreamEventBeat != "beat" || StreamEventStatusChange != "status_change" || StreamEventWorkspaceClear != "workspace_clear" {
+		t.Errorf("StreamEventType value mismatch")
 	}
 }
