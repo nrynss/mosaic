@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"sort"
 	"testing"
+	"time"
 
 	"mosaic.local/mosaic/internal/store"
 )
@@ -145,4 +147,43 @@ func resourceAvailability(cop map[string]any, resourceID, availability string) b
 		}
 	}
 	return false
+}
+
+func TestServiceBeatsMatchScenario(t *testing.T) {
+	ctx := context.Background()
+	service, _ := newTestService(t, ctx)
+
+	beats := service.Beats()
+
+	fixtureDir := filepath.Join("..", "..", "..", "..", "datasets", DomesticDisturbance)
+	scenarioPath := filepath.Join(fixtureDir, "scenario.json")
+
+	var scenario scenarioDocument
+	if err := decodeFile(scenarioPath, &scenario); err != nil {
+		t.Fatalf("failed to decode scenario.json: %v", err)
+	}
+
+	expectedBeats := scenario.Beats
+	sort.Slice(expectedBeats, func(i, j int) bool { return expectedBeats[i].Order < expectedBeats[j].Order })
+
+	if len(beats) != len(expectedBeats) {
+		t.Fatalf("number of beats = %d, want %d", len(beats), len(expectedBeats))
+	}
+
+	for i, expected := range expectedBeats {
+		actual := beats[i]
+		if actual.BeatID != expected.BeatID {
+			t.Errorf("beat[%d] ID = %q, want %q", i, actual.BeatID, expected.BeatID)
+		}
+		if actual.Order != expected.Order {
+			t.Errorf("beat[%d] Order = %d, want %d", i, actual.Order, expected.Order)
+		}
+		if actual.RawEventID != expected.RawEventID {
+			t.Errorf("beat[%d] RawEventID = %q, want %q", i, actual.RawEventID, expected.RawEventID)
+		}
+		expectedDelay := time.Duration(expected.DelayMS) * time.Millisecond
+		if actual.Delay != expectedDelay {
+			t.Errorf("beat[%d] Delay = %v, want %v", i, actual.Delay, expectedDelay)
+		}
+	}
 }

@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"mosaic.local/mosaic/internal/contracts"
 	"mosaic.local/mosaic/internal/ingestion"
@@ -790,6 +791,20 @@ func cloneCOP(cop map[string]any) map[string]any {
 // NormalizerCalls returns the number of non-duplicate FixtureLuna invocations.
 func (s *Service) NormalizerCalls() int {
 	return s.normalizer.Calls()
+}
+
+// Beats returns the scheduled beats for the simulation.
+func (s *Service) Beats() []contracts.ScheduledBeat {
+	scheduledBeats := make([]contracts.ScheduledBeat, len(s.fixture.Beats))
+	for i, beat := range s.fixture.Beats {
+		scheduledBeats[i] = contracts.ScheduledBeat{
+			BeatID:     beat.BeatID,
+			Order:      beat.Order,
+			RawEventID: beat.RawEventID,
+			Delay:      time.Duration(beat.DelayMS) * time.Millisecond,
+		}
+	}
+	return scheduledBeats
 }
 
 // DefaultDBPath keeps the interactive demo database outside the repository.

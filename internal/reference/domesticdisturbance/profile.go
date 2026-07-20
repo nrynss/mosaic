@@ -82,6 +82,7 @@ type runtime struct {
 }
 
 var _ profile.Runtime = (*runtime)(nil)
+var _ contracts.SimulationSchedule = (*runtime)(nil)
 
 func (r *runtime) Run(ctx context.Context) error {
 	run, err := r.scenario.Run(ctx)
@@ -145,4 +146,8 @@ func timelineHasRevision(timeline []simulator.TimelineEntry, revision int64) boo
 
 func (r *runtime) Resolve(ctx context.Context, kind, id string, cop map[string]any) (api.Resolution, error) {
 	return r.resolver.Resolve(ctx, kind, id, cop)
+}
+
+func (r *runtime) Beats() []contracts.ScheduledBeat {
+	return r.scenario.Beats()
 }
