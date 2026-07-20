@@ -13,6 +13,7 @@
     elapsedSeconds,
     loadAdvisories,
     selectEvidence,
+    modelUsage = null,
     auditTargetID = $bindable(),
     auditTargetKind = $bindable(),
     onPrefillMaintenance
@@ -137,7 +138,7 @@
       </div>
     </div>
     <div class="analyze-action">
-      <ModelModeIndicator providers={advisories?.providers} />
+      <ModelModeIndicator providers={advisories?.providers} {modelUsage} />
       <button class="analyze-button" onclick={loadAdvisories} disabled={advisoriesState === 'loading'}>
         {#if advisoriesState === 'loading'}
           Refreshing advice…

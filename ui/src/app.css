@@ -120,7 +120,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   min-height: calc(100vh - 62px);
   padding: clamp(1.4rem, 3vw, 3rem) clamp(1rem, 2.2vw, 2.4rem);
   background: rgba(237, 243, 242, 0.87);
-  overflow-x: clip;
 }
 
 .context-rail { border-right: 1px solid rgba(23, 51, 66, 0.22); }
@@ -1040,6 +1039,14 @@ pre { max-height: 30rem; margin: 0; padding: 0.7rem; overflow: auto; color: #dbe
   text-transform: uppercase;
 }
 
+.drawer-note {
+  margin: 0;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  color: #8db9c7;
+  font-style: italic;
+}
+
 /* Connection configuration settings */
 .connection-config .form-group {
   display: flex;
@@ -1681,6 +1688,19 @@ pre { max-height: 30rem; margin: 0; padding: 0.7rem; overflow: auto; color: #dbe
   color: #ffffff;
 }
 
+.budget-indicator {
+  background: rgba(201, 135, 47, 0.1);
+  border-color: rgba(201, 135, 47, 0.3);
+}
+
+.budget-badge {
+  font-family: "Cascadia Code", ui-monospace, monospace;
+  font-size: 0.65rem;
+  font-weight: bold;
+  text-transform: none;
+  color: #8a5a1e;
+}
+
 /* --- Recurrence Alert Banner --- */
 .recurrence-alert-banner {
   background: #fef9e7;
@@ -2158,7 +2178,15 @@ pre { max-height: 30rem; margin: 0; padding: 0.7rem; overflow: auto; color: #dbe
   gap: 0.4rem;
 }
 
-button.help-tip {
+.help-tip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  margin-left: 0.28rem;
+}
+
+.help-tip-btn {
   margin: 0;
   padding: 0;
   color: inherit;
@@ -2166,15 +2194,15 @@ button.help-tip {
   border: 0;
   font: inherit;
   line-height: 1;
-}
-
-.help-tip {
-  position: relative;
   display: inline-flex;
   align-items: center;
-  vertical-align: middle;
-  margin-left: 0.28rem;
   outline: none;
+}
+
+.help-tip-btn:focus-visible {
+  outline: 2px solid #c9872f;
+  outline-offset: 1px;
+  border-radius: 50%;
 }
 
 .help-tip-glyph {
@@ -2200,7 +2228,7 @@ button.help-tip {
 
 .help-tip-bubble {
   position: absolute;
-  z-index: 40;
+  z-index: 500;
   bottom: calc(100% + 0.45rem);
   left: 50%;
   transform: translateX(-50%);
@@ -2237,8 +2265,37 @@ button.help-tip {
   border-top-color: #c9872f;
 }
 
+/* Directional placements */
+.help-tip[data-direction="bottom"] .help-tip-bubble {
+  bottom: auto;
+  top: calc(100% + 0.45rem);
+}
+
+.help-tip[data-direction="bottom"] .help-tip-bubble::after {
+  top: auto;
+  bottom: 100%;
+  border-top-color: transparent;
+  border-bottom-color: #c9872f;
+}
+
+/* End-aligned variant: pins the bubble to the glyph's right edge instead of
+   centering it, so tips near the right viewport edge (e.g. masthead pills)
+   do not clip. */
+.help-tip[data-align="end"] .help-tip-bubble {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+
+.help-tip[data-align="end"] .help-tip-bubble::after {
+  left: auto;
+  right: 0.32rem;
+  margin-left: 0;
+}
+
 .help-tip:hover .help-tip-bubble,
-.help-tip:focus-visible .help-tip-bubble {
+.help-tip:focus-within .help-tip-bubble,
+.help-tip.open .help-tip-bubble {
   opacity: 1;
   visibility: visible;
 }
@@ -2246,7 +2303,7 @@ button.help-tip {
 .help-overlay {
   position: fixed;
   inset: 0;
-  z-index: 100;
+  z-index: 2000;
   display: flex;
   align-items: center;
   justify-content: center;

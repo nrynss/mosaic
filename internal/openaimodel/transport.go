@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"os"
 	"strings"
+
+	"mosaic.local/mosaic/internal/usage"
 )
 
 const (
@@ -100,9 +102,12 @@ type structuredCall struct {
 }
 
 type structuredResult struct {
-	ResponseID string
-	JSON       json.RawMessage
-	Refusal    string
+	ResponseID   string
+	JSON         json.RawMessage
+	Refusal      string
+	InputTokens  int
+	OutputTokens int
+	TotalTokens  int
 }
 
 func (t *transport) call(ctx context.Context, call structuredCall) (structuredResult, error) {
@@ -176,9 +181,24 @@ func (t *transport) call(ctx context.Context, call structuredCall) (structuredRe
 	}
 
 	responseID := strings.TrimSpace(decoded.ID)
+	var inputTokens, outputTokens, totalTokens int
+	if decoded.Usage != nil {
+		inputTokens = decoded.Usage.InputTokens
+		outputTokens = decoded.Usage.OutputTokens
+		totalTokens = decoded.Usage.TotalTokens
+	}
 	text, refusal := extractOutput(decoded)
 	if strings.TrimSpace(refusal) != "" {
-		return structuredResult{ResponseID: responseID, Refusal: strings.TrimSpace(refusal)}, nil
+		// A refusal still consumes tokens, so it still counts toward the
+		// process-local spend estimate.
+		usage.Global.Record(t.model, inputTokens, outputTokens)
+		return structuredResult{
+			ResponseID:   responseID,
+			Refusal:      strings.TrimSpace(refusal),
+			InputTokens:  inputTokens,
+			OutputTokens: outputTokens,
+			TotalTokens:  totalTokens,
+		}, nil
 	}
 	if strings.TrimSpace(text) == "" {
 		return structuredResult{}, errors.New("openai response has no structured text output")
@@ -195,7 +215,14 @@ func (t *transport) call(ctx context.Context, call structuredCall) (structuredRe
 	if _, ok := probe.(map[string]any); !ok {
 		return structuredResult{}, errors.New("openai structured output must be a JSON object")
 	}
-	return structuredResult{ResponseID: responseID, JSON: append(json.RawMessage(nil), raw...)}, nil
+	usage.Global.Record(t.model, inputTokens, outputTokens)
+	return structuredResult{
+		ResponseID:   responseID,
+		JSON:         append(json.RawMessage(nil), raw...),
+		InputTokens:  inputTokens,
+		OutputTokens: outputTokens,
+		TotalTokens:  totalTokens,
+	}, nil
 }
 
 type responsesRequest struct {
@@ -234,6 +261,11 @@ type responsesAPIResponse struct {
 			Refusal string `json:"refusal"`
 		} `json:"content"`
 	} `json:"output"`
+	Usage *struct {
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+		TotalTokens  int `json:"total_tokens"`
+	} `json:"usage"`
 }
 
 func extractOutput(decoded responsesAPIResponse) (text string, refusal string) {

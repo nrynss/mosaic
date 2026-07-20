@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"mosaic.local/mosaic/internal/contracts"
 	"mosaic.local/mosaic/internal/ontology/gen"
 	"mosaic.local/mosaic/internal/stream"
+	"mosaic.local/mosaic/internal/usage"
 )
 
 const (
@@ -70,6 +72,14 @@ const (
 	ActionOperatorInterpret Action = "operator_interpret"
 	ActionOperatorDecide    Action = "operator_decide"
 )
+
+// UsageReader is implemented by *usage.Accumulator. It is kept as a narrow
+// local interface so this package depends on the accumulator's read surface
+// only, not its internals, and so tests can inject a fresh accumulator
+// instead of the process-wide default.
+type UsageReader interface {
+	Snapshot() usage.Snapshot
+}
 
 // PolicyDecision is intentionally small: the API can distinguish a configured
 // denial from a resolver or policy outage without exposing implementation data.
@@ -163,6 +173,14 @@ type Config struct {
 	Clock             func() time.Time
 	NewID             func() string
 	APIKeyConfigured  bool
+	// Usage is the optional in-memory OpenAI spend estimator behind
+	// GET /api/v1/model-usage. When nil, the process-wide usage.Global
+	// accumulator (fed by internal/openaimodel's shared transport) is used.
+	Usage UsageReader
+	// DemoBudgetUSD is the optional operator-configured demo budget (from
+	// MOSAIC_DEMO_BUDGET_USD). When nil, the model-usage response omits
+	// budget/remaining fields entirely.
+	DemoBudgetUSD *float64
 }
 
 // Server composes the v0.1 HTTP handlers. It reads a COP only through the P06
@@ -188,6 +206,8 @@ type Server struct {
 	clock             func() time.Time
 	newID             func() string
 	apiKeyConfigured  bool
+	usage             UsageReader
+	demoBudgetUSD     *float64
 }
 
 // New rejects partial deterministic/evidence wiring while providing public
@@ -228,6 +248,9 @@ func New(config Config) (*Server, error) {
 	if config.NewID == nil {
 		config.NewID = randomID
 	}
+	if config.Usage == nil {
+		config.Usage = usage.Global
+	}
 	startedAt := config.Clock().UTC()
 	return &Server{
 		recovery:          config.Recovery,
@@ -250,6 +273,8 @@ func New(config Config) (*Server, error) {
 		clock:             config.Clock,
 		newID:             config.NewID,
 		apiKeyConfigured:  config.APIKeyConfigured,
+		usage:             config.Usage,
+		demoBudgetUSD:     config.DemoBudgetUSD,
 	}, nil
 }
 
@@ -259,6 +284,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/health", s.handleHealth)
 	mux.HandleFunc("/api/v1/version", s.handleVersion)
+	mux.HandleFunc("/api/v1/model-usage", s.handleModelUsage)
 	mux.HandleFunc("/api/v1/cop", s.handleCOP)
 	mux.HandleFunc("/api/v1/evidence/", s.handleEvidence)
 	mux.HandleFunc("/api/v1/artifacts/", s.handleArtifact)
@@ -306,6 +332,40 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 		"api_version":       "v1",
 		"openai_configured": s.apiKeyConfigured,
 	}, nil)
+}
+
+// handleModelUsage reports a server-process-local estimate of OpenAI spend.
+// OpenAI exposes no balance/spend endpoint for project keys, so this is
+// computed entirely from token counts Mosaic's own live calls reported; it
+// is never the caller's true OpenAI account balance and always resets when
+// the process restarts. Public like health/version: no actor/policy check.
+func (s *Server) handleModelUsage(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	var snapshot usage.Snapshot
+	if s.usage != nil {
+		snapshot = s.usage.Snapshot()
+	}
+	data := map[string]any{
+		"estimated_spend_usd": roundUSD(snapshot.EstimatedSpendUSD),
+		"input_tokens":        snapshot.InputTokens,
+		"output_tokens":       snapshot.OutputTokens,
+		"live_runs":           snapshot.LiveRuns,
+		"since":               snapshot.Since.UTC().Format(time.RFC3339Nano),
+		"note":                "Estimate for this server process only; not your true OpenAI balance.",
+	}
+	if s.demoBudgetUSD != nil {
+		data["budget_usd"] = roundUSD(*s.demoBudgetUSD)
+		data["estimated_remaining_usd"] = roundUSD(*s.demoBudgetUSD - snapshot.EstimatedSpendUSD)
+	}
+	writeJSON(w, http.StatusOK, data, nil)
+}
+
+// roundUSD keeps the estimate readable (four decimal places) without
+// implying a precision the underlying hardcoded price table does not have.
+func roundUSD(value float64) float64 {
+	return math.Round(value*10000) / 10000
 }
 
 func (s *Server) handleCOP(w http.ResponseWriter, r *http.Request) {

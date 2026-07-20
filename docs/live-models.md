@@ -85,3 +85,23 @@ gcloud run services update mosaic-demo \
 ~~~
 
 Prefer `--set-secrets=OPENAI_API_KEY=openai-api-key:latest` for the key. After the revision rolls out, UI badges should show `live` for each agent.
+
+## Estimated-Credits Meter
+
+OpenAI does not expose a balance or spend-remaining endpoint for project API keys, so Mosaic cannot ask the provider "how much credit is left." Instead the server keeps an honest, local **estimate**:
+
+* Every successful live Luna/Terra/Sol call reports its `usage.input_tokens` / `usage.output_tokens` from the OpenAI Responses API response.
+* An in-memory, mutex-guarded accumulator (`internal/usage`) multiplies those counts by a **hardcoded per-model price table** and tallies a running total.
+* `GET /api/v1/model-usage` returns `estimated_spend_usd`, `input_tokens`, `output_tokens`, `live_runs`, `since`, and a `note` disclaimer. The UI's developer console and a small chip next to the agent badges surface this.
+
+Optional configuration:
+
+| Variable | Description | Allowed Values | Default |
+|---|---|---|---|
+| `MOSAIC_DEMO_BUDGET_USD` | Optional demo budget used to compute `estimated_remaining_usd` | Any parseable float | Unset (budget fields omitted) |
+
+Limitations (by design, not oversights):
+* **Hardcoded prices.** The price table lives in `internal/usage/usage.go` and is not fetched from a live pricing feed; if OpenAI's prices change, or Mosaic starts requesting a different model, the table needs a manual update.
+* **Per-process only.** The accumulator is in-memory and is never written to SQLite — Cloud Run's `/tmp` is ephemeral anyway, so a per-process estimate is the honest scope. It resets to zero whenever the process restarts.
+* **Only counts Mosaic's own calls.** It has no visibility into any other usage on the same OpenAI API key (other tools, other deployments, dashboard usage outside this process).
+* **Not a real balance.** It is never a substitute for checking the actual usage/billing dashboard at platform.openai.com.

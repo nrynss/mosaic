@@ -8,6 +8,8 @@
     operationsState,
     operationsError,
     operationsPresentation,
+    modelUsage = null,
+    modelUsageState = 'idle',
     apiBaseInput = $bindable(),
     applyAPIBase,
     loadOperations
@@ -37,6 +39,12 @@
     return Number.isFinite(number) ? new Intl.NumberFormat().format(number) : '—';
   }
 
+  function formatUSD(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return '—';
+    return `$${number.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+  }
+
   function formatUptime(seconds) {
     const total = Math.max(0, Math.floor(Number(seconds) || 0));
     const hours = Math.floor(total / 3600);
@@ -64,6 +72,7 @@
 
   let operationsCapabilities = $derived(arrayOf(operations?.capabilities));
   let modelRunAgents = $derived(arrayOf(operations?.counts?.model_runs?.by_agent));
+  let modelUsageHasBudget = $derived(modelUsage?.budget_usd !== undefined && modelUsage?.budget_usd !== null);
 </script>
 
 <div class="developer-status-drawer" class:collapsed={collapsed}>
@@ -172,6 +181,34 @@
               {/each}
             </div>
           </div>
+        </section>
+
+        <!-- Model usage estimate -->
+        <section class="drawer-section model-usage-summary">
+          <h3>Estimated OpenAI Usage</h3>
+          <p class="drawer-note">
+            Per-session estimate only — computed from this server process's own token usage
+            since it started. Resets on restart. Not your real OpenAI account balance.
+          </p>
+          {#if modelUsageState === 'loading' || modelUsageState === 'idle'}
+            <div class="drawer-loading">Reading usage estimate...</div>
+          {:else if modelUsageState === 'error' || !modelUsage}
+            <div class="drawer-error" role="alert">
+              <p>Model usage estimate unavailable.</p>
+            </div>
+          {:else}
+            <dl class="status-list">
+              <div><dt>Est. spend</dt><dd>{formatUSD(modelUsage.estimated_spend_usd)}</dd></div>
+              {#if modelUsageHasBudget}
+                <div><dt>Demo budget</dt><dd>{formatUSD(modelUsage.budget_usd)}</dd></div>
+                <div><dt>Est. remaining</dt><dd>{formatUSD(modelUsage.estimated_remaining_usd)}</dd></div>
+              {/if}
+              <div><dt>Input tokens</dt><dd>{formatNumber(modelUsage.input_tokens)}</dd></div>
+              <div><dt>Output tokens</dt><dd>{formatNumber(modelUsage.output_tokens)}</dd></div>
+              <div><dt>Live runs</dt><dd>{formatNumber(modelUsage.live_runs)}</dd></div>
+              <div><dt>Since</dt><dd>{formatTimestamp(modelUsage.since)}</dd></div>
+            </dl>
+          {/if}
         </section>
       </div>
 

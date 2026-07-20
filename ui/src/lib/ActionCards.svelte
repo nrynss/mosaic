@@ -136,7 +136,7 @@
   <div class="panel-section-header">
     <span class="eyebrow">
       Practice notes for other teams
-      <HelpTip text="Write a note as if you would brief Dispatch or Maintenance. Mosaic only saves the note in the demo log — it never radios, emails, or tickets a real team." label="About practice handoffs" />
+      <HelpTip text="Practice drafting a briefing to Dispatch or Maintenance. This mirrors the real handoff form so you can rehearse the workflow." label="About practice handoffs" />
     </span>
     <h3>Draft a handoff (not sent)</h3>
     <p class="section-desc">

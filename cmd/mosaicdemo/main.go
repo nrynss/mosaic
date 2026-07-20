@@ -18,6 +18,7 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -50,6 +51,10 @@ type config struct {
 	RecurrenceArea string
 	// RecurrenceWindow is how far back prior handoffs are considered.
 	RecurrenceWindow time.Duration
+	// DemoBudgetUSD is the optional operator-configured demo budget used to
+	// compute an "estimated remaining" figure on /api/v1/model-usage. Unset
+	// or invalid values leave this nil, which omits budget fields entirely.
+	DemoBudgetUSD *float64
 }
 
 type application struct {
@@ -105,7 +110,23 @@ func parseConfig(args []string, getenv func(string) string) (config, error) {
 		ModelEnv:         parseModelEnv(getenv),
 		RecurrenceArea:   area,
 		RecurrenceWindow: window,
+		DemoBudgetUSD:    parseDemoBudgetUSD(getenv("MOSAIC_DEMO_BUDGET_USD")),
 	})
+}
+
+// parseDemoBudgetUSD parses the optional MOSAIC_DEMO_BUDGET_USD env var as a
+// float. An unset or unparsable value is ignored (returns nil) rather than
+// failing startup; the model-usage endpoint simply omits budget fields.
+func parseDemoBudgetUSD(raw string) *float64 {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+	parsed, err := strconv.ParseFloat(trimmed, 64)
+	if err != nil {
+		return nil
+	}
+	return &parsed
 }
 
 func valueOrDefault(value, fallback string) string {
@@ -265,6 +286,7 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 		ProviderSelection: models.ProviderSelection,
 		BriefingRequester: models.BriefingRequester,
 		APIKeyConfigured:  strings.TrimSpace(configuration.ModelEnv.APIKey) != "",
+		DemoBudgetUSD:     configuration.DemoBudgetUSD,
 	})
 	if err != nil {
 		_ = closeDatabase()

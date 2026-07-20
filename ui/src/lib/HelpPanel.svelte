@@ -26,7 +26,7 @@
     {
       id: 'walk',
       title: 'Suggested walkthrough',
-      body: ``
+      body: `Five steps for a first run:`
     },
     {
       id: 'cop',
@@ -36,7 +36,7 @@
     {
       id: 'safety',
       title: 'Safety boundary',
-      body: `Every operator action is an immutable audit record with executed:false. Handoffs are not delivered externally (delivered:false). There is no login; the public demo actor is open for review. Synthetic data only — no real PII or operational feeds.`
+      body: `Every action you take is written to a permanent, read-only log — but nothing is actually carried out and no handoff leaves the demo. There is no login; this public demo actor is open for review. Synthetic data only — no real PII or operational feeds.`
     },
     {
       id: 'tabs',
@@ -46,7 +46,7 @@
     {
       id: 'dev',
       title: 'For developers',
-      body: `Live models require a server-side OPENAI_API_KEY. Missing keys fall back to pre-built fixtures. Docker deployments use a named volume for SQLite database persistence, while Cloud Run uses /tmp (ephemeral). In production, Litestream or Cloud SQL are used for durable backup-and-restore.`
+      body: `Live models require a server-side OPENAI_API_KEY. Missing keys fall back to pre-built fixtures. Docker deployments use a named volume for SQLite database persistence, while Cloud Run uses /tmp (ephemeral) and resets on restart. For a durable deployment you would add Litestream or Cloud SQL.`
     }
   ];
 

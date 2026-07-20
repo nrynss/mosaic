@@ -16,6 +16,8 @@
   let health = $state({ state: 'idle', detail: 'Not checked' });
   let version = $state({ state: 'idle', detail: 'Not checked' });
   let openaiConfigured = $state(false);
+  let modelUsage = $state(null);
+  let modelUsageState = $state('idle');
   let cop = $state(null);
   let copState = $state('idle');
   let copError = $state('');
@@ -114,9 +116,11 @@
   async function loadPublicStatus() {
     health = { state: 'loading', detail: 'Checking health' };
     version = { state: 'loading', detail: 'Checking version' };
-    const [healthResult, versionResult] = await Promise.allSettled([
+    modelUsageState = 'loading';
+    const [healthResult, versionResult, modelUsageResult] = await Promise.allSettled([
       readEnvelope('health'),
-      readEnvelope('version')
+      readEnvelope('version'),
+      readEnvelope('model-usage')
     ]);
     health = healthResult.status === 'fulfilled'
       ? { state: 'ready', detail: healthResult.value?.status || 'ok' }
@@ -126,6 +130,13 @@
       : { state: 'error', detail: versionResult.reason.message };
     if (versionResult.status === 'fulfilled') {
       openaiConfigured = !!versionResult.value?.openai_configured;
+    }
+    if (modelUsageResult.status === 'fulfilled') {
+      modelUsage = modelUsageResult.value;
+      modelUsageState = 'ready';
+    } else {
+      modelUsage = null;
+      modelUsageState = 'error';
     }
   }
 
@@ -582,13 +593,13 @@
     </button>
     <div class="connection-pill" data-state={openaiConfigured ? 'live' : 'idle'} aria-live="polite" style="margin-right: 0.5rem;">
       <span aria-hidden="true"></span>
-      {openaiConfigured ? 'AI Key: Active' : 'AI Key: Demo Fixture'}
-      <HelpTip text={openaiConfigured ? 'OpenAI key is active. Live model runs are dependent on credits remaining in this key (configure via OPENAI_API_KEY).' : 'Live models are offline. The dashboard runs on pre-built fixture responses.'} label="About OpenAI API key status" />
+      {openaiConfigured ? 'AI Key: Active' : 'AI Key: Demo pack'}
+      <HelpTip text={openaiConfigured ? 'A live AI key is configured on the server, so Terra and Sol can call OpenAI. If the key runs out of credit, calls fall back to the demo pack. See the developer console for an estimated-spend readout.' : 'Live models are offline. The dashboard runs on the pre-built demo pack.'} label="About OpenAI API key status" direction="bottom" align="end" />
     </div>
     <div class="connection-pill" data-state={streamState} aria-live="polite">
       <span aria-hidden="true"></span>
       {streamState === 'live' ? 'Connected' : streamState === 'reconnecting' ? 'Reconnecting' : 'Checking'}
-      <HelpTip text="Green means the browser is connected for live updates. If it drops, Mosaic retries automatically." label="About connection status" />
+      <HelpTip text="Green means the browser is connected for live updates. If it drops, Mosaic retries automatically." label="About connection status" direction="bottom" align="end" />
     </div>
   </div>
 </header>
@@ -613,7 +624,7 @@
     <section class="rail-section boundary-note">
       <p class="eyebrow">
         Safety rule
-        <HelpTip text="AI may suggest context. Only you decide. Notes and handoffs are saved in the demo log; they are never emailed, radioed, or dispatched." label="About safety rule" />
+        <HelpTip text="AI can suggest context, but only you decide. Your notes are saved to the demo log, not acted on." label="About safety rule" />
       </p>
       <p>
         What you see is the demo’s current picture of the synthetic incident.
@@ -636,11 +647,11 @@
     <div class="workspace-tabs-nav">
       <button class="tab-nav-btn" class:active={activeTab === 'workspace'} onclick={() => activeTab = 'workspace'}>
         Live incident board
-        <HelpTip text="Main demo screen: play the scenario, see the current picture, and review advice." label="About live incident board" />
+        <HelpTip text="Main demo screen: play the scenario, see the current picture, and review advice." label="About live incident board" direction="bottom" />
       </button>
       <button class="tab-nav-btn" class:active={activeTab === 'provenance'} onclick={() => activeTab = 'provenance'}>
         Decision history
-        <HelpTip text="Everything you and the demo models recorded: notes, handoffs, and analysis runs — for review only." label="About decision history" />
+        <HelpTip text="Everything you and the demo models recorded: notes, handoffs, and analysis runs — for review only." label="About decision history" direction="bottom" />
       </button>
     </div>
 
@@ -656,6 +667,7 @@
         {elapsedSeconds}
         {loadAdvisories}
         {selectEvidence}
+        {modelUsage}
         bind:auditTargetID
         bind:auditTargetKind
         onPrefillMaintenance={prefillMaintenance}
@@ -722,6 +734,8 @@
   {operationsState}
   {operationsError}
   {operationsPresentation}
+  {modelUsage}
+  {modelUsageState}
   bind:apiBaseInput
   {applyAPIBase}
   loadOperations={() => loadOperations()}
