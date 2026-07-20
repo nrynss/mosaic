@@ -527,3 +527,4 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-20 P42 integrated by coordinator — `1191c31`; monolithic App.svelte refactored into focused SimulationControls, IncidentWorkspace, and StatusDrawer components; layout redesigned with incident command focus and collapsible diagnostics.
 - 2026-07-20 P43 claimed by external builder — base 3e75053368444d92c542887ca96d6aed263ee7c2, branch parcel/P43-ui-action-cards; implementing action cards and operator controls.
 - 2026-07-20 P43 ready for integration — 73e6b485aa3d850a519ac81dbfa492bba44c16e3; action cards and operator decision controls verified.
+- 2026-07-20 P43 integrated by coordinator — `6d95e53`; recipient action cards and operator decision controls added to separate ActionCards Svelte component; API integration and safety boundaries validated.
