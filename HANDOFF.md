@@ -40,8 +40,8 @@ The detailed evaluation and implementation path for running this demo on GCP's f
 
 ## Next Steps
 
-The next increment will focus on deploying the interactive operator demo to **Google Cloud Run** using a durable, single-writer backup-and-restore architecture:
-* **GCS Replication Setup**: Provision a Standard Google Cloud Storage bucket in a qualifying Always Free region for Litestream WAL replication.
-* **Nonroot Key & Config Binding**: Package Litestream replication scripts in the `Dockerfile` with correct nonroot UID/GID privileges.
-* **Artifact Push**: Push the production container image to Artifact Registry (`LOCATION-docker.pkg.dev/PROJECT/REPOSITORY/IMAGE:TAG`).
-* **Single-Instance Cloud Run Deployment**: Deploy with `--max-instances=1` and `--concurrency=1` to enforce transaction safety and match process-local SSE streams. Enforce billing budget alerts on GCP.
+The next increment will focus on implementing the durable, single-writer backup-and-restore replication for the SQLite database:
+* **Litestream Sidecar Packaging**: Update the production `Dockerfile` to bundle the Litestream binary and replication runner.
+* **GCS Replication Bucket**: Provision the Google Cloud Storage bucket in an Always Free region (`us-central1`, `us-east1`, or `us-west1`).
+* **Nonroot Access Setup**: Ensure the Litestream sidecar executes under the `nonroot:nonroot` UID/GID and inherits the GCS credentials securely.
+* **Budget & Alerting**: Configure a GCP billing budget alert to ensure operation costs stay within free allowances.
