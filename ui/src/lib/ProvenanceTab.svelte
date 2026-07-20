@@ -2,8 +2,7 @@
   let {
     session,
     advisories,
-    selectEvidence,
-    readEnvelope
+    selectEvidence
   } = $props();
 
   let auditRecords = $derived(arrayOf(advisories?.audit_records));

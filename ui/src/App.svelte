@@ -616,7 +616,6 @@
         {session}
         {advisories}
         {selectEvidence}
-        {readEnvelope}
       />
     {/if}
   </div>
