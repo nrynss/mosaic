@@ -3,6 +3,7 @@
   import SimulationControls from './lib/SimulationControls.svelte';
   import IncidentWorkspace from './lib/IncidentWorkspace.svelte';
   import StatusDrawer from './lib/StatusDrawer.svelte';
+  import ActionCards from './lib/ActionCards.svelte';
 
   const defaultAPIBase = import.meta.env.VITE_MOSAIC_API_BASE_URL || '/api/v1';
   const hiddenArtifactFields = new Set(['payload_bytes_b64', 'raw_sha256']);
@@ -25,11 +26,8 @@
   let selectedEvidence = $state(null);
   let evidenceState = $state('idle');
   let evidenceError = $state('');
-  let briefingNote = $state('Request a structured supervisor briefing for the current synthetic COP.');
-  let auditAction = $state('acknowledged');
   let auditTargetKind = $state('recommendation');
   let auditTargetID = $state('');
-  let auditNote = $state('Public demo review recorded for the synthetic demonstration.');
   let actionState = $state('idle');
   let actionMessage = $state('');
 
@@ -491,54 +489,7 @@
     }
   }
 
-  function submitBriefing(event) {
-    event.preventDefault();
-    void requestBriefing();
-  }
 
-  function submitAuditAction(event) {
-    event.preventDefault();
-    void recordAuditAction();
-  }
-
-  async function requestBriefing() {
-    actionState = 'loading';
-    actionMessage = '';
-    try {
-      const result = await readEnvelope('briefings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ note: briefingNote })
-      });
-      actionState = 'ready';
-      actionMessage = `Briefing request recorded (${result.briefing_id}); executed: ${String(result.executed)}.`;
-    } catch (error) {
-      actionState = 'error';
-      actionMessage = error.message;
-    }
-  }
-
-  async function recordAuditAction() {
-    actionState = 'loading';
-    actionMessage = '';
-    try {
-      const result = await readEnvelope('audit-actions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: auditAction,
-          target_kind: auditTargetKind,
-          target_id: auditTargetID,
-          note: auditNote
-        })
-      });
-      actionState = 'ready';
-      actionMessage = `Review record created (${result.audit_record?.audit_record_id || 'audit record'}); executed: ${String(result.executed)}.`;
-    } catch (error) {
-      actionState = 'error';
-      actionMessage = error.message;
-    }
-  }
 
   function describeOperations(snapshot, state) {
     if (state === 'loading' || state === 'idle') {
@@ -664,36 +615,16 @@
       {/if}
     </section>
 
-    <section class="review-panel">
-      <p class="eyebrow">Public review</p>
-      <p class="panel-copy">These public-demo calls append immutable audit records. They are visibly non-operational and never dispatch an external action.</p>
-      <form onsubmit={submitBriefing}>
-        <label for="briefing-note">Briefing request note</label>
-        <textarea id="briefing-note" bind:value={briefingNote} rows="3"></textarea>
-        <button class="review-button" disabled={actionState === 'loading'}>Record briefing request <span>executed: false</span></button>
-      </form>
-      <form onsubmit={submitAuditAction}>
-        <label for="audit-action">Review action</label>
-        <select id="audit-action" bind:value={auditAction}>
-          <option value="acknowledged">Acknowledge</option>
-          <option value="rejected">Reject</option>
-          <option value="noted">Note</option>
-        </select>
-        <label for="audit-kind">Artifact kind</label>
-        <select id="audit-kind" bind:value={auditTargetKind}>
-          <option value="recommendation">Recommendation</option>
-          <option value="insight">Insight</option>
-        </select>
-        <label for="audit-target">Resolvable artifact ID</label>
-        <input id="audit-target" bind:value={auditTargetID} placeholder="recommendation-domestic-001" required />
-        <label for="audit-note">Review note</label>
-        <textarea id="audit-note" bind:value={auditNote} rows="3"></textarea>
-        <button class="review-button" disabled={actionState === 'loading'}>Record review <span>executed: false</span></button>
-      </form>
-      {#if actionState !== 'idle'}
-        <p class:problem={actionState === 'error'} class="action-result" aria-live="polite">{actionMessage || 'Recording immutable audit record…'}</p>
-      {/if}
-    </section>
+    <ActionCards
+      {readEnvelope}
+      {cop}
+      {advisories}
+      {selectEvidence}
+      bind:auditTargetID
+      bind:auditTargetKind
+      bind:actionState
+      bind:actionMessage
+    />
   </aside>
 </main>
 
