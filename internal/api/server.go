@@ -54,14 +54,16 @@ type ActorResolver interface {
 type Action string
 
 const (
-	ActionReadCOP         Action = "read_cop"
-	ActionReadEvidence    Action = "read_evidence"
-	ActionReadArtifact    Action = "read_artifact"
-	ActionReadStream      Action = "read_stream"
-	ActionReadOperations  Action = "read_operations"
-	ActionReadAdvisories  Action = "read_advisories"
-	ActionRequestBriefing Action = "record_briefing_request"
-	ActionRecordAudit     Action = "record_audit_action"
+	ActionReadCOP           Action = "read_cop"
+	ActionReadEvidence      Action = "read_evidence"
+	ActionReadArtifact      Action = "read_artifact"
+	ActionReadStream        Action = "read_stream"
+	ActionReadOperations    Action = "read_operations"
+	ActionReadAdvisories    Action = "read_advisories"
+	ActionRequestBriefing   Action = "record_briefing_request"
+	ActionRecordAudit       Action = "record_audit_action"
+	ActionControlSimulation Action = "control_simulation"
+	ActionReadSimulation    Action = "read_simulation"
 )
 
 // PolicyDecision is intentionally small: the API can distinguish a configured
@@ -114,7 +116,8 @@ type AllowDemoPolicy struct{}
 func (AllowDemoPolicy) Authorize(_ context.Context, _ Actor, action Action) (PolicyDecision, error) {
 	switch action {
 	case ActionReadCOP, ActionReadEvidence, ActionReadArtifact, ActionReadStream,
-		ActionReadOperations, ActionRequestBriefing, ActionRecordAudit, ActionReadAdvisories:
+		ActionReadOperations, ActionRequestBriefing, ActionRecordAudit, ActionReadAdvisories,
+		ActionControlSimulation, ActionReadSimulation:
 		return PolicyDecision{Allowed: true}, nil
 	default:
 		return PolicyDecision{Reason: "unknown demo capability"}, nil
@@ -123,6 +126,7 @@ func (AllowDemoPolicy) Authorize(_ context.Context, _ Actor, action Action) (Pol
 
 // Config supplies the already-wired deterministic replay and append-only
 // persistence seams. The composition root chooses concrete P03/P06 instances.
+// Simulation is optional until composition (P46) wires the P36 controller.
 type Config struct {
 	Recovery        RecoveryReader
 	Records         contracts.ImmutableRecordRepository
@@ -131,11 +135,14 @@ type Config struct {
 	AdvisoryHistory contracts.AdvisoryHistoryReader
 	AdvisoryMode    string
 	Stream          *stream.Broker
-	Actors          ActorResolver
-	Policy          ActionPolicy
-	Version         string
-	Clock           func() time.Time
-	NewID           func() string
+	// Simulation is the optional interactive session controller (P36).
+	// When nil, simulation routes return a structured 503.
+	Simulation SimulationController
+	Actors     ActorResolver
+	Policy     ActionPolicy
+	Version    string
+	Clock      func() time.Time
+	NewID      func() string
 }
 
 // Server composes the v0.1 HTTP handlers. It reads a COP only through the P06
@@ -148,6 +155,7 @@ type Server struct {
 	advisoryHistory contracts.AdvisoryHistoryReader
 	advisoryMode    string
 	stream          *stream.Broker
+	simulation      SimulationController
 	actors          ActorResolver
 	policy          ActionPolicy
 	version         string
@@ -203,6 +211,7 @@ func New(config Config) (*Server, error) {
 		advisoryHistory: config.AdvisoryHistory,
 		advisoryMode:    config.AdvisoryMode,
 		stream:          config.Stream,
+		simulation:      config.Simulation,
 		actors:          config.Actors,
 		policy:          config.Policy,
 		version:         config.Version,
@@ -226,6 +235,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/advisories", s.handleAdvisories)
 	mux.HandleFunc("/api/v1/briefings", s.handleBriefing)
 	mux.HandleFunc("/api/v1/audit-actions", s.handleAuditAction)
+	mux.HandleFunc("/api/v1/simulation/start", s.handleSimulationStart)
+	mux.HandleFunc("/api/v1/simulation/reset", s.handleSimulationReset)
+	mux.HandleFunc("/api/v1/simulation/status", s.handleSimulationStatus)
+	mux.HandleFunc("/api/v1/simulation/end", s.handleSimulationEnd)
+	mux.HandleFunc("/api/v1/simulation/stream", s.handleSimulationStream)
 	return mux
 }
 
