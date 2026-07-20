@@ -63,7 +63,7 @@ Deploy the service using the single-instance constraints and point the database 
 gcloud run deploy mosaic-demo \
   --image=us-central1-docker.pkg.dev/YOUR_PROJECT_ID/mosaic-repo/mosaic-demo:latest \
   --max-instances=1 \
-  --concurrency=1 \
+  --concurrency=8 \
   --set-env-vars="MOSAIC_DB_PATH=/tmp/mosaic.db,OPENAI_API_KEY=sk-proj-..." \
   --allow-unauthenticated \
   --region=us-central1

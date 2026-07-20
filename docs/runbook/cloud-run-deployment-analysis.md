@@ -34,8 +34,8 @@ To achieve durable SQLite persistence under the free tier, we will use **[Litest
 Cloud Run is designed to scale horizontally by default. However, Mosaic uses process-local state (for simulation streams, best-effort SSE brokers) and a single-writer SQLite database.
 
 To prevent write conflicts, split simulation states, and broken streams, **we must constrain the deployment to a single instance**:
-* **Enforce Instance Limit**: Deploy the service with `--max-instances=1`.
-* **Enforce Concurrency Limit**: Configure `--concurrency=1` to guarantee single-threaded request processing, or coordinate the model to prevent overlapping transactions.
+* **Enforce Instance Limit**: Deploy the service with `--max-instances=1` to preserve single-writer database integrity.
+* **Configure Concurrency**: Set `--concurrency=8` so that concurrent REST API requests (such as `/health` or UI checks) are not blocked by the persistent Server-Sent Events (SSE) stream occupying the single instance.
 
 *Note: For a future production migration to horizontal scaling, the backend must transition to a shared store like Cloud SQL (PostgreSQL) and a distributed pub/sub broker.*
 
@@ -82,8 +82,8 @@ Deploy the container with a maximum instance count of 1 and fallback port mappin
 gcloud run deploy mosaic-demo \
   --image=us-central1-docker.pkg.dev/PROJECT_ID/mosaic-repo/mosaic-demo:latest \
   --max-instances=1 \
-  --concurrency=1 \
-  --set-env-vars=MOSAIC_DB_PATH=/var/lib/mosaic/mosaic.db \
+  --concurrency=8 \
+  --set-env-vars=MOSAIC_DB_PATH=/tmp/mosaic.db \
   --allow-unauthenticated \
   --region=us-central1
 ```
