@@ -121,6 +121,73 @@ $review = @{
 Invoke-RestMethod "$base/api/v1/audit-actions" -Method Post -ContentType 'application/json' -Body $review
 ~~~
 
+## Verify interactive simulation and operator actions
+
+Start a new simulation session:
+
+~~~powershell
+Invoke-RestMethod "$base/api/v1/simulation/start" -Method Post
+~~~
+
+Expected: Response status is HTTP 200, returning a `session_id` and the status `running`.
+
+Poll the status until the simulation naturally ends (since fixture beats have zero delay in this demo, it will complete immediately):
+
+~~~powershell
+Invoke-RestMethod "$base/api/v1/simulation/status"
+~~~
+
+Expected: Status field is `ended` and the `beats` array contains the replayed simulation beats.
+
+Perform an interactive Analyze operator request (Terra):
+
+~~~powershell
+$analyze = @{
+  evidence = @(
+    @{
+      kind = 'raw_event'
+      id = 'raw-domestic-001-call'
+      explanation = 'Infrastructure incident reports matching weather alert context.'
+    }
+  )
+  note = 'Analyze road closure reports.'
+} | ConvertTo-Json -Depth 5
+Invoke-RestMethod "$base/api/v1/operator/analyze" -Method Post -ContentType 'application/json' -Body $analyze
+~~~
+
+Expected: Returns status `refused` (under fixture mode) with `executed: false`, appending an audit record for the `public-demo` actor.
+
+Prepare a Maintenance Handoff:
+
+~~~powershell
+$handoff = @{
+  recipient = 'maintenance'
+  target_kind = 'system'
+  target_id = 'operator-maintenance-handoff'
+  note = 'A prior road-condition handoff exists for area loc-road-brook-lane.'
+} | ConvertTo-Json
+Invoke-RestMethod "$base/api/v1/operator/prepare-handoff" -Method Post -ContentType 'application/json' -Body $handoff
+~~~
+
+Expected: Status HTTP 201, returning `executed: false`, `delivered: false`, and `handoff_status: "recorded"`. No external system is contacted.
+
+Verify that `/api/v1/advisories` includes the newly recorded provenance trace and that no forbidden fields are leaked:
+
+~~~powershell
+$advisories = Invoke-RestMethod "$base/api/v1/advisories"
+$advisories.audit_records | Format-Table audit_record_id, action, target_kind, target_id, note
+~~~
+
+Expected: The table includes the analyze and handoff audit records, showing they are correctly persisted. No prompts, model responses, raw bytes, or SHA256 fields are present.
+
+Confirm that the operational projection (COP) is unchanged by the review actions:
+
+~~~powershell
+Invoke-RestMethod "$base/api/v1/cop"
+~~~
+
+Expected: `state_revision` is still 9. Bounded operator reviews do not mutate operational state.
+
 ## Verify retained-volume restart
 
 Stop and restart without removing the named volume:
@@ -160,16 +227,14 @@ notice with a three-second context deadline.
 
 ## Current capability boundary
 
-- Deterministic checkpoint/replay recovery is composed and reported as
-  recovered for the current observation.
-- There is no durable reconciliation worker, autonomous recovery process, or
-  shared projection ownership/lease.
-- Terra and Sol are composed only through local checked-in structured fixtures;
-  there is no live model transport, credential, network model request, or GGUF.
+- Interactive simulation replay is controlled via start/reset/end routes, broadcasting ordered beats over the session-scoped stream.
+- Deterministic checkpoint/replay recovery is composed and reported as recovered for the current observation.
+- There is no durable reconciliation worker, autonomous recovery process, or shared projection ownership/lease.
+- Terra, Sol, and Luna default and fall back to deterministic local checked-in fixtures when no live provider key is configured.
+- Live models can be optionally configured at startup via environment variables using a server-side OpenAI API key, which is never exposed to the client.
 - Mosaic never dispatches, contacts, or mutates an external operational system.
 
-PostgreSQL, shared dispatch/outbox, and multi-instance coordination are future
-design work; they are not included by this Docker demo.
+PostgreSQL, shared dispatch/outbox, and multi-instance coordination are future design work; they are not included by this Docker demo.
 
 ## Stop and reset
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"mosaic.local/mosaic/internal/contracts"
 	"mosaic.local/mosaic/internal/ontology/gen"
@@ -499,6 +500,7 @@ func mapOperatorEvidence(refs []operatorEvidenceRef) []gen.Evidence {
 			TargetKind:    kind,
 			TargetID:      id,
 			Explanation:   ref.Explanation,
+			CreatedAt:     time.Now().UTC().Format(time.RFC3339Nano),
 		})
 	}
 	return out
