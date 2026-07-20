@@ -33,6 +33,8 @@ The detailed parcel breakdowns and logs for completed increments are preserved i
 
 ## Next Steps
 
-The next increment planning will focus on:
-* **Multi-Instance Coordination**: Scaling beyond a single local SQLite container to support PostgreSQL state, multi-instance leases, and outbox transactional patterns.
-* **Reconciliation Worker**: Establishing asynchronous, background correction loops to resolve divergence across distributed projections.
+The next increment will focus on deploying the interactive operator demo to **Google Cloud Run** for free (within the permanent GCP Free Tier):
+* **GCS Bucket Setup**: Provision a Standard Google Cloud Storage bucket (qualifying for the 5 GB Free Tier).
+* **Environment Adaptations**: Wire port-binding fallbacks for Cloud Run's dynamic `${PORT}` environment variable.
+* **Artifact Push**: Build and push the production container image to Google Artifact Registry.
+* **Cloud Run Deployment**: Spin up the service with a GCSFuse volume mount mapping the GCS bucket to `/var/lib/mosaic` for persistent SQLite storage.
