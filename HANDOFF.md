@@ -33,15 +33,15 @@ The detailed parcel breakdowns and logs for completed increments are preserved i
 
 ## Cloud Run Deployment Analysis
 
-The detailed evaluation and implementation path for running this demo on GCP's free tier (scale-to-zero compute, Standard GCS FUSE bucket mounts for SQLite persistence) is documented in:
+The detailed evaluation and implementation path for running this demo on GCP's free tier (scale-to-zero compute, single-writer Litestream replication for SQLite persistence, and horizontal concurrency constraints) is documented in:
 * **[Cloud Run Deployment Analysis Runbook](docs/runbook/cloud-run-deployment-analysis.md)**
 
 ---
 
 ## Next Steps
 
-The next increment will focus on deploying the interactive operator demo to **Google Cloud Run** for free (within the permanent GCP Free Tier):
-* **GCS Bucket Setup**: Provision a Standard Google Cloud Storage bucket (qualifying for the 5 GB Free Tier).
-* **Environment Adaptations**: Wire port-binding fallbacks for Cloud Run's dynamic `${PORT}` environment variable.
-* **Artifact Push**: Build and push the production container image to Google Artifact Registry.
-* **Cloud Run Deployment**: Spin up the service with a GCSFuse volume mount mapping the GCS bucket to `/var/lib/mosaic` for persistent SQLite storage.
+The next increment will focus on deploying the interactive operator demo to **Google Cloud Run** using a durable, single-writer backup-and-restore architecture:
+* **GCS Replication Setup**: Provision a Standard Google Cloud Storage bucket in a qualifying Always Free region for Litestream WAL replication.
+* **Nonroot Key & Config Binding**: Package Litestream replication scripts in the `Dockerfile` with correct nonroot UID/GID privileges.
+* **Artifact Push**: Push the production container image to Artifact Registry (`LOCATION-docker.pkg.dev/PROJECT/REPOSITORY/IMAGE:TAG`).
+* **Single-Instance Cloud Run Deployment**: Deploy with `--max-instances=1` and `--concurrency=1` to enforce transaction safety and match process-local SSE streams. Enforce billing budget alerts on GCP.

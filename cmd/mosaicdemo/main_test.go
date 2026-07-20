@@ -219,6 +219,41 @@ func TestParseConfigUsesRuntimeEnvironment(t *testing.T) {
 	}
 }
 
+func TestParseConfigPortFallback(t *testing.T) {
+	configuration, err := parseConfig(nil, func(name string) string {
+		switch name {
+		case "PORT":
+			return "9999"
+		default:
+			return ""
+		}
+	})
+	if err != nil {
+		t.Fatalf("parse configuration: %v", err)
+	}
+	if configuration.ListenAddress != "0.0.0.0:9999" {
+		t.Fatalf("listen address = %q, want 0.0.0.0:9999", configuration.ListenAddress)
+	}
+
+	// MOSAIC_LISTEN_ADDR overrides PORT
+	configurationOverride, err := parseConfig(nil, func(name string) string {
+		switch name {
+		case "PORT":
+			return "9999"
+		case "MOSAIC_LISTEN_ADDR":
+			return "127.0.0.1:4444"
+		default:
+			return ""
+		}
+	})
+	if err != nil {
+		t.Fatalf("parse configuration override: %v", err)
+	}
+	if configurationOverride.ListenAddress != "127.0.0.1:4444" {
+		t.Fatalf("override listen address = %q, want 127.0.0.1:4444", configurationOverride.ListenAddress)
+	}
+}
+
 func TestNewApplicationWiresSimulationModelsAndRecurrence(t *testing.T) {
 	root := repositoryRoot(t)
 	ui := makeDashboard(t)

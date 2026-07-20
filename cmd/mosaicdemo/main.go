@@ -68,7 +68,15 @@ func parseConfig(args []string, getenv func(string) string) (config, error) {
 	}
 	flags := flag.NewFlagSet("mosaicdemo", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
-	listen := flags.String("listen-addr", valueOrDefault(getenv("MOSAIC_LISTEN_ADDR"), defaultListenAddress), "HTTP listen address")
+	listenPort := getenv("MOSAIC_LISTEN_ADDR")
+	if listenPort == "" {
+		if p := getenv("PORT"); p != "" {
+			listenPort = "0.0.0.0:" + p
+		} else {
+			listenPort = defaultListenAddress
+		}
+	}
+	listen := flags.String("listen-addr", listenPort, "HTTP listen address")
 	database := flags.String("db", valueOrDefault(getenv("MOSAIC_DB_PATH"), defaultDatabasePath()), "SQLite database path or DSN")
 	ui := flags.String("ui-dir", valueOrDefault(getenv("MOSAIC_UI_DIR"), defaultUIDirectory), "prebuilt dashboard directory")
 	assets := flags.String("asset-root", valueOrDefault(getenv("MOSAIC_ASSET_ROOT"), defaultAssetRoot), "directory containing ontology and datasets")

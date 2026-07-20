@@ -1,97 +1,90 @@
-# Google Cloud Run Deployment Analysis (Free Tier)
+# Google Cloud Run Deployment Analysis (Durable Design)
 
-This document provides a detailed analysis of deploying the Mosaic single-instance demonstration application on Google Cloud Run within the GCP Free Tier limits.
-
----
-
-## 1. Google Cloud Free Tier Eligibility
-
-Google Cloud Run offers a generous permanent free tier that renews monthly. The limits are:
-
-| Metric | Monthly Free Tier Limit | Mosaic Usage & Bounding |
-|---|---|---|
-| **CPU** | 180,000 vCPU-seconds | ~50 hours of active execution on 1 vCPU (scales to 0 when idle). |
-| **Memory** | 360,000 GB-seconds | ~100 hours of active execution at 1 GB RAM (scales to 0 when idle). |
-| **Requests** | 2 million requests | More than sufficient for operator and E2E checks. |
-| **Egress** | 1 GiB free egress | Shared across GCP services. Sufficient for standard UI/API payloads. |
-| **GCR Artifact Registry** | 500 MB storage | Builds easily fit within this container storage envelope. |
-
-### The "Scale-to-Zero" Multiplier
-Because Cloud Run supports **scaling to zero instances** when there is no incoming web traffic, compute seconds are only consumed during active request processing. For a demonstration app, this practically guarantees **$0.00** monthly compute costs.
+This document provides a detailed evaluation of deploying the Mosaic interactive operator demo on Google Cloud Run under GCP free tier limits, focusing on the selected **durable, single-writer backup-and-restore architecture**.
 
 ---
 
-## 2. The SQLite Persistence Challenge
+## 1. Architectural Options Evaluated
 
-Cloud Run container instances are **stateless and ephemeral**. The instance's local filesystem is a writable `tmpfs` volume, meaning:
-* SQLite writes (like `mosaic.db`) succeed at runtime.
-* However, when Cloud Run scales down to 0 instances (due to inactivity) or restarts/replaces an instance, the SQLite file is **wiped**.
-* Any operator audit trail or simulation sessions recorded will be lost.
-
-To maintain persistent operator decisions under the Free Tier, we have two primary options:
-
-### Option A: Cloud Storage FUSE Volume Mount (Recommended for Demo)
-Cloud Run supports mounting a Google Cloud Storage (GCS) bucket directly as a directory volume using GCSFuse. 
-* **Cost**: GCS offers **5 GB** of free standard storage, 5,000 Class A (write/list) operations, and 50,000 Class B (read) operations per month.
-* **Mechanism**: Mount a bucket at `/var/lib/mosaic` and point the SQLite path to it (`/var/lib/mosaic/mosaic.db`).
-* **Pros**: Zero code changes. The SQLite file is saved directly to GCS.
-* **Cons**: SQLite over FUSE has high latency for concurrent writes due to network-backed block updates. For a single-operator demo, this is acceptable.
-
-### Option B: SQLite + Litestream Replicator
-[Litestream](https://litestream.io/) runs as a sidecar process inside the container. It streams SQLite write-ahead log (WAL) changes to a GCS bucket.
-* **Mechanism**: The container runs Litestream as its entrypoint, restores the db from GCS on boot, starts `mosaicdemo`, and replicates changes back to GCS.
-* **Pros**: Excellent read/write performance (local SQLite speeds) and high reliability.
-* **Cons**: Requires modifying the container packaging (`Dockerfile` and entrypoint script) to bundle the `litestream` binary and write-ahead log configuration.
+We evaluated two paths for deploying this application to Cloud Run:
+1. **Ephemeral Cloud Run Demo**: Run without a persistence layer. The database resets to the seed fixture whenever the container scales to zero or restarts. No persistence promise.
+2. **Durable Cloud Run Demo (Selected Path)**: Shared database or a formally designed single-writer backup-and-restore mechanism. This is required to preserve immutable audit records and simulation history across restarts.
 
 ---
 
-## 3. Configuration & Port Adaptations
+## 2. Persistence & Storage Boundaries
 
-Cloud Run forces the container to listen on the port specified by the dynamic `PORT` environment variable (usually `8080` but not guaranteed). 
+### Why Cloud Storage FUSE is Avoided
+We explicitly **reject** placing an active SQLite database on a Google Cloud Storage (GCS) FUSE volume mount. 
+* **POSIX & Locking Limitations**: Google Cloud Storage is an object store, and GCS FUSE does not support file locking, concurrency controls, or POSIX-compliant write semantics.
+* **Integrity Risk**: Attempting to run an active database like SQLite over GCS FUSE leads to corruption, transaction failures, and breaks Mosaic's core auditability and immutability guarantees.
+* **Permission Issues**: GCS FUSE mounts default to root ownership, which conflicts with our Docker nonroot security posture.
 
-### Port Configuration in `mosaicdemo`
-Our `main.go` parses the port from the `MOSAIC_LISTEN_ADDR` variable:
-```go
-listen := flags.String("listen-addr", valueOrDefault(getenv("MOSAIC_LISTEN_ADDR"), defaultListenAddress), "HTTP listen address")
+### Selected Solution: Single-Writer Litestream Replication (Option 2B)
+To achieve durable SQLite persistence under the free tier, we will use **[Litestream](https://litestream.io/)** replicating to a standard GCS bucket:
+* **Boot Phase**: On container startup, a custom entrypoint script calls `litestream restore` to fetch the latest database backup from the GCS bucket.
+* **Runtime Phase**: The application runs and writes to a local, high-speed SQLite database file.
+* **Replication Phase**: A lightweight background Litestream worker replicates WAL (write-ahead log) changes to GCS every second.
+* **REST Communication**: Litestream uses standard GCS API calls rather than a filesystem mount, bypassing GCS FUSE file locking and nonroot ownership issues.
+
+---
+
+## 3. Concurrency & Scaling Constraints
+
+Cloud Run is designed to scale horizontally by default. However, Mosaic uses process-local state (for simulation streams, best-effort SSE brokers) and a single-writer SQLite database.
+
+To prevent write conflicts, split simulation states, and broken streams, **we must constrain the deployment to a single instance**:
+* **Enforce Instance Limit**: Deploy the service with `--max-instances=1`.
+* **Enforce Concurrency Limit**: Configure `--concurrency=1` to guarantee single-threaded request processing, or coordinate the model to prevent overlapping transactions.
+
+*Note: For a future production migration to horizontal scaling, the backend must transition to a shared store like Cloud SQL (PostgreSQL) and a distributed pub/sub broker.*
+
+---
+
+## 4. GCP Allowance and Budgeting
+
+While the resources are designed to fit within GCP's permanent Always Free allowances, **$0 costs are not guaranteed**:
+* **Limits & Caps**: GCS Always Free standard storage is limited to **5 GB** and is restricted to specific regions (e.g., `us-east1`, `us-west1`, `us-central1`).
+* **Operation Tariffs**: GCS enforces monthly limits of 5,000 Class A (writes/updates) and 50,000 Class B (reads) operations. Frequent Litestream WAL syncs could approach these caps.
+* **Budget Recommendation**: Do not assume the deployment is free. We **must** enforce a budget alert and billing cap in the Google Cloud Console to prevent unexpected charges.
+
+---
+
+## 5. Implementation Path
+
+### Step 1: Update Dockerfile for Litestream
+To package Litestream, modify the runtime image stage in the `Dockerfile` to install the litestream binary and copy a `litestream.yml` configuration:
+
+```dockerfile
+# Download and install Litestream
+ADD https://github.com/benbjohnson/litestream/releases/download/v0.3.13/litestream-v0.3.13-linux-amd64.tar.gz /tmp/litestream.tar.gz
+RUN tar -C /usr/local/bin -xzf /tmp/litestream.tar.gz
+
+# Configure litestream.yml
+COPY litestream.yml /etc/litestream.yml
 ```
 
-To run seamlessly on Cloud Run, we can adapt this dynamically by setting the Cloud Run service environment variable:
-* **`MOSAIC_LISTEN_ADDR`** = `:${PORT}`
+### Step 2: Push Image to Google Artifact Registry
+Avoid legacy `gcr.io` paths. Use the modern Google Artifact Registry format:
 
-Or we can patch `main.go` to automatically fallback to `PORT` if `MOSAIC_LISTEN_ADDR` is empty:
-```diff
-- listen := flags.String("listen-addr", valueOrDefault(getenv("MOSAIC_LISTEN_ADDR"), defaultListenAddress), "HTTP listen address")
-+ listenPort := valueOrDefault(getenv("MOSAIC_LISTEN_ADDR"), "")
-+ if listenPort == "" {
-+ 	if p := getenv("PORT"); p != "" {
-+ 		listenPort = ":" + p
-+ 	} else {
-+ 		listenPort = defaultListenAddress
-+ 	}
-+ }
-+ listen := flags.String("listen-addr", listenPort, "HTTP listen address")
+```bash
+# Build and tag using the regional docker repository
+docker tag mosaic-demo:local us-central1-docker.pkg.dev/PROJECT_ID/mosaic-repo/mosaic-demo:latest
+
+# Push image
+docker push us-central1-docker.pkg.dev/PROJECT_ID/mosaic-repo/mosaic-demo:latest
 ```
 
----
+### Step 3: Deploy to Cloud Run
+Deploy the container with a maximum instance count of 1 and fallback port mapping:
 
-## 4. Implementation Steps for Deploying
-
-1. **Create a GCS Bucket**:
-   Create a standard storage bucket (e.g. `mosaic-demo-db-store`) in your GCP project.
-2. **Push Image**:
-   Build the image locally and push to Google Artifact Registry:
-   ```bash
-   docker tag mosaic-demo:local gcr.io/your-project/mosaic-demo:latest
-   docker push gcr.io/your-project/mosaic-demo:latest
-   ```
-3. **Deploy with Volume Mount**:
-   Deploy to Cloud Run, specifying the volume mount to map the GCS bucket to `/var/lib/mosaic` and mapping the port:
-   ```bash
-   gcloud run deploy mosaic-service \
-     --image=gcr.io/your-project/mosaic-demo:latest \
-     --add-volume=name=db-volume,type=cloud-storage,bucket=mosaic-demo-db-store \
-     --add-volume-mount=volume=db-volume,mount-path=/var/lib/mosaic \
-     --set-env-vars=MOSAIC_DB_PATH=/var/lib/mosaic/mosaic.db,MOSAIC_LISTEN_ADDR=:${PORT} \
-     --allow-unauthenticated \
-     --region=us-central1
-   ```
+```bash
+gcloud run deploy mosaic-demo \
+  --image=us-central1-docker.pkg.dev/PROJECT_ID/mosaic-repo/mosaic-demo:latest \
+  --max-instances=1 \
+  --concurrency=1 \
+  --set-env-vars=MOSAIC_DB_PATH=/var/lib/mosaic/mosaic.db \
+  --allow-unauthenticated \
+  --region=us-central1
+```
+The Go process will dynamically bind to `0.0.0.0:${PORT}` at runtime using the PORT fallback configured in `parseConfig`.
