@@ -10,7 +10,7 @@ All v0.3 parcels (P35–P47) have been merged and integrated into `main`. The im
 2. **Operator API & Key Safety**: Supports generative Analyze (Terra) and briefing (Sol) operator reviews under `executed: false` safety. Key is server-only.
 3. **Department Handoffs**: Captures noted intent to recipient mailboxes (Dispatch/Maintenance) as `executed: false` and `delivered: false` audits without external side effects.
 4. **Interactive UI Workspace**: Refactored to feature tabs for the incident timeline command panel, live elapsed counters, recurrence alerts, and detailed audit trails.
-5. **Durable Persistence**: All model runs and operator audits persist in SQLite and are recovered upon process restarts.
+5. **Local / Docker Persistence**: Model runs and operator audits persist in SQLite and are recovered upon process restarts **when the database file is on durable storage** (local `mosaic.db`, or the Compose named volume at `/var/lib/mosaic`). This does **not** apply to the live Cloud Run deployment, which uses ephemeral `/tmp` storage.
 
 ### Verification Status & Quality Gate
 
@@ -31,25 +31,37 @@ The detailed parcel breakdowns and logs for completed increments are preserved i
 
 ---
 
-## Cloud Run Deployment Analysis
+## Cloud Run Deployment (ephemeral hackathon demo)
 
-The detailed evaluation and implementation path for running this demo on GCP's free tier (scale-to-zero compute, single-writer Litestream replication for SQLite persistence, and horizontal concurrency constraints) is documented in:
-* **[Cloud Run Deployment Analysis Runbook](docs/runbook/cloud-run-deployment-analysis.md)**
+The live service is **up now** under single-instance constraints. It is an
+**ephemeral** demo deploy, not a durable production posture.
 
-The active, live demonstration service is hosted on Google Cloud Run:
 * **Live Service URL**: **[https://mosaic-demo-358513274447.us-central1.run.app](https://mosaic-demo-358513274447.us-central1.run.app)**
+* **Live now**: single Cloud Run service, `--max-instances=1`, fixture-safe.
+* **Ephemeral storage**: deployed with `MOSAIC_DB_PATH=/tmp/mosaic.db`. Audit
+  records, model runs, and simulation history are **lost after a Cloud Run
+  container restart or scale-to-zero**. The fixture reseeds on boot; prior
+  operator session state does not.
+* **Not deployed**: Litestream, GCS WAL replication, Cloud SQL, or any
+  single-writer durable backup path. Those remain a **future durable
+  deployment parcel**. The design notes live in:
+  **[Cloud Run Deployment Analysis Runbook](docs/runbook/cloud-run-deployment-analysis.md)**
+  (proposed durable design, not current reality).
 
 ---
 
 ## Next Steps
 
 > [!NOTE]
-> **Hackathon Scope Complete**: We have completed all functional code changes required for the hackathon. The previously listed tasks (Litestream sidecar replication, GCS WAL backups, and budget caps) are designated as **production-type** requirements for subsequent enterprise scaling, rather than hackathon milestones.
+> **Hackathon Scope Complete**: Functional code for the hackathon demo is done.
+> Litestream / GCS WAL replication, Cloud SQL migration, and budget caps are
+> **future durable-deployment parcels**, not hackathon milestones. The live
+> Cloud Run service remains intentionally ephemeral.
 
 The actual project next steps are:
 * **End-to-End Run with Paid API Key**: Execute a full live model test run (with active credits) to verify generative Terra, Sol, and Luna responses and outputs.
 * **UI Refinement & Polish**: Perform final visual and layout adjustments on the dashboard.
-* **Add UI Help Page**: Implement a dedicated help/info page in the Svelte dashboard to describe the system architecture, components, and evidence ledger design.
-* **Demo Preparation**: Prepare the interactive operator demo walkthrough and recording.
+* **Demo Preparation**: Prepare the interactive operator demo walkthrough and recording (script + in-app Help panel are in place).
 * **Domain Update**: Configure custom domain mapping to route **mosaic.nryn.dev** through Cloudflare to the Cloud Run service.
 * **Project Details Page**: Author and publish a dedicated project description page on the **nryn.dev** site detailing the architecture, constraints, and results.
+* **(Future) Durable Cloud Run parcel**: Litestream restore+replicate to GCS, or Cloud SQL, with Secret Manager for the API key and budget alerts — see the runbook.

@@ -2,11 +2,15 @@
 
 This document outlines the design, configuration, and constraints for integrating live AI model execution (Luna, Terra, and Sol) in the interactive operator demo.
 
-## Overview & Default Path
+## Overview
 
-By default, the demo runs in a fully deterministic, network-free **fixture mode**. All interactive operator analysis and briefings use pre-packaged local scenarios. 
+The process can run each agent in **`fixture`** or **`live`** mode.
 
-Live models are strictly **opt-in** and require a server-only OpenAI API key.
+* **Process default (no env):** `fixture` — deterministic, network-free, historical advisory cards.
+* **Docker Compose default:** `live` for Luna, Terra, and Sol, with `OPENAI_API_KEY` taken from the root `.env`. Without a key, the process still falls back to fixture.
+* **Cloud Run:** set `MOSAIC_*_PROVIDER=live` plus the server-only key (Secret Manager preferred).
+
+Live mode means real OpenAI clients are composed. **Billing balance is not a mode gate.** A present key + `live` keeps the UI on live even if OpenAI later returns insufficient-quota errors; those are recorded as failed model runs.
 
 ## Server-Only Key Safety
 
@@ -17,24 +21,28 @@ To prevent accidental key exposure:
 
 ## Configuration & Provider Selection
 
-Provider selection is configured at startup using process environment variables. If a provider is not specified or is set to an unknown value, it defaults to `fixture`.
+Provider selection is configured at startup using process environment variables.
 
-| Variable | Description | Allowed Values | Default |
-|---|---|---|---|
-| `OPENAI_API_KEY` | Server-only OpenAI API key | *Secret String* | *None* |
-| `MOSAIC_LUNA_PROVIDER` | Ingestion & normalisation mode for Luna | `fixture`, `live` | `fixture` |
-| `MOSAIC_TERRA_PROVIDER` | Interactive incident assessment mode for Terra | `fixture`, `live` | `fixture` |
-| `MOSAIC_SOL_PROVIDER` | Interactive recipient briefing mode for Sol | `fixture`, `live` | `fixture` |
+| Variable | Description | Allowed Values | Process default (unset) | Compose default |
+|---|---|---|---|---|
+| `OPENAI_API_KEY` | Server-only OpenAI API key | *Secret String* | *None* | From root `.env` |
+| `MOSAIC_LUNA_PROVIDER` | Ingestion & normalisation mode for Luna | `fixture`, `live` | `fixture` | `live` |
+| `MOSAIC_TERRA_PROVIDER` | Interactive incident assessment mode for Terra | `fixture`, `live` | `fixture` | `live` |
+| `MOSAIC_SOL_PROVIDER` | Interactive recipient briefing mode for Sol | `fixture`, `live` | `fixture` | `live` |
 
-### Fixture Fallback
+### Effective selection rules
 
-If an agent's provider is configured as `live` but the `OPENAI_API_KEY` is absent from the server environment, the demo automatically falls back to `fixture` mode for that agent. This fallback status is reported in the capabilities metadata returned by the `/api/v1/operations` endpoint.
+1. Agent is **`live`** only when the env requests `live` **and** `OPENAI_API_KEY` is non-empty.
+2. If env requests `live` but the key is **absent**, that agent **falls back to `fixture`**.
+3. If env requests `live`, key is present, but OpenAI returns billing/quota/network errors → agent stays **`live`** in capability metadata; the invocation is recorded as failed/refused/timed_out.
+
+This fallback status is reported in the `providers` object on advisories / operator responses (what the UI badges show).
 
 ## Capability Boundary & Safety Rules
 
 ### 1. Models Inform; They Never Mutate
 Live model outputs are strictly advisory. They exist to inform the operator, who remains the final authority:
-* **COP Immutability**: No live model response can ever mutate the deterministic operational projection (COP). 
+* **COP Immutability**: No live model response can ever mutate the deterministic operational projection (COP).
 * **Operator Reviews**: Operator decisions (Analyze, Approve, Annotate, Prepare Handoff) are captured as immutable audit records with `executed: false`. They are never sent to external actors.
 * **No LLM Self-Healing**: The system does not support autonomous loops, self-correction, or automated outbox dispatching based on model predictions.
 
@@ -42,15 +50,38 @@ Live model outputs are strictly advisory. They exist to inform the operator, who
 All model invocations (successful, refused, or failed) are recorded in the database as immutable `ModelRun` records to preserve a complete audit trail:
 * **Successful Response**: Creates a `ModelRun` with `validation_status: "valid"` and stores the generated insight/recommendation.
 * **Model Refusal**: If the OpenAI client returns an API-level refusal, the system logs a `ModelRun` with `validation_status: "refused"` containing the refusal details, and generates no operational artifacts.
-* **Transport Failure / Timeout**: If the OpenAI service is unreachable or times out, the system logs a `ModelRun` with `validation_status: "failed"` or `"timed_out"` containing the failure details, and the operator request is gracefully declined.
+* **Transport Failure / Timeout / Quota**: If the OpenAI service is unreachable, times out, or rejects for billing/quota, the system logs a `ModelRun` with `validation_status: "failed"` or `"timed_out"` containing the failure details, and the operator request is gracefully declined.
 
 ## Local Docker Setup with Live Models
 
-To opt into live models in your local Docker environment, define the required variables. You can pass them inline or use a local `.env` file at the repository root (which is gitignored by default):
+Root `.env` (gitignored):
 
 ~~~bash
-# Example: Running the interactive demo with a live Terra model
-$env:OPENAI_API_KEY="your-api-key-here"
-$env:MOSAIC_TERRA_PROVIDER="live"
+OPENAI_API_KEY=sk-proj-your-openai-api-key-here
+~~~
+
+Compose injects the key and defaults all three providers to `live`:
+
+~~~bash
 docker compose up --build --detach
 ~~~
+
+Override a single agent back to fixture if needed:
+
+~~~bash
+# PowerShell session
+$env:MOSAIC_LUNA_PROVIDER = "fixture"
+docker compose up --build --detach
+~~~
+
+## Cloud Run
+
+Ensure the service has both the key and the provider flags (key alone is not enough):
+
+~~~bash
+gcloud run services update mosaic-demo \
+  --region=us-central1 \
+  --update-env-vars="MOSAIC_LUNA_PROVIDER=live,MOSAIC_TERRA_PROVIDER=live,MOSAIC_SOL_PROVIDER=live"
+~~~
+
+Prefer `--set-secrets=OPENAI_API_KEY=openai-api-key:latest` for the key. After the revision rolls out, UI badges should show `live` for each agent.

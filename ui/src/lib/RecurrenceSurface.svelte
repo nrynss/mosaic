@@ -56,25 +56,28 @@
   <div class="recurrence-alert-banner" role="alert">
     <div class="recurrence-header">
       <span class="alert-icon">⚠️</span>
-      <strong>Deterministic Recurrence Alert</strong>
-      <span class="maint-badge">recorded, not sent</span>
+      <strong>Seen before at this location</strong>
+      <span class="maint-badge">saved only · not sent</span>
     </div>
     <div class="recurrence-body">
-      <p>A prior road-condition handoff exists for area <code>{incidentLocation}</code>. A new maintenance note has been prepared for review.</p>
+      <p>
+        This area (<code>{incidentLocation}</code>) already has a prior road / maintenance note in the demo log.
+        You can draft a fresh maintenance note — Mosaic will not contact anyone automatically.
+      </p>
       <div class="prior-records">
-        <span>Prior Records:</span>
+        <span>Earlier notes:</span>
         {#each matchedRecords as record}
           <span class="prior-badge"><code>{record.audit_record_id}</code></span>
         {/each}
       </div>
       <div class="prefill-action-bar">
         <button class="prefill-maint-btn" onclick={doPrefill}>
-          Pre-fill Maintenance Handoff Card
+          Fill maintenance note for me
         </button>
       </div>
     </div>
     <div class="recurrence-footer">
-      No autonomous external contact has been made.
+      Reminder: this is pattern awareness in the demo — not an automated work order.
     </div>
   </div>
 {/if}

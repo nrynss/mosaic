@@ -5,6 +5,8 @@
   import StatusDrawer from './lib/StatusDrawer.svelte';
   import ActionCards from './lib/ActionCards.svelte';
   import ProvenanceTab from './lib/ProvenanceTab.svelte';
+  import HelpPanel from './lib/HelpPanel.svelte';
+  import HelpTip from './lib/HelpTip.svelte';
 
   const defaultAPIBase = import.meta.env.VITE_MOSAIC_API_BASE_URL || '/api/v1';
   const hiddenArtifactFields = new Set(['payload_bytes_b64', 'raw_sha256']);
@@ -36,6 +38,7 @@
   let session = $state(null);
   let elapsedSeconds = $state(0);
   let activeTab = $state('workspace'); // 'workspace' | 'provenance'
+  let helpOpen = $state(false);
   let maintenanceNote = $state('Operator road condition notes.');
 
   function prefillMaintenance(noteText) {
@@ -465,6 +468,8 @@
       return;
     }
     if (name === 'workspace_clear') {
+      // Session restart clears the live view; keep a short empty state until
+      // beats/stream snapshots refill, then restore seeded COP if nothing arrives.
       cop = null;
       advisories = null;
       elapsedSeconds = 0;
@@ -480,6 +485,10 @@
       if (newStatus !== 'running') {
         elapsedSeconds = 0;
       }
+      if (newStatus === 'ended' || newStatus === 'idle' || newStatus === 'pending') {
+        void loadCOP();
+        void loadAdvisories();
+      }
       return;
     }
     if (name === 'beat') {
@@ -492,6 +501,9 @@
           session.beats.push(b);
         }
       }
+      // Beats often land with COP/stream updates; refresh facts for the demo view.
+      void loadCOP();
+      void loadAdvisories();
       return;
     }
   }
@@ -544,33 +556,60 @@
 </script>
 
 <svelte:head>
-  <title>Mosaic — Evidence ledger</title>
+  <title>Mosaic — Domestic disturbance demo</title>
 </svelte:head>
 
 <header class="masthead">
-  <a class="wordmark" href="#cop" aria-label="Mosaic evidence ledger home">
+  <a class="wordmark" href="#cop" aria-label="Mosaic home">
     <span class="wordmark-mark" aria-hidden="true"></span>
     <span>Mosaic</span>
-    <small>evidence ledger</small>
+    <small>operator demo</small>
   </a>
-  <p class="scope">Synthetic demo · single instance · no external actions</p>
-  <div class="connection-pill" data-state={streamState} aria-live="polite">
-    <span aria-hidden="true"></span>
-    {streamState === 'live' ? 'Live' : streamState === 'reconnecting' ? 'Reconnecting' : 'Checking'}
+  <p class="scope">Synthetic 911 scenario · practice only · nothing is sent outside</p>
+  <div class="masthead-actions">
+    <button
+      type="button"
+      class="help-open-btn"
+      onclick={() => (helpOpen = true)}
+      aria-haspopup="dialog"
+      aria-expanded={helpOpen}
+    >
+      How this works
+    </button>
+    <div class="connection-pill" data-state={streamState} aria-live="polite">
+      <span aria-hidden="true"></span>
+      {streamState === 'live' ? 'Connected' : streamState === 'reconnecting' ? 'Reconnecting' : 'Checking'}
+      <HelpTip text="Green means the browser is connected for live updates. If it drops, Mosaic retries automatically." label="About connection status" />
+    </div>
   </div>
 </header>
+
+<HelpPanel open={helpOpen} onClose={() => (helpOpen = false)} />
 
 <main class="folio">
   <aside class="context-rail" aria-label="Demo context">
     <section class="rail-section">
-      <p class="eyebrow">Public demo</p>
-      <h1>Read the record.<br />Keep judgment human.</h1>
-      <p class="rail-copy">This synthetic demonstration is open to anyone. Review calls append an immutable record; they never dispatch an external action.</p>
+      <p class="eyebrow">You are the operator</p>
+      <h1>One synthetic call.<br />Your judgment stays human.</h1>
+      <p class="rail-copy">
+        This is a practice board for a made-up domestic-disturbance call.
+        Press <strong>Play scenario</strong>, watch facts arrive, review advice,
+        and record notes. Nothing here pages a real agency.
+      </p>
+      <button type="button" class="quiet-button help-rail-btn" onclick={() => (helpOpen = true)}>
+        How this works (walkthrough)
+      </button>
     </section>
 
     <section class="rail-section boundary-note">
-      <p class="eyebrow">Boundary</p>
-      <p>Claims describe the current deterministic record. Mosaic does not dispatch, contact, or alter an operational system.</p>
+      <p class="eyebrow">
+        Safety rule
+        <HelpTip text="AI may suggest context. Only you decide. Notes and handoffs are saved in the demo log; they are never emailed, radioed, or dispatched." label="About safety rule" />
+      </p>
+      <p>
+        What you see is the demo’s current picture of the synthetic incident.
+        Mosaic will not contact Dispatch, Maintenance, or any live system.
+      </p>
     </section>
   </aside>
 
@@ -587,10 +626,12 @@
     <!-- Tab switcher navigation -->
     <div class="workspace-tabs-nav">
       <button class="tab-nav-btn" class:active={activeTab === 'workspace'} onclick={() => activeTab = 'workspace'}>
-        Incident Command Workspace
+        Live incident board
+        <HelpTip text="Main demo screen: play the scenario, see the current picture, and review advice." label="About live incident board" />
       </button>
       <button class="tab-nav-btn" class:active={activeTab === 'provenance'} onclick={() => activeTab = 'provenance'}>
-        Provenance & Action Trail
+        Decision history
+        <HelpTip text="Everything you and the demo models recorded: notes, handoffs, and analysis runs — for review only." label="About decision history" />
       </button>
     </div>
 
@@ -622,23 +663,29 @@
 
   <aside class="evidence-rail" aria-label="Evidence and review">
     <section class="evidence-panel">
-      <p class="eyebrow">Evidence resolution</p>
-      <h2>{selectedEvidence?.label || 'Select a ledger item'}</h2>
+      <p class="eyebrow">
+        Why is this claimed?
+        <HelpTip text="Click “Show source” on any fact to open the underlying demo record. Raw wire dumps stay hidden." label="About evidence panel" />
+      </p>
+      <h2>{selectedEvidence?.label || 'Click “Show source” on a fact'}</h2>
       {#if evidenceState === 'idle'}
-        <p class="panel-copy">Every evidence button calls the public resolver. Raw source payload bytes are never shown here by default.</p>
+        <p class="panel-copy">
+          Use this panel to check the story behind a road closure, weather alert,
+          or assessment. You are reading demo records — not a live CAD feed.
+        </p>
       {:else if evidenceState === 'loading'}
-        <p class="panel-copy" aria-live="polite">Resolving cited artifact…</p>
+        <p class="panel-copy" aria-live="polite">Looking up the source record…</p>
       {:else if evidenceState === 'error'}
-        <p class="panel-copy problem" role="alert">Evidence could not be resolved: {evidenceError}</p>
+        <p class="panel-copy problem" role="alert">Could not load that source: {evidenceError}</p>
       {:else if evidenceState === 'unresolved' || !selectedEvidence?.resolved}
-        <p class="panel-copy problem">This evidence reference is unresolved. {selectedEvidence?.reason || 'The API did not return a persisted artifact.'}</p>
+        <p class="panel-copy problem">No matching source was found. {selectedEvidence?.reason || 'It may have been cleared with the session view.'}</p>
       {:else}
         <dl class="resolution-meta">
-          <div><dt>Kind</dt><dd>{selectedEvidence.kind}</dd></div>
-          <div><dt>ID</dt><dd><code>{selectedEvidence.id}</code></dd></div>
-          <div><dt>Status</dt><dd class="resolved">Resolved</dd></div>
+          <div><dt>Type</dt><dd>{selectedEvidence.kind}</dd></div>
+          <div><dt>Record</dt><dd><code>{selectedEvidence.id}</code></dd></div>
+          <div><dt>Status</dt><dd class="resolved">Found</dd></div>
         </dl>
-        <pre aria-label="Resolved evidence artifact with raw payload bytes omitted">{evidenceText()}</pre>
+        <pre aria-label="Source record without raw payload bytes">{evidenceText()}</pre>
       {/if}
     </section>
 

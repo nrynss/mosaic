@@ -29,7 +29,9 @@ COPY --from=runtime-build --chown=nonroot:nonroot /src/ontology ./ontology
 COPY --from=runtime-build --chown=nonroot:nonroot /src/datasets/domestic-disturbance ./datasets/domestic-disturbance
 COPY --from=dashboard-build --chown=nonroot:nonroot /src/ui/dist ./ui
 
-ENV MOSAIC_LISTEN_ADDR=:8080
+# Do not set MOSAIC_LISTEN_ADDR here. Leaving it empty preserves the process
+# PORT fallback (0.0.0.0:${PORT}) required by Cloud Run's dynamic port. Local
+# Compose sets MOSAIC_LISTEN_ADDR=:8080 explicitly.
 ENV MOSAIC_DB_PATH=/var/lib/mosaic/mosaic.db
 ENV MOSAIC_UI_DIR=/srv/mosaic/ui
 

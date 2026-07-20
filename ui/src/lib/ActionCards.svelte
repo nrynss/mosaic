@@ -1,4 +1,6 @@
 <script>
+  import HelpTip from './HelpTip.svelte';
+
   let {
     readEnvelope,
     cop,
@@ -132,49 +134,58 @@
 <div class="action-cards-panel">
   <!-- Header -->
   <div class="panel-section-header">
-    <span class="eyebrow">Recipient Action Handoffs</span>
-    <h3>Operator Handoff Controls</h3>
-    <p class="section-desc">Prepare bounded notifications for departmental review. Actions are recorded but not physically sent.</p>
+    <span class="eyebrow">
+      Practice notes for other teams
+      <HelpTip text="Write a note as if you would brief Dispatch or Maintenance. Mosaic only saves the note in the demo log — it never radios, emails, or tickets a real team." label="About practice handoffs" />
+    </span>
+    <h3>Draft a handoff (not sent)</h3>
+    <p class="section-desc">
+      These forms look like inter-team handoffs so you can practice the workflow.
+      Every save is marked <strong>not carried out</strong> and <strong>not delivered</strong>.
+    </p>
   </div>
 
   <!-- Dispatch Card -->
   <div class="action-card dispatch-card">
     <div class="card-header">
-      <span class="badge recipient-badge">RECIPIENT: DISPATCH</span>
-      <span class="badge status-badge safety-badge">recorded, not sent</span>
+      <span class="badge recipient-badge">For: Dispatch desk</span>
+      <span class="badge status-badge safety-badge">
+        saved only · not sent
+        <HelpTip text="Honest label: your note is stored for the demo trail. No real dispatcher receives it." label="About not sent" />
+      </span>
     </div>
 
     <div class="context-box">
-      <span class="context-title">INCIDENT CONTEXT</span>
+      <span class="context-title">This call (from the board)</span>
       {#if activeIncident}
         <div class="context-grid">
-          <div><span class="lbl">ID:</span> <code class="val">{activeIncident.incident_id}</code></div>
-          <div><span class="lbl">Cat:</span> <span class="val">{activeIncident.category || '—'}</span></div>
-          <div><span class="lbl">Loc:</span> <span class="val">{activeIncident.location_id || '—'}</span></div>
+          <div><span class="lbl">Call:</span> <code class="val">{activeIncident.incident_id}</code></div>
+          <div><span class="lbl">Type:</span> <span class="val">{activeIncident.category || '—'}</span></div>
+          <div><span class="lbl">Where:</span> <span class="val">{activeIncident.location_id || '—'}</span></div>
         </div>
       {:else}
-        <p class="context-empty">Waiting for active incident data...</p>
+        <p class="context-empty">Play the scenario so a call appears on the board.</p>
       {/if}
     </div>
 
     <form onsubmit={handleDispatchHandoff} class="card-form">
-      <label for="dispatch-observations">Observations & Notes</label>
+      <label for="dispatch-observations">Your note to Dispatch</label>
       <textarea
         id="dispatch-observations"
         bind:value={dispatchObservations}
         rows="3"
-        placeholder="Enter dispatcher briefing notes..."
+        placeholder="e.g. Unit on scene; Brook Lane access may be constrained by weather…"
       ></textarea>
       <button class="action-btn" type="submit" disabled={actionState === 'loading'}>
-        Prepare dispatch handoff
+        Save Dispatch note (demo)
       </button>
     </form>
 
     {#if dispatchResult}
       <div class="result-box success">
-        <div class="res-row"><strong>executed:</strong> <span>{dispatchResult.executed}</span></div>
-        <div class="res-row"><strong>delivered:</strong> <span>{dispatchResult.delivered}</span></div>
-        <div class="res-row"><strong>status:</strong> <span>{dispatchResult.handoff_status}</span></div>
+        <div class="res-row"><strong>Carried out in the real world?</strong> <span>{dispatchResult.executed ? 'Yes' : 'No'}</span></div>
+        <div class="res-row"><strong>Delivered to a real desk?</strong> <span>{dispatchResult.delivered ? 'Yes' : 'No'}</span></div>
+        <div class="res-row"><strong>Demo status:</strong> <span>{dispatchResult.handoff_status}</span></div>
         <p class="res-msg">{dispatchResult.message}</p>
       </div>
     {/if}
@@ -188,12 +199,12 @@
   <!-- Maintenance Card -->
   <div class="action-card maintenance-card">
     <div class="card-header">
-      <span class="badge recipient-badge">RECIPIENT: MAINTENANCE</span>
-      <span class="badge status-badge safety-badge">recorded, not sent</span>
+      <span class="badge recipient-badge">For: Road / maintenance</span>
+      <span class="badge status-badge safety-badge">saved only · not sent</span>
     </div>
 
     <div class="context-box">
-      <span class="context-title">ROAD CONDITIONS</span>
+      <span class="context-title">Roads on the board</span>
       {#if roads.length > 0}
         <ul class="roads-list">
           {#each roads.slice(0, 3) as road}
@@ -207,28 +218,28 @@
           {/if}
         </ul>
       {:else}
-        <p class="context-empty">No active road conditions reported.</p>
+        <p class="context-empty">No roads on the board yet — play the scenario.</p>
       {/if}
     </div>
 
     <form onsubmit={handleMaintenanceHandoff} class="card-form">
-      <label for="maintenance-note">Condition Annotations</label>
+      <label for="maintenance-note">Your note about roads / access</label>
       <textarea
         id="maintenance-note"
         bind:value={maintenanceNote}
         rows="3"
-        placeholder="Enter infrastructure warning details..."
+        placeholder="e.g. Brook Lane closed during heavy rain; flag for maintenance review…"
       ></textarea>
       <button class="action-btn" type="submit" disabled={actionState === 'loading'}>
-        Prepare maintenance handoff
+        Save maintenance note (demo)
       </button>
     </form>
 
     {#if maintenanceResult}
       <div class="result-box success">
-        <div class="res-row"><strong>executed:</strong> <span>{maintenanceResult.executed}</span></div>
-        <div class="res-row"><strong>delivered:</strong> <span>{maintenanceResult.delivered}</span></div>
-        <div class="res-row"><strong>status:</strong> <span>{maintenanceResult.handoff_status}</span></div>
+        <div class="res-row"><strong>Carried out in the real world?</strong> <span>{maintenanceResult.executed ? 'Yes' : 'No'}</span></div>
+        <div class="res-row"><strong>Delivered to a real desk?</strong> <span>{maintenanceResult.delivered ? 'Yes' : 'No'}</span></div>
+        <div class="res-row"><strong>Demo status:</strong> <span>{maintenanceResult.handoff_status}</span></div>
         <p class="res-msg">{maintenanceResult.message}</p>
       </div>
     {/if}
@@ -242,39 +253,45 @@
   <!-- Decision Controls Panel -->
   <div class="decision-panel">
     <div class="panel-section-header">
-      <span class="eyebrow">Public Review & Decisions</span>
-      <h3>Operator Decisions</h3>
-      <p class="section-desc">Record review actions. No live external department will be contacted.</p>
+      <span class="eyebrow">
+        Your call as operator
+        <HelpTip text="Agree with advice or add a note. Saved to the demo history only — never an operational command." label="About your decision" />
+      </span>
+      <h3>Record a decision</h3>
+      <p class="section-desc">
+        Pick what you are reviewing (use “Use in my decision” on an advice card to fill this in).
+        Nothing here becomes a live dispatch.
+      </p>
     </div>
 
     <div class="decision-form card-form">
       <div class="input-grid">
         <div>
-          <label for="decision-kind">Target Kind</label>
+          <label for="decision-kind">What are you reviewing?</label>
           <select id="decision-kind" bind:value={auditTargetKind}>
             <option value="recommendation">Recommendation</option>
-            <option value="insight">Insight</option>
+            <option value="insight">Assessment</option>
             <option value="briefing">Briefing</option>
-            <option value="system">System</option>
+            <option value="system">System / other</option>
           </select>
         </div>
         <div>
-          <label for="decision-target">Target ID</label>
+          <label for="decision-target">Which record? (id)</label>
           <input
             id="decision-target"
             bind:value={auditTargetID}
-            placeholder="e.g. rec-001"
+            placeholder="e.g. recommendation-domestic-001"
             required
           />
         </div>
       </div>
 
-      <label for="decision-note">Decision Note</label>
+      <label for="decision-note">Your note</label>
       <textarea
         id="decision-note"
         bind:value={decisionNote}
         rows="3"
-        placeholder="Enter review annotations..."
+        placeholder="e.g. Agree access risk is outdated after road reopened…"
       ></textarea>
 
       <div class="btn-group">
@@ -284,7 +301,7 @@
           onclick={() => handleDecision('approve')}
           disabled={actionState === 'loading'}
         >
-          Approve <span>executed: false</span>
+          Agree / approve <span>demo only</span>
         </button>
         <button
           class="decision-btn annotate-btn"
@@ -292,16 +309,16 @@
           onclick={() => handleDecision('annotate')}
           disabled={actionState === 'loading'}
         >
-          Annotate <span>executed: false</span>
+          Add note only <span>demo only</span>
         </button>
       </div>
     </div>
 
     {#if decisionResult}
       <div class="result-box success">
-        <div class="res-row"><strong>action:</strong> <span class="capitalize">{decisionResult.action}</span></div>
-        <div class="res-row"><strong>executed:</strong> <span>{decisionResult.executed}</span></div>
-        <div class="res-row"><strong>audit ID:</strong> <code>{decisionResult.audit_record_id}</code></div>
+        <div class="res-row"><strong>What you did:</strong> <span class="capitalize">{decisionResult.action}</span></div>
+        <div class="res-row"><strong>Carried out in the real world?</strong> <span>{decisionResult.executed ? 'Yes' : 'No'}</span></div>
+        <div class="res-row"><strong>History id:</strong> <code>{decisionResult.audit_record_id}</code></div>
       </div>
     {/if}
     {#if decisionError}

@@ -17,10 +17,17 @@ services:
         condition: service_completed_successfully
     ports:
       - "${MOSAIC_PORT:-8080}:8080"
+    # Root .env is used for ${…} interpolation (OPENAI_API_KEY, etc.).
+    # Providers default to live; without a key the process still falls back to
+    # fixture at runtime. Billing balance is unrelated to mode selection.
     environment:
       MOSAIC_LISTEN_ADDR: ":8080"
       MOSAIC_DB_PATH: "/var/lib/mosaic/mosaic.db"
       MOSAIC_UI_DIR: "/srv/mosaic/ui"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      MOSAIC_LUNA_PROVIDER: "${MOSAIC_LUNA_PROVIDER:-live}"
+      MOSAIC_TERRA_PROVIDER: "${MOSAIC_TERRA_PROVIDER:-live}"
+      MOSAIC_SOL_PROVIDER: "${MOSAIC_SOL_PROVIDER:-live}"
     volumes:
       - mosaic-data:/var/lib/mosaic
     read_only: true

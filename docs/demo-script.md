@@ -2,128 +2,200 @@
 
 ## Positioning
 
-Mosaic is an auditable event-to-state foundation for decision-support tools. The domestic-disturbance call is a synthetic reference implementation, not a police product claim.
+Mosaic is an auditable event-to-state foundation for decision-support tools. The
+domestic-disturbance call is a **synthetic reference implementation**, not a
+police product claim.
 
-The demo must distinguish three things:
+Distinguish three layers for the audience:
 
-- **Runs now:** deterministic synthetic ingestion, state projection/recovery, bounded evidence, historical fixture advisory records, immutable review actions, and the local Docker UI/API.
-- **Next interface increment:** an incident-centred workspace, user-triggered analysis presentation, recipient-specific handoff cards, and a provenance/actions tab.
-- **Future architecture:** independently operated dispatch and maintenance feeds, durable handoff delivery, and deterministic recurrent-issue awareness. No live connector or external action is claimed in the current demo.
+| Layer | Status |
+|-------|--------|
+| **Runs now** | Synthetic ingestion, deterministic COP, simulation session, evidence resolution, fixture + opt-in live models, operator handoffs/audits (`executed: false`), in-app Help + tips, local Docker durable volume, Cloud Run ephemeral demo |
+| **Interface complete** | Incident command workspace, Analyze, recipient handoff cards, provenance/actions tab, recurrence surface |
+| **Future** | Durable Cloud Run (Litestream/Cloud SQL), external delivery connectors, multi-instance scaling |
 
-## Opening: one incident, not a systems dashboard
+**Live URL:** https://mosaic-demo-358513274447.us-central1.run.app  
+**Local:** `docker compose up --build` → http://localhost:8080
 
-Start with a synthetic 911-style intake:
+Use the in-app **Help** panel for architecture details; this script is the
+spoken walkthrough.
 
-> A caller reports a domestic disturbance. The call is assigned a synthetic dispatch reference and the incident clock begins.
+---
 
-The main workspace should show the dispatch reference, location, elapsed time, the latest trusted facts, and one clear **Analyze** action. Connection health and API details are supporting developer diagnostics, not the primary user experience.
+## Synthetic data: enough for the demo?
 
-## Analyze: evidence-backed context
+**Yes.** No extra dataset generation is required for the hackathon narrative.
 
-When the operator selects **Analyze**, explain that Mosaic assembles only durable, evidence-resolvable facts:
+Checked-in fixture: `datasets/domestic-disturbance/`
 
-- the active incident and assigned unit;
-- the relevant road and weather conditions;
-- availability of supporting resources; and
-- the source event and state revision behind every displayed claim.
+| Item | Detail |
+|------|--------|
+| Beats | 10 (scenario.json) |
+| Story | 911 intake → welfare → weather → road closure → EMS → officer update → incomplete repair → quarantine → late EMS → road open |
+| COP end state | State revision **9** with open Brook Lane after correction |
+| Advisories | Access-constraint insight (superseded) + obsolete follow-up + recommendation (not current) |
+| Integrity demos | Quarantined invalid input; late delivery; repaired-then-opened road |
+| Audits | Briefing requested + supervisor ack samples |
 
-For the current reference implementation, the advisory history is fixture-composed and intentionally labelled historical/not current after the final road correction. Do not call it a live model response.
+That is enough to show: intake → constraint → judgment → correction →
+provenance without inventing more events mid-demo.
 
-## Action cards and human judgment
+---
 
-Present concise, recipient-specific action cards:
+## Spoken opening (30–45 seconds)
 
-1. **Dispatch handoff** — a briefing/note for the dispatch team, with a field for the operator's own observations.
-2. **Infrastructure handoff** — a critical-condition note for the maintenance or road-owning team when a bridge or route materially affects the incident.
+> Mosaic turns synthetic field events into a common operating picture you can
+> audit. Only the world is simulated. You are the real operator. Models may
+> advise; they never dispatch, and they never rewrite the projection.
 
-The operator may acknowledge, reject, annotate, or prepare a handoff. Every interaction becomes an immutable audit record with executed: false in the current demo. The UI must say that it recorded a handoff; it must never claim a real department was contacted.
+Point at the header: **Synthetic demo · single instance · no external actions**.
+Open **Help** briefly, then close it — show that guidance is built in.
 
-## Provenance and actions tab
+---
 
-A dedicated tab should make the decision trail legible:
+## Step 1 — Connection and agent modes
 
-- source event and receipt time;
-- canonical event and state revision;
-- evidence used by an assessment or handoff;
-- the generated/fixture recommendation;
-- each operator annotation and decision;
-- each recorded recipient, status, and acknowledgement; and
-- the explicit boundary between recorded and externally delivered actions.
+1. Confirm the connection pill is **Live** (SSE).
+2. Show Luna / Terra / Sol badges.
+   - **live** = server has key + `MOSAIC_*_PROVIDER=live` (Compose and Cloud Run
+     are configured this way when the key is present).
+   - **fixture** = deterministic local path (missing key or explicit fixture).
+3. Hover a **?** tip on an agent badge; mention zero-balance keys still show
+   live and fail as recorded model runs — they do not silently flip to fixture.
 
-This is where developers see why Mosaic is useful as a framework: every displayed recommendation has evidence, timing, provenance, and a durable history.
+---
 
-## Recurrent-issue awareness: future, deterministic, and configurable
+## Step 2 — Start simulation (the story clock)
 
-For a later call in the same configured area, Mosaic can deterministically surface a prior recorded maintenance handoff after a configurable time window. The system should say:
+1. Click **Start Simulation**.
+2. Elapsed timer runs; beats arrive on the session stream.
+3. Narrate as facts appear:
+   - domestic incident and unit assignment;
+   - heavy rain;
+   - road constraint (access risk);
+   - EMS availability;
+   - officer update;
+   - correction path that reopens the road.
 
-> A prior road-condition handoff exists for this area. A new maintenance note has been prepared for review.
+Optional: click **Resolve evidence** on a road or weather row — right rail shows
+the bounded artifact (raw payload bytes withheld).
 
-It must not say that it autonomously contacted maintenance. The future implementation may create a pending handoff draft, link it to prior immutable records, and expose it to a separate maintenance-feed instance. An external delivery connector remains a separate, policy-governed capability.
+---
 
-This is not LLM self-healing. It is evidence-backed recurrence awareness and a durable, reviewable workflow.
+## Step 3 — COP and claim classes
 
-## Closing
+On the **Incident Command Workspace**:
 
-> Mosaic turns an event into a traceable operating picture, lets people make and record judgment calls, and preserves the evidence needed for the next team, the next incident, and the next system instance.
+- **Reported fact** — source-projected state (incident, unit, road, weather).
+- **Derived assessment** — Terra-class insight (historical fixture cards may be
+  superseded after the road opens — that is intentional).
+- **Human-review recommendation** — Sol-class guidance for the supervisor.
 
-## UI direction
+Say: *The COP is deterministic. Only the projector mutates it. AI assesses; it
+does not write state.*
 
-The primary screen becomes an incident command workspace:
+---
 
-1. intake identity, live elapsed counter, and Analyze;
-2. current evidence-backed context;
-3. findings and action cards, grouped by recipient;
-4. an annotation/decision control; and
-5. a provenance/actions tab for the full audit trail.
+## Step 4 — Analyze and advisories
 
-Keep API connection, health, version, stream, and recovery indicators in a compact status drawer or developer view.
+1. Click **Analyze Incident** to refresh advisory composition.
+2. Walk the access insight: confidence, cited evidence, later **superseded** /
+   **not current** after correction.
+3. If live Terra/Sol and a funded key: operator analyze/brief API paths call
+   OpenAI; results appear as new model runs. If the key is empty or API errors,
+   explain the recorded failure without COP mutation.
 
-## Simulation lifecycle
+Do **not** claim historical fixture cards are live model output.
 
-The primary UI action is **Start simulation**.
+---
 
-1. It creates a new synthetic simulation session and clears only the visible incident workspace.
-2. The session replays the declared source events in configured timing order.
-3. The UI shows intake, elapsed simulation time, current state, analysis availability, recipient-specific handoffs, and provenance as each beat arrives.
-4. The session ends explicitly after the final event and remains reviewable in the provenance/actions tab.
-5. A new start creates a new session; it does not truncate or rewrite immutable event, insight, recommendation, handoff, or audit history.
+## Step 5 — Handoffs and human judgment
 
-The current startup-only fixture composition is sufficient for Docker proof but is not this interactive lifecycle. Implementing it requires a dedicated synthetic simulation-session API and stream contract, scoped separately from the read/audit API.
+Right rail **Operator Handoff Controls**:
 
-## The operator is real; the world is synthetic
+1. **Dispatch handoff** — add an observation; Prepare.  
+2. **Maintenance handoff** — road-condition note; Prepare.  
+3. Show response fields: `executed: false`, `delivered: false`, status recorded.
 
-Only the incoming call/events, environmental data, and the reference scenario are
-simulated. There is no login — the demo is open, and the person using it is the
-operator who drives the session:
+Then **Operator Decisions**: approve or annotate a selected target. Every action
+is an immutable audit with `executed: false`.
 
-- **Synthetic:** the intake call, source events, environment, and reference COP.
-- **Real:** the operator presses **Analyze**, reviews findings, adds a note,
-  approves or prepares a dispatch/maintenance handoff, and records why.
-- **Safe:** the system records a proposed handoff; it does not autonomously
-  contact any real department.
+Line to use:
 
-Every operator action becomes an immutable audit record (`executed: false`) using
-the existing open public actor. No accounts or identity management are added.
+> Mosaic recorded a proposed handoff. It did not contact a real department.
 
-## Live models: opt-in, server-side, bounded
+If recurrence alert appears for a prior maintenance-style note in the same area,
+frame it as **deterministic recurrence awareness**, not LLM self-healing.
 
-The demo can run Luna/Terra/Sol against real OpenAI models, opt-in:
+---
 
-- **Routing:** Luna for lightweight event interpretation, Terra for the primary
-  Analyze result, Sol only for an explicit operator-triggered deep briefing —
-  never automatic.
-- **Default and fallback:** without an explicit live selection and a present
-  server secret, each agent uses its deterministic fixture client. Invalid,
-  refused, or unavailable live output is recorded as a ModelRun and mutates
-  nothing — exactly as the fixture path.
-- **Budget:** bounded by the provider-side spend limit on the supplied key. The
-  app adds no separate budget enforcement. A typical operator-triggered session
-  (one Terra analysis plus an optional Sol briefing) is inexpensive; token usage
-  may be shown for provenance, but it is not a control.
-- **Key handling:** the OpenAI key is a server-only runtime secret
-  (`OPENAI_API_KEY`). It never enters the browser, Git history, the Docker image,
-  or a committed compose file. The live path is opt-in; the fixture path is the
-  safe default.
+## Step 6 — Provenance tab
 
-Say plainly in the demo: the models inform the operator; they never take an
-operational action, and the deterministic projection is never mutated by a model.
+Switch to **Provenance & Action Trail**:
+
+- model runs (fixture seed vs any live runs this session);
+- audit records;
+- simulation beats / session identity.
+
+This is the “why Mosaic as a framework” moment: evidence, timing, provenance,
+durable review history (durable on local Docker volume; ephemeral on Cloud Run
+`/tmp` after recycle).
+
+---
+
+## Closing (15 seconds)
+
+> Mosaic turns an event into a traceable operating picture, lets people make and
+> record judgment calls, and preserves the evidence for the next team, the next
+> incident, and the next system instance — without pretending AI ran the
+> operation.
+
+---
+
+## Safety lines (always true)
+
+- Synthetic data only; no real PII or operational feeds in the repo.
+- No login; open public demo actor.
+- Models inform; projector alone mutates COP.
+- Handoffs and reviews: `executed: false`; never external delivery in this demo.
+- API key is server-only (Secret Manager on Cloud Run; `.env` locally, never Git).
+
+---
+
+## Persistence honesty
+
+| Environment | After restart |
+|-------------|----------------|
+| Local Compose volume | SQLite audits/model runs recovered |
+| Cloud Run `/tmp` | Fixture reseeded; operator history lost |
+
+Litestream / Cloud SQL = future durable parcel, not current live deploy.
+
+---
+
+## Live models (quick reference)
+
+| Variable | Role |
+|----------|------|
+| `OPENAI_API_KEY` | Server-only secret |
+| `MOSAIC_LUNA_PROVIDER` | `fixture` \| `live` |
+| `MOSAIC_TERRA_PROVIDER` | `fixture` \| `live` |
+| `MOSAIC_SOL_PROVIDER` | `fixture` \| `live` |
+
+Compose defaults providers to **live** and injects the key from `.env`.  
+Cloud Run: live providers + Secret Manager key (already wired for the public demo).
+
+Budget is the key’s provider-side limit; the app does not add a separate governor.
+
+---
+
+## UI map for the presenter
+
+1. Masthead — Help, connection, scope line  
+2. Simulation bar — Start / Reset / elapsed  
+3. Workspace — incident banner, Analyze, COP, advisories, recurrence  
+4. Right rail — evidence + handoffs + decisions  
+5. Provenance tab — full trail  
+6. Bottom drawer — developer health / version / operations (optional)  
+
+Hover **?** for short tips without leaving the surface.

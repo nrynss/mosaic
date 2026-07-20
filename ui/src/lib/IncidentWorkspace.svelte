@@ -1,6 +1,7 @@
 <script>
   import RecurrenceSurface from './RecurrenceSurface.svelte';
   import ModelModeIndicator from './ModelModeIndicator.svelte';
+  import HelpTip from './HelpTip.svelte';
 
   let {
     cop,
@@ -27,9 +28,9 @@
   }
 
   function claimLabel(claimClass) {
-    if (claimClass === 'derived_assessment') return 'Derived assessment';
-    if (claimClass === 'supervisor_recommendation') return 'Human-review recommendation';
-    return 'Reported fact';
+    if (claimClass === 'derived_assessment') return 'Suggested assessment';
+    if (claimClass === 'supervisor_recommendation') return 'Suggestion for you to review';
+    return 'Fact from the scenario';
   }
 
   function formatTimestamp(value) {
@@ -119,19 +120,19 @@
   <div class="active-incident-banner">
     <div class="incident-meta-grid">
       <div class="meta-item">
-        <span class="meta-label">DISPATCH ID</span>
-        <span class="meta-val"><code>{activeIncident?.incident_id || '—'}</code></span>
+        <span class="meta-label">Call / incident</span>
+        <span class="meta-val"><code>{activeIncident?.incident_id || 'Not on board yet'}</code></span>
       </div>
       <div class="meta-item">
-        <span class="meta-label">LOCATION</span>
+        <span class="meta-label">Where</span>
         <span class="meta-val">{activeIncident?.location_id || '—'}</span>
       </div>
       <div class="meta-item">
-        <span class="meta-label">CATEGORY</span>
+        <span class="meta-label">What kind of call</span>
         <span class="meta-val">{activeIncident?.category || '—'}</span>
       </div>
       <div class="meta-item">
-        <span class="meta-label">ELAPSED TIME</span>
+        <span class="meta-label">Demo clock</span>
         <span class="meta-val elapsed-val">{formatTime(elapsedSeconds)}</span>
       </div>
     </div>
@@ -139,10 +140,11 @@
       <ModelModeIndicator providers={advisories?.providers} />
       <button class="analyze-button" onclick={loadAdvisories} disabled={advisoriesState === 'loading'}>
         {#if advisoriesState === 'loading'}
-          Analyzing...
+          Refreshing advice…
         {:else}
-          Analyze Incident
+          Refresh advice
         {/if}
+        <HelpTip text="Loads the latest assessments and recommendations for this synthetic call. With “AI on”, Terra/Sol may call OpenAI; with “Demo pack”, you only see pre-built scenario advice." label="About Refresh advice" />
       </button>
     </div>
   </div>
@@ -154,35 +156,44 @@
     <section class="ledger-column facts-column" aria-labelledby="cop-title">
       <div class="column-header">
         <div>
-          <p class="eyebrow">Current common operating picture</p>
-          <h2 id="cop-title">State revision <span>{cop?.state_revision ?? cop?.cop?.state_revision ?? '—'}</span></h2>
+          <p class="eyebrow">
+            What we know right now
+            <HelpTip text="This is the trusted board for the synthetic incident. It is built only from scenario events — AI suggestions cannot rewrite it." label="About the incident board" />
+          </p>
+          <h2 id="cop-title">
+            Picture update
+            <span>#{cop?.state_revision ?? cop?.cop?.state_revision ?? '—'}</span>
+          </h2>
         </div>
         <div class="revision-meta">
-          <span>Projected</span>
+          <span>Last built</span>
           <strong>{formatTimestamp(cop?.projected_at || cop?.cop?.projected_at)}</strong>
         </div>
       </div>
 
-      <div class="claim-key" aria-label="Claim class key">
-        <span class="key-item reported"><i></i>Reported fact</span>
-        <span class="key-item assessed"><i></i>Derived assessment</span>
-        <span class="key-item recommended"><i></i>Human-review recommendation</span>
+      <div class="claim-key" aria-label="How to read the board">
+        <span class="key-item reported"><i></i>Fact from the scenario</span>
+        <span class="key-item assessed"><i></i>Suggested assessment</span>
+        <span class="key-item recommended"><i></i>Suggestion for you</span>
       </div>
 
       {#if copState === 'loading' || copState === 'idle'}
-        <div class="empty-state" aria-live="polite">Loading the deterministic COP…</div>
+        <div class="empty-state" aria-live="polite">Loading the incident board…</div>
       {:else if copState === 'error'}
         <div class="empty-state error-state" role="alert">
-          <strong>COP unavailable</strong>
+          <strong>Incident board unavailable</strong>
           <p>{copError}</p>
         </div>
       {:else if claimItems.length === 0}
         <div class="empty-state">
-          <strong>No source-derived facts are in this COP yet.</strong>
-          <p>When the simulator or a valid source appends canonical events, this ledger will show the resulting state and its evidence.</p>
+          <strong>No facts on the board yet.</strong>
+          <p>
+            Press <strong>Play scenario</strong> above to run the synthetic domestic-disturbance call.
+            The board fills as each step arrives (intake, weather, roads, unit, EMS).
+          </p>
         </div>
       {:else}
-        <ol class="claim-ledger" aria-label="Current source-derived state">
+        <ol class="claim-ledger" aria-label="Current incident facts">
           {#each claimItems as item (item.kind + item.id)}
             <li class="claim-item {item.class}">
               <span class="ledger-pin" aria-hidden="true"></span>
@@ -198,10 +209,10 @@
                   <code>{item.id}</code>
                   {#if item.evidence.id}
                     <button class="evidence-button" onclick={() => selectEvidence(item.evidence.kind, item.evidence.id, `${item.kind} · ${item.id}`)}>
-                      Resolve evidence
+                      Show source
                     </button>
                   {:else}
-                    <span class="missing-evidence">Evidence ID unavailable</span>
+                    <span class="missing-evidence">No source linked</span>
                   {/if}
                 </div>
               </article>
@@ -214,57 +225,57 @@
     <!-- Advisories section -->
     <section class="ledger-column advisories-column">
       {#if advisoriesState === 'loading'}
-        <div class="empty-state" aria-live="polite">Loading advisories…</div>
+        <div class="empty-state" aria-live="polite">Loading advice…</div>
       {:else if advisoriesState === 'unavailable'}
         <div class="advisory-composition" data-state="unavailable">
           <div class="advisory-column">
-            <p class="claim-class assessed">Derived assessment</p>
+            <p class="claim-class assessed">Suggested assessment</p>
             <div class="empty-advisory-state" data-state="unavailable">
-              <h3>Assessment unavailable</h3>
-              <p>Live Terra model transport is not composed, or structured fixture response was refused, invalid, or failed.</p>
+              <h3>Assessment not available</h3>
+              <p>Terra could not produce advice (AI error, missing key, or demo pack refused). The incident board is unchanged.</p>
             </div>
           </div>
           <div class="advisory-column">
-            <p class="claim-class recommended">Human-review recommendation</p>
+            <p class="claim-class recommended">Suggestion for you</p>
             <div class="empty-advisory-state" data-state="unavailable">
-              <h3>Recommendation unavailable</h3>
-              <p>Live Sol model transport is not composed, or structured fixture response was refused, invalid, or failed.</p>
+              <h3>Recommendation not available</h3>
+              <p>Sol could not produce a recommendation. Nothing was sent to any team.</p>
             </div>
           </div>
         </div>
       {:else if advisoriesState === 'empty'}
         <div class="advisory-composition" data-state="empty">
           <div class="advisory-column">
-            <p class="claim-class assessed">Derived assessment</p>
+            <p class="claim-class assessed">Suggested assessment</p>
             <div class="empty-advisory-state" data-state="empty">
-              <h3>No assessment composed</h3>
-              <p>No local fixture is composed, or the advisory history is empty.</p>
+              <h3>No assessment yet</h3>
+              <p>Play the scenario, then press <strong>Refresh advice</strong>.</p>
             </div>
           </div>
           <div class="advisory-column">
-            <p class="claim-class recommended">Human-review recommendation</p>
+            <p class="claim-class recommended">Suggestion for you</p>
             <div class="empty-advisory-state" data-state="empty">
-              <h3>No recommendation composed</h3>
-              <p>No local fixture is composed, or the advisory history is empty.</p>
+              <h3>No recommendation yet</h3>
+              <p>Recommendations appear after the scenario’s analysis pack loads.</p>
             </div>
           </div>
         </div>
       {:else if advisoriesState === 'ready' && advisories}
         <div class="advisories-header">
           <p class="advisory-mode-badge" data-mode={advisories.status || 'unavailable'}>
-            Composition Mode: {(advisories.status || 'unavailable').replaceAll('_', ' ').replaceAll('-', ' ')}
+            Advice source: {(advisories.status || 'unavailable').replaceAll('_', ' ').replaceAll('-', ' ')}
           </p>
         </div>
 
         <div class="advisory-composition" data-state="ready">
           <div class="advisory-column">
-            <p class="claim-class assessed">Derived assessment</p>
+            <p class="claim-class assessed">Suggested assessment</p>
             {#if hasCurrentInsight}
               <!-- Current assessment rendered below -->
             {:else}
               <div class="empty-advisory-state" data-state="superseded">
-                <h3>No current assessment is active.</h3>
-                <p>The final road-opening correction has superseded the previous assessment.</p>
+                <h3>No still-current assessment</h3>
+                <p>The road-opening correction made the earlier access warning out of date — that is part of the demo story.</p>
               </div>
             {/if}
 
@@ -275,7 +286,7 @@
                   <span class="status-badge" data-status={ins.status}>{ins.status.replaceAll('_', ' ')}</span>
                 </div>
                 <div class="card-body">
-                  <h4>Assertions</h4>
+                  <h4>What it says</h4>
                   <ul>
                     {#each arrayOf(ins.assertions) as assertion}
                       <li>{assertion}</li>
@@ -283,16 +294,16 @@
                   </ul>
                   {#if ins.confidence}
                     <div class="confidence-info">
-                      <strong>Confidence</strong>: {ins.confidence.basis} (Source: {ins.confidence.source_quality}, Reasoning: {ins.confidence.reasoning_support})
+                      <strong>Why trust it?</strong> {ins.confidence.basis} (sources: {ins.confidence.source_quality}, reasoning: {ins.confidence.reasoning_support})
                     </div>
                   {/if}
                 </div>
                 <div class="card-footer">
-                  <button class="evidence-button" onclick={() => selectEvidence('insight', ins.insight_id, `Insight · ${ins.insight_id}`)}>
-                    Resolve evidence
+                  <button class="evidence-button" onclick={() => selectEvidence('insight', ins.insight_id, `Assessment · ${ins.insight_id}`)}>
+                    Show source
                   </button>
                   <button class="prefill-button" onclick={() => { auditTargetID = ins.insight_id; auditTargetKind = 'insight'; }}>
-                    Review insight
+                    Use in my decision
                   </button>
                 </div>
               </div>
@@ -300,13 +311,13 @@
           </div>
 
           <div class="advisory-column">
-            <p class="claim-class recommended">Human-review recommendation</p>
+            <p class="claim-class recommended">Suggestion for you</p>
             {#if hasCurrentRecommendation}
               <!-- Current recommendation rendered below -->
             {:else}
               <div class="empty-advisory-state" data-state="not-current">
-                <h3>No current recommendation is active.</h3>
-                <p>No current operational recommendation is active at this revision.</p>
+                <h3>No still-current recommendation</h3>
+                <p>Earlier advice may be marked not current after the road reopened. You can still open it for history.</p>
               </div>
             {/if}
 
@@ -321,10 +332,10 @@
                 </div>
                 <div class="card-footer">
                   <button class="evidence-button" onclick={() => selectEvidence('recommendation', rec.recommendation_id, `Recommendation · ${rec.recommendation_id}`)}>
-                    Resolve evidence
+                    Show source
                   </button>
                   <button class="prefill-button" onclick={() => { auditTargetID = rec.recommendation_id; auditTargetKind = 'recommendation'; }}>
-                    Review recommendation
+                    Use in my decision
                   </button>
                 </div>
               </div>

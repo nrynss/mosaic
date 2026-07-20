@@ -1,75 +1,176 @@
 # Mosaic Bounded Demonstration App
 
-Mosaic is a greenfield interactive operator timeline application utilizing synthetic scenario beat replays, SSE streams, SQLite-backed immutable audit trails, and opt-in generative models.
+Mosaic is a greenfield interactive operator timeline: synthetic scenario beat
+replays, SSE streams, SQLite-backed immutable audit trails, and opt-in
+generative models (Luna / Terra / Sol).
+
+**Live demo:** [https://mosaic-demo-358513274447.us-central1.run.app](https://mosaic-demo-358513274447.us-central1.run.app)
+
+In the UI, open **Help** (header or left rail) for the online walkthrough. Hover
+any **?** mark for field tips.
 
 ---
 
-## 1. Local Development Setup
+## 1. Is the synthetic data enough?
+
+**Yes.** The checked-in `datasets/domestic-disturbance` fixture is sufficient
+for a complete hackathon operator demo. You do **not** need additional generated
+data for the walkthrough.
+
+| Asset | Coverage |
+|-------|----------|
+| **Scenario beats** | 10 timed events (911 call → road correction) |
+| **Entities** | Incident, unit, EMS resource, two roads, weather alert, location |
+| **Integrity paths** | Incomplete road repair, quarantined invalid input, late EMS delivery |
+| **COP** | Deterministic projection through **state revision 9** |
+| **Advisories** | Historical Terra insights (later superseded) + Sol recommendation |
+| **Audits** | Sample briefing request + supervisor acknowledgement |
+| **Simulation** | Same beats drive Start Simulation session replay |
+
+Narrative arc operators can tell:
+
+1. Domestic disturbance intake and welfare check  
+2. Weather + road access constraints (Main Street / Brook Lane)  
+3. EMS and officer updates  
+4. Access assessment → recommendation (historical, then superseded)  
+5. Road reopens → assessment no longer current  
+6. Operator records handoffs / decisions without external delivery  
+
+Full presenter script: [`docs/demo-script.md`](docs/demo-script.md).
+
+---
+
+## 2. Local Development Setup
 
 ### Bounded Env File Configuration
-Before running the application locally or deploying it, create a `.env` file at the repository root. This file is ignored by Git to prevent secret exposure.
+Create a `.env` at the repository root (gitignored):
 
-Add your OpenAI API key to the `.env` file to enable live model reasoning (Terra/Sol/Luna):
 ```bash
 # e:\work\mosaic\.env
 OPENAI_API_KEY=sk-proj-your-openai-api-key-here
+# Optional overrides (Compose defaults are live):
+# MOSAIC_LUNA_PROVIDER=live
+# MOSAIC_TERRA_PROVIDER=live
+# MOSAIC_SOL_PROVIDER=live
 ```
 
+Compose injects the key and defaults Luna/Terra/Sol to **live**. An empty key
+falls back to **fixture** at process start. A zero-balance key still shows
+`live`; failed API calls are recorded as model-run failures.
+
 ### Build and Run via Docker Compose
-To build and spin up the complete application (Go API server + Svelte dashboard + database seeding) locally:
+
 ```bash
 docker compose up --build
 ```
-The application will stand up at [http://localhost:8080](http://localhost:8080).
+
+Open [http://localhost:8080](http://localhost:8080).
+
+Compose mounts a named volume at `/var/lib/mosaic` so SQLite audits **survive**
+local container restarts. That durability does **not** apply to Cloud Run
+(`/tmp`).
+
+### In-app help
+
+* **Help** button in the masthead — topics for architecture, data, walkthrough,
+  agents, COP/evidence, safety, and persistence.
+* **?** hover tips on simulation controls, agent badges, Analyze, tabs, handoffs,
+  and evidence resolution.
+* Left rail: **Open help & walkthrough**.
 
 ---
 
-## 2. Port Binding & Environment Defaults
+## 3. Demo walkthrough (5–8 minutes)
 
-The Go process configures its port binding dynamically based on the following precedence rules:
-1. **`MOSAIC_LISTEN_ADDR`**: Explicitly set listen address (e.g. `127.0.0.1:8080`).
-2. **`PORT` (Cloud Run Fallback)**: If `MOSAIC_LISTEN_ADDR` is empty and the `PORT` environment variable is defined, the process automatically binds to `0.0.0.0:${PORT}` to satisfy Cloud Run's dynamic runtime health check requirements.
-3. **Default**: Fallback to `127.0.0.1:8080`.
+1. Open the app; confirm connection **Live** and agent badges (`live` or `fixture`).
+2. Click **Help** once if the audience is new — then close it.
+3. **Start Simulation** — 10 synthetic beats replay; watch COP facts update.
+4. **Resolve evidence** on a road or weather claim (right rail).
+5. **Analyze Incident** — refresh advisory history; discuss superseded access
+   assessment after the road opens.
+6. Prepare a **Dispatch** or **Maintenance** handoff — show `executed: false`,
+   `delivered: false`.
+7. Open **Provenance & Action Trail** for model runs and audits.
+8. **Reset** for a clean second pass if needed.
+
+Say clearly: models inform; the deterministic projector alone mutates the COP;
+no real department is contacted.
 
 ---
 
-## 3. Google Cloud Run Deployment (Durable Design)
+## 4. Port Binding & Environment Defaults
 
-Due to process-local SSE streams and SQLite single-writer exclusivity, the application is deployed to Google Cloud Run under strict single-instance constraints.
+1. **`MOSAIC_LISTEN_ADDR`** — explicit listen address (e.g. `:8080`).
+2. **`PORT`** — if listen addr is empty, bind `0.0.0.0:${PORT}` (Cloud Run).
+3. **Default** — `127.0.0.1:8080`.
+
+The production image does **not** bake in `MOSAIC_LISTEN_ADDR`. Compose sets
+`MOSAIC_LISTEN_ADDR=:8080` explicitly.
+
+---
+
+## 5. Cloud Run Deployment (ephemeral hackathon demo)
+
+**What it is:** live now, single-instance, fixture-safe, **ephemeral** `/tmp` DB.  
+**What it is not:** Litestream / Cloud SQL durable history.
 
 ### Prerequisites
-1. Enable the Artifact Registry and Cloud Run APIs:
-   ```bash
-   gcloud services enable artifactregistry.googleapis.com run.googleapis.com
-   ```
-2. Configure Docker authentication:
-   ```bash
-   gcloud auth configure-docker us-central1-docker.pkg.dev
-   ```
 
-### Push Container to Artifact Registry
-Use the Artifact Registry format (`LOCATION-docker.pkg.dev/PROJECT/REPOSITORY/IMAGE:TAG`) to tag and push the production build:
 ```bash
-# Tag the local image
-docker tag mosaic-demo:local us-central1-docker.pkg.dev/YOUR_PROJECT_ID/mosaic-repo/mosaic-demo:latest
-
-# Push the image
-docker push us-central1-docker.pkg.dev/YOUR_PROJECT_ID/mosaic-repo/mosaic-demo:latest
+gcloud services enable \
+  artifactregistry.googleapis.com \
+  run.googleapis.com \
+  secretmanager.googleapis.com
+gcloud auth configure-docker us-central1-docker.pkg.dev
 ```
 
-### Deploy to Cloud Run
-Deploy the service using the single-instance constraints and point the database path to a writable `/tmp` directory:
+### Secret Manager for the API key
+
+Do **not** pass the key via `--set-env-vars` (shell history risk).
+
 ```bash
+printf '%s' "$OPENAI_API_KEY" | gcloud secrets create openai-api-key \
+  --data-file=- \
+  --replication-policy=automatic
+# existing: gcloud secrets versions add openai-api-key --data-file=-
+
+PROJECT_NUMBER="$(gcloud projects describe "$(gcloud config get-value project)" --format='value(projectNumber)')"
+gcloud secrets add-iam-policy-binding openai-api-key \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+```
+
+### Push and deploy
+
+```bash
+docker tag mosaic-demo:local us-central1-docker.pkg.dev/YOUR_PROJECT_ID/mosaic-repo/mosaic-demo:latest
+docker push us-central1-docker.pkg.dev/YOUR_PROJECT_ID/mosaic-repo/mosaic-demo:latest
+
 gcloud run deploy mosaic-demo \
   --image=us-central1-docker.pkg.dev/YOUR_PROJECT_ID/mosaic-repo/mosaic-demo:latest \
   --max-instances=1 \
   --concurrency=8 \
-  --set-env-vars="MOSAIC_DB_PATH=/tmp/mosaic.db,OPENAI_API_KEY=sk-proj-..." \
+  --set-env-vars="MOSAIC_DB_PATH=/tmp/mosaic.db,MOSAIC_LUNA_PROVIDER=live,MOSAIC_TERRA_PROVIDER=live,MOSAIC_SOL_PROVIDER=live" \
+  --set-secrets="OPENAI_API_KEY=openai-api-key:latest" \
   --allow-unauthenticated \
   --region=us-central1
 ```
 
-The active, live demonstration service is hosted on Google Cloud Run:
-* **Live Service URL**: **[https://mosaic-demo-358513274447.us-central1.run.app](https://mosaic-demo-358513274447.us-central1.run.app)**
+Leave `MOSAIC_LISTEN_ADDR` unset so Cloud Run `PORT` is used.
 
-*Note: In the Cloud Run environment, the database is hosted at `/tmp/mosaic.db` (in-memory/tmpfs), which is ephemeral. For a permanent production persistence layer, configure a shared database (like Cloud SQL PostgreSQL) or set up Litestream WAL synchronization to a GCS bucket as outlined in the [Cloud Run Deployment Runbook](docs/runbook/cloud-run-deployment-analysis.md).*
+### Live service
+
+* **URL:** [https://mosaic-demo-358513274447.us-central1.run.app](https://mosaic-demo-358513274447.us-central1.run.app)
+* Durable SQLite (Litestream → GCS or Cloud SQL) remains a **future** parcel —
+  see [`docs/runbook/cloud-run-deployment-analysis.md`](docs/runbook/cloud-run-deployment-analysis.md).
+
+---
+
+## 6. Further reading
+
+| Doc | Purpose |
+|-----|---------|
+| [`docs/demo-script.md`](docs/demo-script.md) | Presenter script and talking points |
+| [`docs/live-models.md`](docs/live-models.md) | Fixture vs live agent configuration |
+| [`docs/runbook/local-docker-demo.md`](docs/runbook/local-docker-demo.md) | Local Docker verification |
+| [`HANDOFF.md`](HANDOFF.md) | Integration board and live deploy status |

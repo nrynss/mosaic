@@ -1,14 +1,27 @@
-# Google Cloud Run Deployment Analysis (Durable Design)
+# Google Cloud Run Deployment Analysis (Durable Design — Proposed)
 
-This document provides a detailed evaluation of deploying the Mosaic interactive operator demo on Google Cloud Run under GCP free tier limits, focusing on the selected **durable, single-writer backup-and-restore architecture**.
+This document evaluates deploying the Mosaic interactive operator demo on
+Google Cloud Run under GCP free-tier-ish limits, including a **proposed**
+durable single-writer backup-and-restore architecture.
+
+> **Status (hackathon live deploy):** The service that is live today follows
+> path **1 (Ephemeral)** only — `MOSAIC_DB_PATH=/tmp/mosaic.db`, no Litestream
+> binary/config in the shipped `Dockerfile`, no GCS replica, no Cloud SQL.
+> Path **2 (Durable)** remains a future parcel. Do not read this runbook as
+> “currently deployed.”
 
 ---
 
 ## 1. Architectural Options Evaluated
 
 We evaluated two paths for deploying this application to Cloud Run:
-1. **Ephemeral Cloud Run Demo**: Run without a persistence layer. The database resets to the seed fixture whenever the container scales to zero or restarts. No persistence promise.
-2. **Durable Cloud Run Demo (Selected Path)**: Shared database or a formally designed single-writer backup-and-restore mechanism. This is required to preserve immutable audit records and simulation history across restarts.
+1. **Ephemeral Cloud Run Demo (current live path)**: Run without a durable
+   persistence layer. The database lives under `/tmp` and resets to the seed
+   fixture whenever the container scales to zero or restarts. No persistence
+   promise for audit/model history.
+2. **Durable Cloud Run Demo (future parcel)**: Shared database or a formally
+   designed single-writer backup-and-restore mechanism. Required only when we
+   need immutable audit records and simulation history to survive restarts.
 
 ---
 
@@ -20,10 +33,13 @@ We explicitly **reject** placing an active SQLite database on a Google Cloud Sto
 * **Integrity Risk**: Attempting to run an active database like SQLite over GCS FUSE leads to corruption, transaction failures, and breaks Mosaic's core auditability and immutability guarantees.
 * **Permission Issues**: GCS FUSE mounts default to root ownership, which conflicts with our Docker nonroot security posture.
 
-### Selected Solution: Single-Writer Litestream Replication (Option 2B)
-To achieve durable SQLite persistence under the free tier, we will use **[Litestream](https://litestream.io/)** replicating to a standard GCS bucket:
+### Proposed durable path: Single-Writer Litestream Replication (Option 2B)
+To achieve durable SQLite persistence under free-tier-friendly constraints, a
+future parcel can use **[Litestream](https://litestream.io/)** replicating to a
+standard GCS bucket. **None of this is in the current image or live service.**
+
 * **Boot Phase**: On container startup, a custom entrypoint script calls `litestream restore` to fetch the latest database backup from the GCS bucket.
-* **Runtime Phase**: The application runs and writes to a local, high-speed SQLite database file.
+* **Runtime Phase**: The application runs and writes to a local, high-speed SQLite database file (still not GCS FUSE).
 * **Replication Phase**: A lightweight background Litestream worker replicates WAL (write-ahead log) changes to GCS every second.
 * **REST Communication**: Litestream uses standard GCS API calls rather than a filesystem mount, bypassing GCS FUSE file locking and nonroot ownership issues.
 
@@ -50,19 +66,41 @@ While the resources are designed to fit within GCP's permanent Always Free allow
 
 ---
 
-## 5. Implementation Path
+## 5. Implementation Path (future durable parcel — not shipped)
 
-### Step 1: Update Dockerfile for Litestream
-To package Litestream, modify the runtime image stage in the `Dockerfile` to install the litestream binary and copy a `litestream.yml` configuration:
+The current `Dockerfile` is **distroless**, runs a single `mosaicdemo`
+entrypoint, and contains **no** Litestream binary, `litestream.yml`, restore
+script, or shell. Ephemeral deploy docs live in `README.md`. The steps below
+are the proposed durable parcel only.
+
+### Step 1: Package Litestream (image + entrypoint changes)
+
+Distroless has no shell, so either:
+
+* switch the final stage to a minimal shell image (e.g. `debian:bookworm-slim`
+  nonroot), or
+* use a multi-binary pattern with a custom static entrypoint that can exec
+  Litestream then the app.
+
+Sketch (requires a shell base, not current distroless):
 
 ```dockerfile
-# Download and install Litestream
+# Download and install Litestream (amd64 example; pin version + checksum)
 ADD https://github.com/benbjohnson/litestream/releases/download/v0.3.13/litestream-v0.3.13-linux-amd64.tar.gz /tmp/litestream.tar.gz
 RUN tar -C /usr/local/bin -xzf /tmp/litestream.tar.gz
 
-# Configure litestream.yml
 COPY litestream.yml /etc/litestream.yml
+COPY scripts/litestream-entrypoint.sh /usr/local/bin/litestream-entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/litestream-entrypoint.sh"]
 ```
+
+Entrypoint responsibilities:
+
+1. `litestream restore -if-replica-exists -o $MOSAIC_DB_PATH <replica-url>`
+2. `exec litestream replicate -exec "/usr/local/bin/mosaicdemo …"`
+
+Also need: GCS bucket, service-account IAM for the object prefix, budget alert,
+and still `--max-instances=1` (single writer).
 
 ### Step 2: Push Image to Google Artifact Registry
 Avoid legacy `gcr.io` paths. Use the modern Google Artifact Registry format:
@@ -76,7 +114,14 @@ docker push us-central1-docker.pkg.dev/PROJECT_ID/mosaic-repo/mosaic-demo:latest
 ```
 
 ### Step 3: Deploy to Cloud Run
-Deploy the container with a maximum instance count of 1 and fallback port mapping:
+
+**Ephemeral (current live posture)** — see `README.md`. Key points: `/tmp`
+DB path, Secret Manager for `OPENAI_API_KEY`, no Litestream.
+
+**Durable (future)** — same single-instance flags, plus GCS credentials /
+workload identity for Litestream, a durable local path for the SQLite file
+during the instance lifetime, and budget caps. Do **not** put the live SQLite
+file on GCS FUSE.
 
 ```bash
 gcloud run deploy mosaic-demo \
@@ -84,7 +129,10 @@ gcloud run deploy mosaic-demo \
   --max-instances=1 \
   --concurrency=8 \
   --set-env-vars=MOSAIC_DB_PATH=/tmp/mosaic.db \
+  --set-secrets=OPENAI_API_KEY=openai-api-key:latest \
   --allow-unauthenticated \
   --region=us-central1
 ```
-The Go process will dynamically bind to `0.0.0.0:${PORT}` at runtime using the PORT fallback configured in `parseConfig`.
+
+Leave `MOSAIC_LISTEN_ADDR` unset so the process binds `0.0.0.0:${PORT}` via
+`parseConfig` (the image no longer bakes `MOSAIC_LISTEN_ADDR`).
