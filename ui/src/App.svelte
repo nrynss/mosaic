@@ -1,5 +1,8 @@
 <script>
   import { onMount } from 'svelte';
+  import SimulationControls from './lib/SimulationControls.svelte';
+  import IncidentWorkspace from './lib/IncidentWorkspace.svelte';
+  import StatusDrawer from './lib/StatusDrawer.svelte';
 
   const defaultAPIBase = import.meta.env.VITE_MOSAIC_API_BASE_URL || '/api/v1';
   const hiddenArtifactFields = new Set(['payload_bytes_b64', 'raw_sha256']);
@@ -30,24 +33,28 @@
   let actionState = $state('idle');
   let actionMessage = $state('');
 
+  // Simulation Session State
+  let session = $state(null);
+  let elapsedSeconds = $state(0);
+
   let streamController;
   let reconnectTimer;
   let reconnectAttempt = 0;
+
+  let simStreamController;
+  let simReconnectTimer;
+  let simReconnectAttempt = 0;
+
   let destroyed = false;
 
-  let copStateRevision = $derived(cop?.state_revision ?? cop?.cop?.state_revision ?? '—');
-  let claimItems = $derived(makeClaimItems(cop?.cop));
   let operationsPresentation = $derived(describeOperations(operations, operationsState));
-  let operationsCapabilities = $derived(arrayOf(operations?.capabilities));
-  let modelRunAgents = $derived(arrayOf(operations?.counts?.model_runs?.by_agent));
-  let hasCurrentInsight = $derived(arrayOf(advisories?.insights).some(ins => ins.status === 'current'));
-  let hasCurrentRecommendation = $derived(arrayOf(advisories?.recommendations).some(rec => rec.status === 'current'));
 
   onMount(() => {
     void refreshAll();
     return () => {
       destroyed = true;
       stopStream();
+      stopSimulationStream();
     };
   });
 
@@ -84,8 +91,15 @@
   }
 
   async function refreshAll() {
-    await Promise.all([loadPublicStatus(), loadCOP(), loadOperations(), loadAdvisories()]);
+    await Promise.all([
+      loadPublicStatus(),
+      loadCOP(),
+      loadOperations(),
+      loadAdvisories(),
+      loadSimulationStatus()
+    ]);
     connectStream();
+    connectSimulationStream();
   }
 
   async function loadPublicStatus() {
@@ -139,9 +153,9 @@
       if (advisories?.status === 'unavailable') {
         advisoriesState = 'unavailable';
       } else {
-        const hasInsights = arrayOf(advisories?.insights).length > 0;
-        const hasRecs = arrayOf(advisories?.recommendations).length > 0;
-        if (!hasInsights && !hasRecs) {
+        const insightsArr = Array.isArray(advisories?.insights) ? advisories.insights : [];
+        const recsArr = Array.isArray(advisories?.recommendations) ? advisories.recommendations : [];
+        if (insightsArr.length === 0 && recsArr.length === 0) {
           advisoriesState = 'empty';
         } else {
           advisoriesState = 'ready';
@@ -151,6 +165,18 @@
       advisories = null;
       advisoriesState = 'unavailable';
       advisoriesError = error.message;
+    }
+  }
+
+  async function loadSimulationStatus() {
+    try {
+      session = await readEnvelope('simulation/status');
+      if (session?.status !== 'running') {
+        elapsedSeconds = 0;
+      }
+    } catch (error) {
+      session = null;
+      elapsedSeconds = 0;
     }
   }
 
@@ -187,8 +213,6 @@
     } catch {
       throw new Error(`The evidence API returned ${response.status} without JSON.`);
     }
-    // A 404 from P08 is an explicit unresolved Evidence Resolution, not a
-    // transport failure. Preserve it so the interface can name that state.
     if (response.status === 404 && body?.data) {
       return body.data;
     }
@@ -197,6 +221,7 @@
     }
     return body.data;
   }
+
   function stopStream() {
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
@@ -226,7 +251,6 @@
           const body = await response.json();
           detail = body?.error?.message || detail;
         } catch {
-          // The status is the useful fallback when the stream did not produce JSON.
         }
         throw new Error(detail);
       }
@@ -318,11 +342,153 @@
       void loadAdvisories();
       return;
     }
-    // P08's named event means the read model changed. Re-reading the COP keeps
-    // the dashboard deterministic even when an event's payload is only a notice.
     void loadCOP();
     void loadOperations({ quiet: true });
     void loadAdvisories();
+  }
+
+  function stopSimulationStream() {
+    if (simReconnectTimer) {
+      clearTimeout(simReconnectTimer);
+      simReconnectTimer = undefined;
+    }
+    if (simStreamController) {
+      simStreamController.abort();
+      simStreamController = undefined;
+    }
+  }
+
+  async function connectSimulationStream() {
+    stopSimulationStream();
+    const controller = new AbortController();
+    simStreamController = controller;
+
+    try {
+      const response = await fetch(apiURL('simulation/stream'), {
+        headers: headersFor(),
+        signal: controller.signal
+      });
+      if (!response.ok || !response.body) {
+        let detail = `The simulation stream returned ${response.status}.`;
+        try {
+          const body = await response.json();
+          detail = body?.error?.message || detail;
+        } catch {
+        }
+        throw new Error(detail);
+      }
+      simReconnectAttempt = 0;
+      await consumeSimulationSSE(response.body, controller.signal);
+      if (!controller.signal.aborted) {
+        throw new Error('The simulation stream ended.');
+      }
+    } catch (error) {
+      if (controller.signal.aborted || destroyed || simStreamController !== controller) {
+        return;
+      }
+      scheduleSimReconnect();
+    }
+  }
+
+  function scheduleSimReconnect() {
+    if (destroyed) {
+      return;
+    }
+    const delay = Math.min(1000 * 2 ** simReconnectAttempt, 12000);
+    simReconnectAttempt += 1;
+    simReconnectTimer = setTimeout(() => {
+      simReconnectTimer = undefined;
+      void connectSimulationStream();
+    }, delay);
+  }
+
+  async function consumeSimulationSSE(body, signal) {
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let eventName = 'message';
+    let dataLines = [];
+
+    const dispatch = () => {
+      if (!dataLines.length) {
+        eventName = 'message';
+        return;
+      }
+      const data = dataLines.join('\n');
+      dataLines = [];
+      let payload;
+      try {
+        payload = JSON.parse(data);
+      } catch {
+        eventName = 'message';
+        return;
+      }
+      applySimulationStreamEvent(eventName, payload);
+      eventName = 'message';
+    };
+
+    try {
+      while (!signal.aborted) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (line === '') {
+            dispatch();
+          } else if (line.startsWith('event:')) {
+            eventName = line.slice(6).trim() || 'message';
+          } else if (line.startsWith('data:')) {
+            dataLines.push(line.slice(5).trimStart());
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  function applySimulationStreamEvent(name, payload) {
+    if (name === 'session.snapshot') {
+      session = payload;
+      if (payload?.status !== 'running') {
+        elapsedSeconds = 0;
+      }
+      return;
+    }
+    if (name === 'workspace_clear') {
+      cop = null;
+      advisories = null;
+      elapsedSeconds = 0;
+      return;
+    }
+    if (name === 'status_change') {
+      const newStatus = payload.payload?.status || payload.status;
+      if (session) {
+        session.status = newStatus;
+      } else {
+        session = { session_id: payload.session_id, status: newStatus, beats: [] };
+      }
+      if (newStatus !== 'running') {
+        elapsedSeconds = 0;
+      }
+      return;
+    }
+    if (name === 'beat') {
+      if (session) {
+        if (!session.beats) {
+          session.beats = [];
+        }
+        const b = payload.payload;
+        if (b && !session.beats.some(x => x.beat_id === b.beat_id)) {
+          session.beats.push(b);
+        }
+      }
+      return;
+    }
   }
 
   function submitBriefing(event) {
@@ -334,6 +500,7 @@
     event.preventDefault();
     void recordAuditAction();
   }
+
   async function requestBriefing() {
     actionState = 'loading';
     actionMessage = '';
@@ -373,103 +540,6 @@
     }
   }
 
-  function makeClaimItems(snapshot) {
-    if (!snapshot) {
-      return [];
-    }
-    const items = [];
-    for (const incident of arrayOf(snapshot.incidents)) {
-      items.push({
-        class: 'reported_fact',
-        kind: 'Incident',
-        id: incident.incident_id,
-        title: `${incident.category || 'Incident'} · ${incident.status || 'status unknown'}`,
-        detail: `Location ${incident.location_id || 'not recorded'}`,
-        timestamp: incident.opened_at,
-        evidence: { kind: 'state_fact', id: incident.incident_id }
-      });
-    }
-    for (const unit of arrayOf(snapshot.units)) {
-      items.push({
-        class: 'reported_fact',
-        kind: 'Unit',
-        id: unit.unit_id,
-        title: `${unit.availability || 'status unknown'} · ${unit.unit_id}`,
-        detail: unit.incident_id ? `Linked to ${unit.incident_id}` : 'No incident link recorded',
-        timestamp: unit.updated_at,
-        evidence: { kind: 'canonical_event', id: unit.source_event_id }
-      });
-    }
-    for (const resource of arrayOf(snapshot.resources)) {
-      items.push({
-        class: 'reported_fact',
-        kind: 'Resource',
-        id: resource.resource_id,
-        title: `${resource.availability || 'status unknown'} · ${resource.resource_id}`,
-        detail: resource.incident_id ? `Linked to ${resource.incident_id}` : 'No incident link recorded',
-        timestamp: resource.updated_at,
-        evidence: { kind: 'canonical_event', id: resource.source_event_id }
-      });
-    }
-    for (const road of arrayOf(snapshot.roads)) {
-      items.push({
-        class: 'reported_fact',
-        kind: 'Road',
-        id: road.road_id,
-        title: `${road.status || 'status unknown'} · ${road.name || road.road_id}`,
-        detail: 'Current effective road condition',
-        timestamp: road.updated_at,
-        evidence: { kind: 'canonical_event', id: road.effective_event_id }
-      });
-    }
-    for (const weather of arrayOf(snapshot.weather_alerts)) {
-      items.push({
-        class: 'reported_fact',
-        kind: 'Weather',
-        id: weather.weather_alert_id,
-        title: `${weather.status || 'status unknown'} · ${weather.severity || 'unspecified'} alert`,
-        detail: weather.summary || 'Weather alert status',
-        timestamp: weather.updated_at,
-        evidence: { kind: 'canonical_event', id: weather.source_event_id }
-      });
-    }
-    return items.sort((left, right) => String(right.timestamp || '').localeCompare(String(left.timestamp || '')));
-  }
-
-  function arrayOf(value) {
-    return Array.isArray(value) ? value : [];
-  }
-
-  function claimLabel(claimClass) {
-    if (claimClass === 'derived_assessment') return 'Derived assessment';
-    if (claimClass === 'supervisor_recommendation') return 'Human-review recommendation';
-    return 'Reported fact';
-  }
-
-  function formatTimestamp(value) {
-    if (!value) return 'Time not recorded';
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return value;
-    return new Intl.DateTimeFormat(undefined, {
-      day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short'
-    }).format(date);
-  }
-
-  function formatNumber(value) {
-    const number = Number(value);
-    return Number.isFinite(number) ? new Intl.NumberFormat().format(number) : '—';
-  }
-
-  function formatUptime(seconds) {
-    const total = Math.max(0, Math.floor(Number(seconds) || 0));
-    const hours = Math.floor(total / 3600);
-    const minutes = Math.floor((total % 3600) / 60);
-    const remainder = total % 60;
-    if (hours > 0) return `${hours}h ${minutes}m`;
-    if (minutes > 0) return `${minutes}m ${remainder}s`;
-    return `${remainder}s`;
-  }
-
   function describeOperations(snapshot, state) {
     if (state === 'loading' || state === 'idle') {
       return { state: 'loading', label: 'Collecting', detail: 'Reading bounded operational records.' };
@@ -491,16 +561,12 @@
     return { state: 'ready', label: 'Observed', detail: 'Bounded records are available for this observation.' };
   }
 
-  function outcomeSummary(statuses) {
-    const values = statuses || {};
-    return [
-      ['valid', values.valid],
-      ['invalid', values.invalid],
-      ['refused', values.refused],
-      ['failed', values.failed],
-      ['timed out', values.timed_out]
-    ].map(([label, count]) => `${label} ${formatNumber(count || 0)}`).join(' · ');
+  function formatNumber(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? new Intl.NumberFormat().format(number) : '—';
   }
+
+  // filter payload fields for public audit
   function safeArtifact(value) {
     if (Array.isArray(value)) return value.map(safeArtifact);
     if (value && typeof value === 'object') {
@@ -544,316 +610,37 @@
       <p class="rail-copy">This synthetic demonstration is open to anyone. Review calls append an immutable record; they never dispatch an external action.</p>
     </section>
 
-    <section class="rail-section connection-form">
-      <p class="eyebrow">Connection</p>
-      <label for="api-base">API base URL</label>
-      <input id="api-base" bind:value={apiBaseInput} spellcheck="false" autocomplete="off" />
-      <button class="quiet-button" onclick={applyAPIBase}>Apply endpoint</button>
-      <dl class="service-status">
-        <div><dt>Health</dt><dd data-state={health.state}>{health.detail}</dd></div>
-        <div><dt>Version</dt><dd data-state={version.state}>{version.detail}</dd></div>
-        <div><dt>Stream</dt><dd data-state={streamState}>{streamDetail}</dd></div>
-        <div><dt>Operations</dt><dd data-state={operationsPresentation.state}>{operationsPresentation.label}</dd></div>
-      </dl>
-    </section>
-
     <section class="rail-section boundary-note">
       <p class="eyebrow">Boundary</p>
       <p>Claims describe the current deterministic record. Mosaic does not dispatch, contact, or alter an operational system.</p>
     </section>
   </aside>
 
-  <section class="ledger" id="cop" aria-labelledby="cop-title">
-    <div class="ledger-heading">
-      <div>
-        <p class="eyebrow">Current common operating picture</p>
-        <h2 id="cop-title">State revision <span>{copStateRevision}</span></h2>
-      </div>
-      <div class="revision-meta">
-        <span>Projected</span>
-        <strong>{formatTimestamp(cop?.projected_at || cop?.cop?.projected_at)}</strong>
-      </div>
-    </div>
+  <div class="center-workspace">
+    <!-- Simulation Controls at the top of the workspace -->
+    <SimulationControls
+      bind:session
+      bind:elapsedSeconds
+      {readEnvelope}
+      bind:actionState
+      bind:actionMessage
+    />
 
-    <div class="claim-key" aria-label="Claim class key">
-      <span class="key-item reported"><i></i>Reported fact</span>
-      <span class="key-item assessed"><i></i>Derived assessment</span>
-      <span class="key-item recommended"><i></i>Human-review recommendation</span>
-    </div>
-
-    {#if copState === 'loading' || copState === 'idle'}
-      <div class="empty-state" aria-live="polite">Loading the deterministic COP…</div>
-    {:else if copState === 'error'}
-      <div class="empty-state error-state" role="alert">
-        <strong>COP unavailable</strong>
-        <p>{copError}</p>
-        <button class="quiet-button" onclick={refreshAll}>Try again</button>
-      </div>
-    {:else if claimItems.length === 0}
-      <div class="empty-state">
-        <strong>No source-derived facts are in this COP yet.</strong>
-        <p>When the simulator or a valid source appends canonical events, this ledger will show the resulting state and its evidence.</p>
-      </div>
-    {:else}
-      <ol class="claim-ledger" aria-label="Current source-derived state">
-        {#each claimItems as item (item.kind + item.id)}
-          <li class="claim-item {item.class}">
-            <span class="ledger-pin" aria-hidden="true"></span>
-            <div class="claim-time">{formatTimestamp(item.timestamp)}</div>
-            <article>
-              <div class="claim-topline">
-                <p class="claim-class">{claimLabel(item.class)}</p>
-                <span class="entity-kind">{item.kind}</span>
-              </div>
-              <h3>{item.title}</h3>
-              <p>{item.detail}</p>
-              <div class="claim-footer">
-                <code>{item.id}</code>
-                {#if item.evidence.id}
-                  <button class="evidence-button" onclick={() => selectEvidence(item.evidence.kind, item.evidence.id, `${item.kind} · ${item.id}`)}>
-                    Resolve evidence
-                  </button>
-                {:else}
-                  <span class="missing-evidence">Evidence ID unavailable</span>
-                {/if}
-              </div>
-            </article>
-          </li>
-        {/each}
-      </ol>
-    {/if}
-
-    {#if advisoriesState === 'loading'}
-      <div class="empty-state" aria-live="polite">Loading advisories…</div>
-    {:else if advisoriesState === 'unavailable'}
-      <section class="advisory-composition" data-state="unavailable" aria-label="Advisory composition is unavailable">
-        <div class="advisory-column">
-          <p class="claim-class assessed">Derived assessment</p>
-          <div class="empty-advisory-state" data-state="unavailable">
-            <h3>Assessment unavailable</h3>
-            <p>Live Terra model transport is not composed, or structured fixture response was refused, invalid, or failed.</p>
-          </div>
-        </div>
-        <div class="advisory-column">
-          <p class="claim-class recommended">Human-review recommendation</p>
-          <div class="empty-advisory-state" data-state="unavailable">
-            <h3>Recommendation unavailable</h3>
-            <p>Live Sol model transport is not composed, or structured fixture response was refused, invalid, or failed.</p>
-          </div>
-        </div>
-      </section>
-    {:else if advisoriesState === 'empty'}
-      <section class="advisory-composition" data-state="empty" aria-label="No advisories are composed">
-        <div class="advisory-column">
-          <p class="claim-class assessed">Derived assessment</p>
-          <div class="empty-advisory-state" data-state="empty">
-            <h3>No assessment composed</h3>
-            <p>No local fixture is composed, or the advisory history is empty.</p>
-          </div>
-        </div>
-        <div class="advisory-column">
-          <p class="claim-class recommended">Human-review recommendation</p>
-          <div class="empty-advisory-state" data-state="empty">
-            <h3>No recommendation composed</h3>
-            <p>No local fixture is composed, or the advisory history is empty.</p>
-          </div>
-        </div>
-      </section>
-    {:else if advisoriesState === 'ready' && advisories}
-      <div class="advisories-header">
-        <p class="advisory-mode-badge" data-mode={advisories.status || 'unavailable'}>
-          Composition Mode: {(advisories.status || 'unavailable').replaceAll('_', ' ').replaceAll('-', ' ')}
-        </p>
-      </div>
-
-      <section class="advisory-composition" data-state="ready" aria-label="Advisory assessment and recommendations">
-        <div class="advisory-column">
-          <p class="claim-class assessed">Derived assessment</p>
-          {#if hasCurrentInsight}
-            <!-- Current assessment rendered below -->
-          {:else}
-            <div class="empty-advisory-state" data-state="superseded">
-              <h3>No current assessment is active.</h3>
-              <p>The final road-opening correction has superseded the previous assessment.</p>
-            </div>
-          {/if}
-
-          {#each arrayOf(advisories.insights) as ins (ins.insight_id)}
-            <div class="advisory-card assessed-card" data-status={ins.status}>
-              <div class="card-header">
-                <strong>{ins.insight_id}</strong>
-                <span class="status-badge" data-status={ins.status}>{ins.status.replaceAll('_', ' ')}</span>
-              </div>
-              <div class="card-body">
-                <h4>Assertions</h4>
-                <ul>
-                  {#each arrayOf(ins.assertions) as assertion}
-                    <li>{assertion}</li>
-                  {/each}
-                </ul>
-                {#if ins.confidence}
-                  <div class="confidence-info">
-                    <strong>Confidence</strong>: {ins.confidence.basis} (Source: {ins.confidence.source_quality}, Reasoning: {ins.confidence.reasoning_support})
-                  </div>
-                {/if}
-              </div>
-              <div class="card-footer">
-                <button class="evidence-button" onclick={() => selectEvidence('insight', ins.insight_id, `Insight · ${ins.insight_id}`)}>
-                  Resolve evidence
-                </button>
-                <button class="prefill-button" onclick={() => { auditTargetID = ins.insight_id; auditTargetKind = 'insight'; }}>
-                  Review insight
-                </button>
-              </div>
-            </div>
-          {/each}
-        </div>
-
-        <div class="advisory-column">
-          <p class="claim-class recommended">Human-review recommendation</p>
-          {#if hasCurrentRecommendation}
-            <!-- Current recommendation rendered below -->
-          {:else}
-            <div class="empty-advisory-state" data-state="not-current">
-              <h3>No current recommendation is active.</h3>
-              <p>No current operational recommendation is active at this revision.</p>
-            </div>
-          {/if}
-
-          {#each arrayOf(advisories.recommendations) as rec (rec.recommendation_id)}
-            <div class="advisory-card recommended-card" data-status={rec.status}>
-              <div class="card-header">
-                <strong>{rec.recommendation_id}</strong>
-                <span class="status-badge" data-status={rec.status}>{rec.status.replaceAll('_', ' ')}</span>
-              </div>
-              <div class="card-body">
-                <p>{rec.text}</p>
-              </div>
-              <div class="card-footer">
-                <button class="evidence-button" onclick={() => selectEvidence('recommendation', rec.recommendation_id, `Recommendation · ${rec.recommendation_id}`)}>
-                  Resolve evidence
-                </button>
-                <button class="prefill-button" onclick={() => { auditTargetID = rec.recommendation_id; auditTargetKind = 'recommendation'; }}>
-                  Review recommendation
-                </button>
-              </div>
-            </div>
-          {/each}
-        </div>
-      </section>
-    {/if}
-    <section class="operations-receipt" aria-labelledby="operations-title" data-state={operationsPresentation.state}>
-      <div class="operations-heading">
-        <div>
-          <p class="eyebrow">Agent operations</p>
-          <h2 id="operations-title">Operations receipt</h2>
-          <p>{operationsPresentation.detail}</p>
-        </div>
-        <div class="recovery-stamp" data-state={operationsPresentation.state} aria-label={`Operations state: ${operationsPresentation.label}`}>
-          <span>DETERMINISTIC</span>
-          <strong>{operationsPresentation.label}</strong>
-        </div>
-      </div>
-
-      {#if operationsState === 'loading' || operationsState === 'idle'}
-        <div class="operations-empty" aria-live="polite">Reading the bounded operations record…</div>
-      {:else if operationsState === 'unavailable'}
-        <div class="operations-empty operations-problem" role="alert">
-          <strong>Operations view unavailable</strong>
-          <p>{operationsError || operationsPresentation.detail}</p>
-          <button class="quiet-button" onclick={() => loadOperations()}>Try again</button>
-        </div>
-      {:else}
-        <div class="receipt-body">
-          <dl class="receipt-facts">
-            <div><dt>Observed</dt><dd>{formatTimestamp(operations?.observed_at)}</dd></div>
-            <div><dt>Source receipt</dt><dd>{formatTimestamp(operations?.latest_source_received_at)}</dd></div>
-            <div><dt>COP recovery</dt><dd>{operations?.recovery?.status || 'Not recorded'} · revision {formatNumber(operations?.recovery?.state_revision)}</dd></div>
-            <div><dt>Projected</dt><dd>{formatTimestamp(operations?.recovery?.projected_at)}</dd></div>
-            <div><dt>Service</dt><dd>{operations?.service?.version || 'Unknown'} · up {formatUptime(operations?.service?.uptime_seconds)}</dd></div>
-            <div><dt>Local stream</dt><dd>{formatNumber(operations?.stream?.local_subscriber_count)} subscriber{Number(operations?.stream?.local_subscriber_count) === 1 ? '' : 's'} · {operations?.stream?.last_published?.name || 'no event published'}</dd></div>
-            {#if operations?.stream?.last_published?.published_at}
-              <div><dt>Last stream event</dt><dd>{formatTimestamp(operations.stream.last_published.published_at)}</dd></div>
-            {/if}
-          </dl>
-
-          <div class="operations-ledgers">
-            <section class="durable-tally" aria-labelledby="durable-tally-title">
-              <div class="subsection-heading">
-                <p class="eyebrow">Immutable record</p>
-                <h3 id="durable-tally-title">Durable ledger</h3>
-              </div>
-              <dl>
-                <div><dt>Raw</dt><dd>{formatNumber(operations?.counts?.raw_events)}</dd></div>
-                <div><dt>Canonical</dt><dd>{formatNumber(operations?.counts?.canonical_events)}</dd></div>
-                <div><dt>Projected</dt><dd>{formatNumber(operations?.counts?.projected_events)}</dd></div>
-                <div><dt>Unprojected</dt><dd>{formatNumber(operations?.counts?.unprojected_events)}</dd></div>
-                <div><dt>Checkpoints</dt><dd>{formatNumber(operations?.counts?.checkpoints)}</dd></div>
-                <div><dt>Insights</dt><dd>{formatNumber(operations?.counts?.insights)}</dd></div>
-                <div><dt>Recommendations</dt><dd>{formatNumber(operations?.counts?.recommendations)}</dd></div>
-                <div><dt>Audit records</dt><dd>{formatNumber(operations?.counts?.audit_records)}</dd></div>
-              </dl>
-            </section>
-
-            <section class="lifecycle-tally" aria-labelledby="lifecycle-tally-title">
-              <div class="subsection-heading">
-                <p class="eyebrow">Fixture normalizer</p>
-                <h3 id="lifecycle-tally-title">Luna lifecycle</h3>
-              </div>
-              <dl>
-                <div><dt>Accepted</dt><dd>{formatNumber(operations?.counts?.luna_lifecycle?.accepted)}</dd></div>
-                <div><dt>Repaired</dt><dd>{formatNumber(operations?.counts?.luna_lifecycle?.repaired)}</dd></div>
-                <div><dt>Quarantined</dt><dd>{formatNumber(operations?.counts?.luna_lifecycle?.quarantined)}</dd></div>
-                <div><dt>Rejected</dt><dd>{formatNumber(operations?.counts?.luna_lifecycle?.rejected)}</dd></div>
-              </dl>
-              <p class="lifecycle-note">Lifecycle outcomes are recorded; only accepted and repaired records can enter deterministic projection.</p>
-            </section>
-          </div>
-
-          <section class="model-record" aria-labelledby="model-record-title">
-            <div class="subsection-heading">
-              <p class="eyebrow">Structured-model record</p>
-              <h3 id="model-record-title">Model runs <span>{formatNumber(operations?.counts?.model_runs?.total)}</span></h3>
-            </div>
-            <p>These are persisted invocation outcomes, not evidence of live Terra or Sol transport.</p>
-            <dl class="model-run-list">
-              {#each modelRunAgents as agent (agent.agent)}
-                <div>
-                  <dt>{agent.agent}</dt>
-                  <dd><strong>{formatNumber(agent.total)} run{Number(agent.total) === 1 ? '' : 's'}</strong>{outcomeSummary(agent.validation_statuses)}</dd>
-                </div>
-              {/each}
-            </dl>
-          </section>
-
-          <section class="capability-docket" aria-labelledby="capability-docket-title">
-            <div class="capability-heading">
-              <div>
-                <p class="eyebrow">Capability docket</p>
-                <h3 id="capability-docket-title">What is composed — and what is not</h3>
-              </div>
-              <p>Mode and status are statements of this demo’s current evidence boundary.</p>
-            </div>
-            <ul class="capability-cards">
-              {#each operationsCapabilities as capability (capability.capability)}
-                <li data-mode={capability.mode} data-status={capability.status}>
-                  <div class="capability-card-topline">
-                    <code>{capability.capability.replaceAll('_', ' ')}</code>
-                    <span>{capability.mode.replaceAll('_', ' ')}</span>
-                  </div>
-                  <h4>{capability.feature}</h4>
-                  <p>{capability.detail}</p>
-                  <strong>{capability.status}</strong>
-                </li>
-              {/each}
-            </ul>
-          </section>
-
-          <p class="operations-limits">No live Terra/Sol transport. No durable reconciliation worker. No external operational action.</p>
-        </div>
-      {/if}
-    </section>
-  </section>
+    <!-- Incident Workspace in the middle -->
+    <IncidentWorkspace
+      {cop}
+      {copState}
+      {copError}
+      {advisories}
+      {advisoriesState}
+      {advisoriesError}
+      {elapsedSeconds}
+      {loadAdvisories}
+      {selectEvidence}
+      bind:auditTargetID
+      bind:auditTargetKind
+    />
+  </div>
 
   <aside class="evidence-rail" aria-label="Evidence and review">
     <section class="evidence-panel">
@@ -909,3 +696,18 @@
     </section>
   </aside>
 </main>
+
+<!-- Collapsible Developer Status Drawer at the bottom -->
+<StatusDrawer
+  {health}
+  {version}
+  {streamState}
+  {streamDetail}
+  {operations}
+  {operationsState}
+  {operationsError}
+  {operationsPresentation}
+  bind:apiBaseInput
+  {applyAPIBase}
+  loadOperations={() => loadOperations()}
+/>
