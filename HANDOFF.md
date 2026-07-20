@@ -36,7 +36,8 @@ The detailed parcel breakdowns and logs for completed increments are preserved i
 The live service is **up now** under single-instance constraints. It is an
 **ephemeral** demo deploy, not a durable production posture.
 
-* **Live Service URL**: **[https://mosaic-demo-358513274447.us-central1.run.app](https://mosaic-demo-358513274447.us-central1.run.app)**
+* **Public URL**: **[https://mosaic.nryn.dev](https://mosaic.nryn.dev)** (Cloudflare → Cloud Run)
+* **Cloud Run URL**: [https://mosaic-demo-358513274447.us-central1.run.app](https://mosaic-demo-358513274447.us-central1.run.app)
 * **Live now**: single Cloud Run service, `--max-instances=1`, fixture-safe.
 * **Ephemeral storage**: deployed with `MOSAIC_DB_PATH=/tmp/mosaic.db`. Audit
   records, model runs, and simulation history are **lost after a Cloud Run
@@ -50,6 +51,39 @@ The live service is **up now** under single-instance constraints. It is an
 
 ---
 
+## Planned: Playwright demo capture (not built yet)
+
+After the UI freezes for the submission recording, we plan a small standalone
+tool (e.g. `tools/demo-recorder/`) using **Playwright** to produce a repeatable
+demo video of the interactive walkthrough.
+
+**Intent**
+
+* Drive the **same steps** as [`docs/demo-script.md`](docs/demo-script.md)
+  (connection → Play scenario → COP → advice → handoffs → Decision history).
+* Sync advancement to **simulation SSE beats** (`/api/v1/simulation/stream`)
+  and UI-ready selectors, plus explicit **hold times** for voiceover (scenario
+  `delay_ms` is ~100ms — beat-only pacing is too fast for a narrated take).
+* Record at **1920×1080** with Playwright’s built-in video (`.webm`); post with
+  **system ffmpeg** → H.264 `.mp4` (trim / optional mux of narration).
+* Optional later: in-page CSS zoom, cursor overlay, step captions — not required
+  for a first pass.
+
+**When to build**
+
+* **Not while the UI is still thrashing.** Prefer after a short freeze window
+  before the final recording.
+* First takes against **local Docker** (cheap retries); optional clean take
+  against **https://mosaic.nryn.dev** (or the Cloud Run URL).
+
+**Out of scope for v1**
+
+* Full cinematic Ken Burns pipeline as a day-one requirement.
+* Replacing the presenter script — the script stays the source of truth; the
+  recorder executes it.
+
+---
+
 ## Next Steps
 
 > [!NOTE]
@@ -60,8 +94,8 @@ The live service is **up now** under single-instance constraints. It is an
 
 The actual project next steps are:
 * **End-to-End Run with Paid API Key**: Execute a full live model test run (with active credits) to verify generative Terra, Sol, and Luna responses and outputs.
-* **UI Refinement & Polish**: Perform final visual and layout adjustments on the dashboard.
-* **Demo Preparation**: Prepare the interactive operator demo walkthrough and recording (script + in-app Help panel are in place).
-* **Domain Update**: Configure custom domain mapping to route **mosaic.nryn.dev** through Cloudflare to the Cloud Run service.
+* **UI Refinement & Polish**: Final visual pass; freeze labels/selectors before any automated capture.
+* **Demo Preparation**: Walkthrough + end VO are in [`docs/demo-script.md`](docs/demo-script.md); record when UI is stable (manual or planned Playwright tool above).
+* **Playwright demo-recorder** (planned): Beat/SSE-aware automated capture — see section above; build only after UI freeze.
 * **Project Details Page**: Author and publish a dedicated project description page on the **nryn.dev** site detailing the architecture, constraints, and results.
 * **(Future) Durable Cloud Run parcel**: Litestream restore+replicate to GCS, or Cloud SQL, with Secret Manager for the API key and budget alerts — see the runbook.

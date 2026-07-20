@@ -99,7 +99,7 @@ Do not demo a second live domain. Name the **seam**, then continue.
 
 | | |
 |--|--|
-| **Live URL** | https://mosaic-demo-358513274447.us-central1.run.app |
+| **Live URL** | https://mosaic.nryn.dev ([Cloud Run](https://mosaic-demo-358513274447.us-central1.run.app)) |
 | **Local** | `docker compose up --build` → http://localhost:8080 |
 | **In-app** | **How this works** + **?** tips (operator-facing; this doc is the *pitch*) |
 
@@ -256,16 +256,40 @@ Open **Decision history**: your notes, analysis runs, scenario steps.
 
 ---
 
-## Closing (20–30 seconds)
+## Closing / end-of-video voiceover
 
-> Mosaic turns events into a traceable operating picture, lets people make and
-> **record** judgment, and keeps AI on the advisory side of a hard line: models
-> propose, the projector disposes, audits never claim external execution.
+Hold 1–2s on **Decision history** or **Connected**, then VO.
+
+### Full close + CTA (preferred for video, ≈25–35s)
+
+> Mosaic keeps AI on the right side of the line. Models propose. The
+> deterministic projector owns the operating picture. Every suggestion and
+> human decision is auditable — and nothing claims to have executed outside
+> the system.
 >
-> This UI is one reference client. Same contracts — cybersecurity ops floor,
-> government disaster EOC, or your own ledger — by plugging a different
-> deterministic core and, at handoff seams like maintenance, a different
-> downstream system. That’s the framework.
+> This UI is one reference client. Same contracts for a cybersecurity ops
+> floor, a government disaster EOC, or your own ledger — by plugging a
+> different deterministic core and, at handoff seams like maintenance, a
+> different downstream system. That’s the framework.
+>
+> The framework is live right now. Click the link in the project description,
+> hit **Play scenario**, and drive the simulation yourself.
+
+### Tighter close + CTA (≈15–20s)
+
+> Models propose. The projector disposes. Provenance never lies.
+>
+> The framework is live right now. Click the link in the project description,
+> hit **Play scenario**, and drive the simulation yourself.
+
+### CTA only (if architecture pitch already ran)
+
+> The framework is live right now. Click the link in the project description,
+> hit **Play scenario**, and drive the simulation yourself.
+
+**Delivery notes:** Match the UI label **Play scenario**. Optional half-second
+hold after “live right now,” then the click instruction. Lower-third can show
+**mosaic.nryn.dev** (or the project-description link).
 
 ---
 
