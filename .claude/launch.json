@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mosaic-demo",
+      "runtimeExecutable": "go",
+      "runtimeArgs": ["run", "./cmd/mosaicdemo", "--listen-addr=127.0.0.1:8090", "--db=C:/Users/rockn/AppData/Local/Temp/claude/E--work-mosaic/02b66908-7088-408e-992c-9334a4fcedbc/scratchpad/mosaic-preview.db"],
+      "port": 8090,
+      "autoPort": false
+    }
+  ]
+}

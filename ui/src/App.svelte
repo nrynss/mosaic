@@ -568,6 +568,66 @@
     if (!selectedEvidence?.artifact) return '';
     return JSON.stringify(safeArtifact(selectedEvidence.artifact), null, 2);
   }
+
+  // Flatten the artifact's primitive fields into label/value rows so the
+  // right rail reads as a summary instead of a raw JSON dump. Nested
+  // structures stay available under "View raw record".
+  function evidenceSummary() {
+    const artifact = selectedEvidence?.artifact;
+    if (!artifact || typeof artifact !== 'object' || Array.isArray(artifact)) return [];
+    const rows = [];
+    for (const [key, value] of Object.entries(safeArtifact(artifact))) {
+      if (value === null || value === undefined) continue;
+      if (typeof value === 'object') continue;
+      rows.push({ key, label: key.replaceAll('_', ' '), value: String(value) });
+      if (rows.length >= 12) break;
+    }
+    return rows;
+  }
+
+  function formatClock(total) {
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const seconds = total % 60;
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+  }
+
+  // Left-rail status board + top-bar chips, derived from the projection.
+  let copSnapshot = $derived(cop?.cop || cop);
+  let railIncidents = $derived(listOf(copSnapshot?.incidents));
+  let railUnits = $derived(listOf(copSnapshot?.units));
+  let railRoads = $derived(listOf(copSnapshot?.roads));
+  let railResources = $derived(listOf(copSnapshot?.resources));
+  let railWeather = $derived(listOf(copSnapshot?.weather_alerts));
+  let activeIncidentID = $derived(railIncidents[0]?.incident_id || '');
+
+  function listOf(value) {
+    return Array.isArray(value) ? value : [];
+  }
+
+  function availabilityTone(availability) {
+    const value = String(availability || '').toLowerCase();
+    if (value.includes('available')) return 'ok';
+    if (value.includes('assigned') || value.includes('scene') || value.includes('route') || value.includes('dispatch')) return 'info';
+    if (value.includes('unavailable') || value.includes('out')) return 'alert';
+    return 'warn';
+  }
+
+  function roadTone(status) {
+    const value = String(status || '').toLowerCase();
+    if (value.includes('open')) return 'ok';
+    if (value.includes('closed') || value.includes('blocked')) return 'alert';
+    return 'warn';
+  }
+
+  function weatherTone(alert) {
+    const status = String(alert?.status || '').toLowerCase();
+    if (status.includes('cleared') || status.includes('expired')) return 'ok';
+    const severity = String(alert?.severity || '').toLowerCase();
+    if (severity.includes('severe') || severity.includes('extreme') || severity.includes('high')) return 'alert';
+    return 'warn';
+  }
 </script>
 
 <svelte:head>
@@ -580,7 +640,13 @@
     <span>Mosaic</span>
     <small>operator demo</small>
   </a>
-  <p class="scope">Synthetic 911 scenario · practice only · nothing is sent outside</p>
+  <div class="topbar-meta">
+    <span class="meta-chip synthetic">Synthetic data · training</span>
+    <span class="meta-chip">Inc <strong>{activeIncidentID || '—'}</strong></span>
+    {#if session?.status === 'running'}
+      <span class="meta-chip clock">T+ <strong>{formatClock(elapsedSeconds)}</strong></span>
+    {/if}
+  </div>
   <div class="masthead-actions">
     <button
       type="button"
@@ -607,28 +673,89 @@
 <HelpPanel open={helpOpen} onClose={() => (helpOpen = false)} />
 
 <main class="folio">
-  <aside class="context-rail" aria-label="Demo context">
+  <aside class="context-rail" aria-label="Status board">
     <section class="rail-section">
-      <p class="eyebrow">You are the operator</p>
-      <h1>One synthetic call.<br />Your judgment stays human.</h1>
-      <p class="rail-copy">
-        This is a practice board for a made-up domestic-disturbance call.
-        Press <strong>Play scenario</strong>, watch facts arrive, review advice,
-        and record notes. Nothing here pages a real agency.
+      <p class="eyebrow">
+        Status board
+        <HelpTip text="Live roster from the incident board: units, roads, resources, and weather. Fills in as the scenario plays." label="About the status board" />
       </p>
+
+      <div class="rail-block" aria-label="Units">
+        <p class="rail-block-title">Units <span class="count">{railUnits.length}</span></p>
+        {#if railUnits.length === 0}
+          <p class="rail-empty">No units on board</p>
+        {:else}
+          <ul class="status-lines">
+            {#each railUnits as unit (unit.unit_id)}
+              <li class="status-line">
+                <span class="sl-id">{unit.unit_id}{#if unit.incident_id}<span class="sl-note">→ {unit.incident_id}</span>{/if}</span>
+                <span class="sl-state" data-tone={availabilityTone(unit.availability)}>{unit.availability || 'unknown'}</span>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
+
+      <div class="rail-block" aria-label="Roads">
+        <p class="rail-block-title">Roads <span class="count">{railRoads.length}</span></p>
+        {#if railRoads.length === 0}
+          <p class="rail-empty">No road reports</p>
+        {:else}
+          <ul class="status-lines">
+            {#each railRoads as road (road.road_id)}
+              <li class="status-line">
+                <span class="sl-id">{road.name || road.road_id}</span>
+                <span class="sl-state" data-tone={roadTone(road.status)}>{road.status || 'unknown'}</span>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
+
+      <div class="rail-block" aria-label="Resources">
+        <p class="rail-block-title">Resources <span class="count">{railResources.length}</span></p>
+        {#if railResources.length === 0}
+          <p class="rail-empty">No resources on board</p>
+        {:else}
+          <ul class="status-lines">
+            {#each railResources as resource (resource.resource_id)}
+              <li class="status-line">
+                <span class="sl-id">{resource.resource_id}{#if resource.incident_id}<span class="sl-note">→ {resource.incident_id}</span>{/if}</span>
+                <span class="sl-state" data-tone={availabilityTone(resource.availability)}>{resource.availability || 'unknown'}</span>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
+
+      <div class="rail-block" aria-label="Weather">
+        <p class="rail-block-title">Weather <span class="count">{railWeather.length}</span></p>
+        {#if railWeather.length === 0}
+          <p class="rail-empty">No active alerts</p>
+        {:else}
+          <ul class="status-lines">
+            {#each railWeather as alert (alert.weather_alert_id)}
+              <li class="status-line">
+                <span class="sl-id">{alert.summary || alert.weather_alert_id}</span>
+                <span class="sl-state" data-tone={weatherTone(alert)}>{alert.status || alert.severity || 'unknown'}</span>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
+
       <button type="button" class="quiet-button help-rail-btn" onclick={() => (helpOpen = true)}>
-        How this works (walkthrough)
+        How this works
       </button>
     </section>
 
     <section class="rail-section boundary-note">
       <p class="eyebrow">
-        Safety rule
+        Advisory only
         <HelpTip text="AI can suggest context, but only you decide. Your notes are saved to the demo log, not acted on." label="About safety rule" />
       </p>
       <p>
-        What you see is the demo’s current picture of the synthetic incident.
-        Mosaic will not contact Dispatch, Maintenance, or any live system.
+        Mosaic never contacts Dispatch, Maintenance, or any live system.
       </p>
     </section>
   </aside>
@@ -706,7 +833,17 @@
           <div><dt>Record</dt><dd><code>{selectedEvidence.id}</code></dd></div>
           <div><dt>Status</dt><dd class="resolved">Found</dd></div>
         </dl>
-        <pre aria-label="Source record without raw payload bytes">{evidenceText()}</pre>
+        {#if evidenceSummary().length > 0}
+          <dl class="artifact-summary" aria-label="Source record summary">
+            {#each evidenceSummary() as row (row.key)}
+              <div><dt>{row.label}</dt><dd>{row.value}</dd></div>
+            {/each}
+          </dl>
+        {/if}
+        <details class="raw-record">
+          <summary>View raw record</summary>
+          <pre aria-label="Source record without raw payload bytes">{evidenceText()}</pre>
+        </details>
       {/if}
     </section>
 

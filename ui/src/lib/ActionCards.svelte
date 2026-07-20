@@ -326,275 +326,285 @@
 <style>
   .action-cards-panel {
     display: grid;
-    gap: 1.5rem;
-    padding-top: 1rem;
+    gap: 1rem;
+    padding-top: 0.75rem;
   }
 
   .panel-section-header {
-    border-bottom: 1px solid rgba(158, 184, 192, 0.4);
-    padding-bottom: 0.5rem;
-    margin-bottom: 0.5rem;
+    border-bottom: 1px solid var(--line-strong);
+    padding-bottom: 0.4rem;
+    margin-bottom: 0.35rem;
   }
 
   .panel-section-header h3 {
-    font-size: 1.25rem;
-    color: #173342;
+    font-size: 0.85rem;
+    color: var(--ink);
     margin: 0.2rem 0;
   }
 
   .section-desc {
-    font-size: 0.78rem;
-    color: #5d6d7e;
+    font-size: 0.68rem;
+    color: var(--ink-dim);
     margin: 0;
-    line-height: 1.4;
+    line-height: 1.45;
   }
 
   .action-card {
-    background: #fdfefe;
-    border: 1px solid #c9d6d9;
-    border-top: 3px solid #c9872f;
-    padding: 1rem;
+    background: var(--bg0);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--amber);
+    padding: 0.7rem;
     display: grid;
-    gap: 0.8rem;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.03);
+    gap: 0.6rem;
   }
 
   .card-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    border-bottom: 1px solid rgba(158, 184, 192, 0.3);
-    padding-bottom: 0.5rem;
+    gap: 0.4rem;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 0.4rem;
   }
 
   .badge {
-    font-family: "Cascadia Code", ui-monospace, monospace;
-    font-size: 0.62rem;
+    font-family: var(--mono);
+    font-size: 0.56rem;
     font-weight: bold;
-    padding: 0.15rem 0.4rem;
+    padding: 0.1rem 0.35rem;
+    letter-spacing: 0.05em;
   }
 
   .recipient-badge {
-    color: #173342;
-    background: rgba(23, 51, 66, 0.08);
-    border: 1px solid rgba(23, 51, 66, 0.15);
-  }
-
-  .status-badge.safety-badge {
-    color: #943a32;
-    background: rgba(148, 58, 50, 0.08);
-    border: 1px solid rgba(148, 58, 50, 0.15);
+    color: var(--ink-dim);
+    border: 1px solid var(--line-strong);
     text-transform: uppercase;
   }
 
+  .status-badge.safety-badge {
+    color: var(--alert);
+    border: 1px solid var(--alert);
+    text-transform: uppercase;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+  }
+
   .context-box {
-    background: #f2f7f7;
-    padding: 0.6rem;
-    border-left: 2px solid #216273;
+    background: var(--bg2);
+    padding: 0.5rem;
+    border-left: 2px solid var(--info);
   }
 
   .context-title {
     display: block;
-    font-family: "Cascadia Code", ui-monospace, monospace;
-    font-size: 0.6rem;
+    font-family: var(--mono);
+    font-size: 0.54rem;
     font-weight: bold;
-    color: #477889;
+    color: var(--ink-faint);
     margin-bottom: 0.3rem;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
 
   .context-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
-    gap: 0.4rem;
-    font-size: 0.72rem;
+    gap: 0.35rem;
+    font-size: 0.64rem;
+    font-family: var(--mono);
   }
 
   .lbl {
-    color: #7f8c8d;
+    color: var(--ink-faint);
     font-weight: 500;
   }
 
   .val {
-    color: #2c3e50;
+    color: var(--ink);
     font-weight: 600;
   }
 
   .context-empty {
     margin: 0;
-    font-size: 0.72rem;
-    color: #7f8c8d;
-    font-style: italic;
+    font-size: 0.64rem;
+    color: var(--ink-faint);
+    font-family: var(--mono);
   }
 
   .roads-list {
     margin: 0;
     padding: 0;
     list-style: none;
-    font-size: 0.72rem;
+    font-size: 0.64rem;
+    font-family: var(--mono);
     display: grid;
-    gap: 0.25rem;
+    gap: 0.2rem;
   }
 
   .roads-list li {
     display: flex;
     justify-content: space-between;
+    gap: 0.5rem;
   }
 
   .road-name {
-    color: #2c3e50;
+    color: var(--ink);
     font-weight: 500;
   }
 
   .road-status {
-    font-weight: 600;
-    color: #27ae60;
+    font-weight: 700;
+    color: var(--ok);
+    text-transform: uppercase;
+    font-size: 0.58rem;
   }
 
   .road-status.closed {
-    color: #c0392b;
+    color: var(--alert);
   }
 
   .more-roads {
-    color: #7f8c8d;
-    font-style: italic;
+    color: var(--ink-faint);
     text-align: right;
   }
 
   .card-form {
     display: grid;
-    gap: 0.5rem;
+    gap: 0.4rem;
   }
 
   .card-form label {
-    font-size: 0.72rem;
+    font-size: 0.6rem;
     font-weight: 700;
-    color: #34495e;
+    color: var(--ink-dim);
   }
 
   .card-form textarea, .card-form select, .card-form input {
-    font-size: 0.78rem;
-    padding: 0.45rem 0.5rem;
-    border: 1px solid #bdc3c7;
-    background: #fafbfc;
+    font-size: 0.7rem;
+    padding: 0.4rem 0.45rem;
+    border: 1px solid var(--line-strong);
+    background: var(--bg1);
+    color: var(--ink);
   }
 
   .card-form textarea:focus, .card-form select:focus, .card-form input:focus {
-    border-color: #c9872f;
+    border-color: var(--amber);
     outline: none;
   }
 
   .action-btn {
     width: 100%;
-    padding: 0.55rem;
-    color: #f7fbfa;
-    background: #173342;
-    border: 1px solid #173342;
+    padding: 0.45rem;
+    color: var(--ink);
+    background: transparent;
+    border: 1px solid var(--line-strong);
+    font-family: var(--mono);
     font-weight: 700;
-    font-size: 0.75rem;
+    font-size: 0.62rem;
     text-transform: uppercase;
-    letter-spacing: 0.02em;
-    transition: background 0.2s;
+    letter-spacing: 0.05em;
   }
 
   .action-btn:hover:not(:disabled) {
-    background: #216273;
-    border-color: #216273;
+    border-color: var(--amber);
+    color: var(--amber);
   }
 
   .result-box {
-    margin-top: 0.5rem;
-    padding: 0.6rem;
-    font-size: 0.72rem;
+    margin-top: 0.35rem;
+    padding: 0.5rem;
+    font-size: 0.64rem;
     border: 1px solid;
     display: grid;
     gap: 0.25rem;
   }
 
   .result-box.success {
-    background: #ebf5fb;
-    border-color: #aed6f1;
-    color: #2c3e50;
+    background: rgba(67, 193, 104, 0.06);
+    border-color: rgba(67, 193, 104, 0.4);
+    color: var(--ink-dim);
   }
 
   .result-box.failure {
-    background: #fdf2f2;
-    border-color: #f8d7da;
-    color: #721c24;
+    background: rgba(255, 93, 82, 0.06);
+    border-color: rgba(255, 93, 82, 0.4);
+    color: var(--alert);
   }
 
   .res-row {
     display: flex;
     justify-content: space-between;
-    border-bottom: 1px dashed rgba(0,0,0,0.06);
+    gap: 0.5rem;
+    border-bottom: 1px dashed var(--line);
     padding-bottom: 0.15rem;
   }
 
   .res-row strong {
-    font-family: "Cascadia Code", ui-monospace, monospace;
-    font-size: 0.65rem;
-    color: #7f8c8d;
+    font-family: var(--mono);
+    font-size: 0.56rem;
+    color: var(--ink-faint);
+    text-transform: uppercase;
   }
 
   .res-msg {
-    margin: 0.2rem 0 0;
+    margin: 0.15rem 0 0;
     line-height: 1.4;
-    font-style: italic;
-    color: #566573;
+    color: var(--ink-dim);
   }
 
   .decision-panel {
-    border-top: 2px solid #bdc3c7;
-    padding-top: 1rem;
+    border-top: 1px solid var(--line-strong);
+    padding-top: 0.75rem;
     display: grid;
-    gap: 0.8rem;
+    gap: 0.6rem;
   }
 
   .input-grid {
     display: grid;
     grid-template-columns: 1fr 1.2fr;
-    gap: 0.5rem;
+    gap: 0.4rem;
   }
 
   .btn-group {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 0.5rem;
-    margin-top: 0.3rem;
+    gap: 0.4rem;
+    margin-top: 0.25rem;
   }
 
   .decision-btn {
-    padding: 0.55rem;
+    padding: 0.45rem;
+    font-family: var(--mono);
     font-weight: 700;
-    font-size: 0.72rem;
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
     border: 1px solid;
-    transition: all 0.2s;
   }
 
-
   .approve-btn {
-    color: #fff;
-    background: #216273;
-    border-color: #216273;
+    color: var(--ok);
+    background: transparent;
+    border-color: var(--ok);
   }
 
   .approve-btn:hover:not(:disabled) {
-    background: #173342;
-    border-color: #173342;
+    background: rgba(67, 193, 104, 0.12);
   }
 
   .annotate-btn {
-    color: #173342;
-    background: #edf3f2;
-    border-color: #bdc3c7;
+    color: var(--ink-dim);
+    background: transparent;
+    border-color: var(--line-strong);
   }
 
   .annotate-btn:hover:not(:disabled) {
-    background: #bdc3c7;
+    color: var(--ink);
+    border-color: var(--ink-dim);
   }
 
   .capitalize {

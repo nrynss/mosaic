@@ -24,6 +24,12 @@
   let hasCurrentInsight = $derived(arrayOf(advisories?.insights).some(ins => ins.status === 'current'));
   let hasCurrentRecommendation = $derived(arrayOf(advisories?.recommendations).some(rec => rec.status === 'current'));
 
+  // Superseded / not-current advice stays visible by default so the
+  // supersede moment reads on the board; operators can collapse it.
+  let showHistory = $state(true);
+  let visibleInsights = $derived(arrayOf(advisories?.insights).filter((ins) => showHistory || ins.status === 'current'));
+  let visibleRecommendations = $derived(arrayOf(advisories?.recommendations).filter((rec) => showHistory || rec.status === 'current'));
+
   function arrayOf(value) {
     return Array.isArray(value) ? value : [];
   }
@@ -263,8 +269,16 @@
         </div>
       {:else if advisoriesState === 'ready' && advisories}
         <div class="advisories-header">
+          <button
+            type="button"
+            class="history-toggle"
+            aria-pressed={showHistory}
+            onclick={() => (showHistory = !showHistory)}
+          >
+            {showHistory ? 'Hide past advice' : 'Show past advice'}
+          </button>
           <p class="advisory-mode-badge" data-mode={advisories.status || 'unavailable'}>
-            Advice source: {advisories.status && advisories.status.includes('live') ? 'Live AI' : 'Pre-built demo advice'}
+            Advice source: {advisories.status && advisories.status.includes('live') ? 'Live AI' : 'Demo pack'}
           </p>
         </div>
 
@@ -280,14 +294,13 @@
               </div>
             {/if}
 
-            {#each arrayOf(advisories.insights) as ins (ins.insight_id)}
+            {#each visibleInsights as ins (ins.insight_id)}
               <div class="advisory-card assessed-card" data-status={ins.status}>
                 <div class="card-header">
                   <strong>{ins.insight_id}</strong>
                   <span class="status-badge" data-status={ins.status}>{ins.status.replaceAll('_', ' ')}</span>
                 </div>
                 <div class="card-body">
-                  <h4>What it says</h4>
                   <ul>
                     {#each arrayOf(ins.assertions) as assertion}
                       <li>{assertion}</li>
@@ -322,7 +335,7 @@
               </div>
             {/if}
 
-            {#each arrayOf(advisories.recommendations) as rec (rec.recommendation_id)}
+            {#each visibleRecommendations as rec (rec.recommendation_id)}
               <div class="advisory-card recommended-card" data-status={rec.status}>
                 <div class="card-header">
                   <strong>{rec.recommendation_id}</strong>

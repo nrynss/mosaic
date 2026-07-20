@@ -16,7 +16,7 @@
     {
       id: 'what',
       title: 'What Mosaic is',
-      body: `Mosaic shows an operator one trustworthy picture of an unfolding incident, with AI advice on the side that can never change the facts.`
+      body: `One synthetic call. Your judgment stays human. Mosaic shows an operator one trustworthy picture of an unfolding incident, with AI advice on the side that can never change the facts. This demo plays a made-up domestic-disturbance call: press Play scenario, watch facts arrive, review advice, and record notes. Nothing here pages a real agency.`
     },
     {
       id: 'data',
