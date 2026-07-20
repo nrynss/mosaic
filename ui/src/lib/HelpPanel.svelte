@@ -16,27 +16,22 @@
     {
       id: 'what',
       title: 'What Mosaic is',
-      body: `Mosaic is an auditable event-to-state foundation for operator decision-support. This demo uses a fully synthetic domestic-disturbance scenario. It is not a police product claim and never contacts real departments or external systems.`
+      body: `Mosaic shows an operator one trustworthy picture of an unfolding incident, with AI advice on the side that can never change the facts.`
     },
     {
       id: 'data',
       title: 'Synthetic data coverage',
-      body: `The domestic-disturbance fixture includes 10 timed beats: 911 intake, welfare check, weather alert, main-road closure, EMS availability, officer update, incomplete road repair, quarantined invalid input, late EMS delivery, and a road-opening correction. That arc drives COP state through revision 9, historical Terra/Sol advisories (later superseded), and sample audit records. It is enough for a full operator walkthrough without more data generation.`
+      body: `The domestic-disturbance fixture includes 10 timed beats: 911 intake, welfare check, weather alert, main-road closure, EMS availability, officer update, incomplete road repair, quarantined invalid input, late EMS delivery, and a road-opening correction. That arc drives the board state through revision 9, historical Terra/Sol advisories, and sample audit records. It is enough for a full operator walkthrough without more data generation.`
     },
     {
       id: 'walk',
       title: 'Suggested walkthrough',
-      body: `1) Confirm connection is Live and agent badges (Luna/Terra/Sol). 2) Start Simulation — beats replay on a virtual clock. 3) Watch the COP facts update (incident, unit, roads, weather, resources). 4) Analyze Incident — refresh advisory history; with live providers and a funded key, operator analyze/brief endpoints call OpenAI. 5) Use Dispatch / Maintenance handoff cards — records are executed:false and delivered:false. 6) Open Provenance & Action Trail for the full audit trail. 7) Reset for a clean session.`
-    },
-    {
-      id: 'agents',
-      title: 'Luna, Terra, and Sol',
-      body: `Luna normalises source events. Terra produces derived assessments (Analyze). Sol drafts recipient briefings. Each agent is fixture or live. Live requires MOSAIC_*_PROVIDER=live and a server-side OPENAI_API_KEY. Missing key falls back to fixture. A zero-balance key still shows live; failed calls are recorded as model runs and do not mutate the COP.`
+      body: ``
     },
     {
       id: 'cop',
-      title: 'COP and evidence',
-      body: `The Common Operating Picture is the only operational projection. It is produced by a deterministic projector from canonical events. Click Resolve evidence on any claim to open the bounded evidence artifact (raw payload bytes withheld). Models may assess the COP but cannot change it.`
+      title: 'Board state and evidence',
+      body: `The Live incident board is the single source of truth. It is generated automatically from raw inputs by a deterministic projection engine. You can click "Show source" on any claim to inspect the exact input event. AI models can give advice on the side, but they can never change the facts.`
     },
     {
       id: 'safety',
@@ -44,14 +39,14 @@
       body: `Every operator action is an immutable audit record with executed:false. Handoffs are not delivered externally (delivered:false). There is no login; the public demo actor is open for review. Synthetic data only — no real PII or operational feeds.`
     },
     {
-      id: 'persist',
-      title: 'Persistence',
-      body: `Local Docker uses a named volume so SQLite audits survive container restarts. Cloud Run uses /tmp (ephemeral): cold starts reseed the fixture and drop prior operator history. Litestream/Cloud SQL are future durable options, not the live hackathon deploy.`
-    },
-    {
       id: 'tabs',
       title: 'Workspace tabs',
-      body: `Incident Command Workspace is the live operator surface (sim, COP, advisories, recurrence). Provenance & Action Trail lists model runs, audits, and session beats for the decision trail. The right rail holds evidence resolution and handoff/review forms. The bottom drawer is developer status (health, version, operations, API base).`
+      body: `"Live incident board" is the live operator surface (scenario controls, active incident details, timeline, and advice). "Decision history" lists model runs, audits, and scenario beats for the decision trail. The right rail holds evidence resolution and handoff/review forms. The bottom drawer is the developer console (health, version, operations, API base).`
+    },
+    {
+      id: 'dev',
+      title: 'For developers',
+      body: `Live models require a server-side OPENAI_API_KEY. Missing keys fall back to pre-built fixtures. Docker deployments use a named volume for SQLite database persistence, while Cloud Run uses /tmp (ephemeral). In production, Litestream or Cloud SQL are used for durable backup-and-restore.`
     }
   ];
 

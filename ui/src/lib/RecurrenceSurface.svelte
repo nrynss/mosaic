@@ -76,8 +76,5 @@
         </button>
       </div>
     </div>
-    <div class="recurrence-footer">
-      Reminder: this is pattern awareness in the demo — not an automated work order.
-    </div>
   </div>
 {/if}

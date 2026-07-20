@@ -162,6 +162,7 @@ type Config struct {
 	Version           string
 	Clock             func() time.Time
 	NewID             func() string
+	APIKeyConfigured  bool
 }
 
 // Server composes the v0.1 HTTP handlers. It reads a COP only through the P06
@@ -186,6 +187,7 @@ type Server struct {
 	startedAt         time.Time
 	clock             func() time.Time
 	newID             func() string
+	apiKeyConfigured  bool
 }
 
 // New rejects partial deterministic/evidence wiring while providing public
@@ -247,6 +249,7 @@ func New(config Config) (*Server, error) {
 		startedAt:         startedAt,
 		clock:             config.Clock,
 		newID:             config.NewID,
+		apiKeyConfigured:  config.APIKeyConfigured,
 	}, nil
 }
 
@@ -298,7 +301,11 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"version": s.version, "api_version": "v1"}, nil)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"version":           s.version,
+		"api_version":       "v1",
+		"openai_configured": s.apiKeyConfigured,
+	}, nil)
 }
 
 func (s *Server) handleCOP(w http.ResponseWriter, r *http.Request) {

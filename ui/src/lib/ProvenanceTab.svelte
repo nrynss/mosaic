@@ -61,7 +61,6 @@
                     <button class="small-evidence-btn" onclick={() => selectEvidence(record.target_kind, record.target_id, `${record.target_kind} · ${record.target_id}`)}>
                       Show source
                     </button>
-                    <span class="safety-indicator">not carried out</span>
                   </div>
                 </div>
               </div>
@@ -134,7 +133,7 @@
               <div class="timeline-content">
                 <div class="timeline-top">
                   <strong>Step #{beat.order}</strong>
-                  <span class="delay-tag">+{beat.delay_ms}ms</span>
+                  <span class="delay-tag">+{beat.delay_ms / 1000}s</span>
                 </div>
                 <div class="beat-details">
                   <span>Step: <code>{beat.beat_id}</code></span>

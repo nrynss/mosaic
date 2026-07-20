@@ -10,11 +10,11 @@
     auditTargetKind = $bindable('recommendation'),
     actionState = $bindable('idle'),
     actionMessage = $bindable(''),
-    maintenanceNote = $bindable('Operator road condition notes.')
+    maintenanceNote = $bindable('')
   } = $props();
 
   // Local state for Dispatch Handoff
-  let dispatchObservations = $state('Operator notes on dispatch context.');
+  let dispatchObservations = $state('');
   let dispatchResult = $state(null);
   let dispatchError = $state('');
 
@@ -23,7 +23,7 @@
   let maintenanceError = $state('');
 
   // Local state for Operator Decision Controls
-  let decisionNote = $state('Public demo review recorded for the synthetic demonstration.');
+  let decisionNote = $state('');
   let decisionResult = $state(null);
   let decisionError = $state('');
 
@@ -177,16 +177,13 @@
         placeholder="e.g. Unit on scene; Brook Lane access may be constrained by weather…"
       ></textarea>
       <button class="action-btn" type="submit" disabled={actionState === 'loading'}>
-        Save Dispatch note (demo)
+        Save Dispatch note
       </button>
     </form>
 
     {#if dispatchResult}
       <div class="result-box success">
-        <div class="res-row"><strong>Carried out in the real world?</strong> <span>{dispatchResult.executed ? 'Yes' : 'No'}</span></div>
-        <div class="res-row"><strong>Delivered to a real desk?</strong> <span>{dispatchResult.delivered ? 'Yes' : 'No'}</span></div>
-        <div class="res-row"><strong>Demo status:</strong> <span>{dispatchResult.handoff_status}</span></div>
-        <p class="res-msg">{dispatchResult.message}</p>
+        <p class="res-msg">Saved to the demo log. Nothing was sent.</p>
       </div>
     {/if}
     {#if dispatchError}
@@ -231,16 +228,13 @@
         placeholder="e.g. Brook Lane closed during heavy rain; flag for maintenance review…"
       ></textarea>
       <button class="action-btn" type="submit" disabled={actionState === 'loading'}>
-        Save maintenance note (demo)
+        Save maintenance note
       </button>
     </form>
 
     {#if maintenanceResult}
       <div class="result-box success">
-        <div class="res-row"><strong>Carried out in the real world?</strong> <span>{maintenanceResult.executed ? 'Yes' : 'No'}</span></div>
-        <div class="res-row"><strong>Delivered to a real desk?</strong> <span>{maintenanceResult.delivered ? 'Yes' : 'No'}</span></div>
-        <div class="res-row"><strong>Demo status:</strong> <span>{maintenanceResult.handoff_status}</span></div>
-        <p class="res-msg">{maintenanceResult.message}</p>
+        <p class="res-msg">Saved to the demo log. Nothing was sent.</p>
       </div>
     {/if}
     {#if maintenanceError}
@@ -301,7 +295,7 @@
           onclick={() => handleDecision('approve')}
           disabled={actionState === 'loading'}
         >
-          Agree / approve <span>demo only</span>
+          Agree / approve
         </button>
         <button
           class="decision-btn annotate-btn"
@@ -309,7 +303,7 @@
           onclick={() => handleDecision('annotate')}
           disabled={actionState === 'loading'}
         >
-          Add note only <span>demo only</span>
+          Add note only
         </button>
       </div>
     </div>
@@ -317,7 +311,7 @@
     {#if decisionResult}
       <div class="result-box success">
         <div class="res-row"><strong>What you did:</strong> <span class="capitalize">{decisionResult.action}</span></div>
-        <div class="res-row"><strong>Carried out in the real world?</strong> <span>{decisionResult.executed ? 'Yes' : 'No'}</span></div>
+        <p class="res-msg">Saved to the demo log. Nothing was sent.</p>
         <div class="res-row"><strong>History id:</strong> <code>{decisionResult.audit_record_id}</code></div>
       </div>
     {/if}
@@ -581,13 +575,6 @@
     transition: all 0.2s;
   }
 
-  .decision-btn span {
-    font-family: "Cascadia Code", ui-monospace, monospace;
-    font-size: 0.55rem;
-    font-weight: normal;
-    opacity: 0.85;
-    margin-top: 0.1rem;
-  }
 
   .approve-btn {
     color: #fff;

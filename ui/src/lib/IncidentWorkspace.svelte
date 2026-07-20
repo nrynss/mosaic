@@ -232,7 +232,7 @@
             <p class="claim-class assessed">Suggested assessment</p>
             <div class="empty-advisory-state" data-state="unavailable">
               <h3>Assessment not available</h3>
-              <p>Terra could not produce advice (AI error, missing key, or demo pack refused). The incident board is unchanged.</p>
+              <p>The AI could not answer this time. The incident board is unchanged.</p>
             </div>
           </div>
           <div class="advisory-column">
@@ -263,7 +263,7 @@
       {:else if advisoriesState === 'ready' && advisories}
         <div class="advisories-header">
           <p class="advisory-mode-badge" data-mode={advisories.status || 'unavailable'}>
-            Advice source: {(advisories.status || 'unavailable').replaceAll('_', ' ').replaceAll('-', ' ')}
+            Advice source: {advisories.status && advisories.status.includes('live') ? 'Live AI' : 'Pre-built demo advice'}
           </p>
         </div>
 
@@ -274,7 +274,7 @@
               <!-- Current assessment rendered below -->
             {:else}
               <div class="empty-advisory-state" data-state="superseded">
-                <h3>No still-current assessment</h3>
+                <h3>Earlier assessment is now out of date</h3>
                 <p>The road-opening correction made the earlier access warning out of date — that is part of the demo story.</p>
               </div>
             {/if}

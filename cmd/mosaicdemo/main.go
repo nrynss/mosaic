@@ -264,6 +264,7 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 		Luna:              models.Luna,
 		ProviderSelection: models.ProviderSelection,
 		BriefingRequester: models.BriefingRequester,
+		APIKeyConfigured:  strings.TrimSpace(configuration.ModelEnv.APIKey) != "",
 	})
 	if err != nil {
 		_ = closeDatabase()

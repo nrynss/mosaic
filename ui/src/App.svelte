@@ -15,6 +15,7 @@
   let apiBaseInput = $state(normaliseAPIBase(defaultAPIBase));
   let health = $state({ state: 'idle', detail: 'Not checked' });
   let version = $state({ state: 'idle', detail: 'Not checked' });
+  let openaiConfigured = $state(false);
   let cop = $state(null);
   let copState = $state('idle');
   let copError = $state('');
@@ -39,7 +40,7 @@
   let elapsedSeconds = $state(0);
   let activeTab = $state('workspace'); // 'workspace' | 'provenance'
   let helpOpen = $state(false);
-  let maintenanceNote = $state('Operator road condition notes.');
+  let maintenanceNote = $state('');
 
   function prefillMaintenance(noteText) {
     maintenanceNote = noteText;
@@ -123,6 +124,9 @@
     version = versionResult.status === 'fulfilled'
       ? { state: 'ready', detail: versionResult.value?.version || 'Unknown version' }
       : { state: 'error', detail: versionResult.reason.message };
+    if (versionResult.status === 'fulfilled') {
+      openaiConfigured = !!versionResult.value?.openai_configured;
+    }
   }
 
   async function loadCOP() {
@@ -576,6 +580,11 @@
     >
       How this works
     </button>
+    <div class="connection-pill" data-state={openaiConfigured ? 'live' : 'idle'} aria-live="polite" style="margin-right: 0.5rem;">
+      <span aria-hidden="true"></span>
+      {openaiConfigured ? 'AI Key: Active' : 'AI Key: Demo Fixture'}
+      <HelpTip text={openaiConfigured ? 'OpenAI key is active. Live model runs are dependent on credits remaining in this key (configure via OPENAI_API_KEY).' : 'Live models are offline. The dashboard runs on pre-built fixture responses.'} label="About OpenAI API key status" />
+    </div>
     <div class="connection-pill" data-state={streamState} aria-live="polite">
       <span aria-hidden="true"></span>
       {streamState === 'live' ? 'Connected' : streamState === 'reconnecting' ? 'Reconnecting' : 'Checking'}
@@ -664,7 +673,7 @@
   <aside class="evidence-rail" aria-label="Evidence and review">
     <section class="evidence-panel">
       <p class="eyebrow">
-        Why is this claimed?
+        Where did this come from?
         <HelpTip text="Click “Show source” on any fact to open the underlying demo record. Raw wire dumps stay hidden." label="About evidence panel" />
       </p>
       <h2>{selectedEvidence?.label || 'Click “Show source” on a fact'}</h2>
@@ -678,7 +687,7 @@
       {:else if evidenceState === 'error'}
         <p class="panel-copy problem" role="alert">Could not load that source: {evidenceError}</p>
       {:else if evidenceState === 'unresolved' || !selectedEvidence?.resolved}
-        <p class="panel-copy problem">No matching source was found. {selectedEvidence?.reason || 'It may have been cleared with the session view.'}</p>
+        <p class="panel-copy problem">No matching source was found. {selectedEvidence?.reason || 'It may have been cleared when the scenario restarted.'}</p>
       {:else}
         <dl class="resolution-meta">
           <div><dt>Type</dt><dd>{selectedEvidence.kind}</dd></div>
