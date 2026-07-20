@@ -522,3 +522,4 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-20 P39 ready for integration — a7631a7; recurrence detector implemented and verified.
 - 2026-07-20 P37 integrated by coordinator — `33f344f`; domesticdisturbance profile now implements contracts.SimulationSchedule and exposes the configured-timing beats.
 - 2026-07-20 P39 integrated by coordinator — `aa0c3b0`; recurrence package added with configurable-window detector, area matching, and prepared note linkage.
+- 2026-07-20 P42 claimed by external builder — base 5df2455a2291fa21bc3d7dcf59ecb16fae27d8df, branch parcel/P42-ui-incident-workspace; implementing incident-first workspace.
