@@ -659,13 +659,11 @@
     </button>
     <div class="connection-pill" data-state={openaiConfigured ? 'live' : 'idle'} aria-live="polite" style="margin-right: 0.5rem;">
       <span aria-hidden="true"></span>
-      {openaiConfigured ? 'AI Key: Active' : 'AI Key: Demo pack'}
-      <HelpTip text={openaiConfigured ? 'A live AI key is configured on the server, so Terra and Sol can call OpenAI. If the key runs out of credit, calls fall back to the demo pack. See the developer console for an estimated-spend readout.' : 'Live models are offline. The dashboard runs on the pre-built demo pack.'} label="About OpenAI API key status" direction="bottom" align="end" />
+      {openaiConfigured ? 'AI: Live' : 'AI: Demo pack'}
     </div>
     <div class="connection-pill" data-state={streamState} aria-live="polite">
       <span aria-hidden="true"></span>
       {streamState === 'live' ? 'Connected' : streamState === 'reconnecting' ? 'Reconnecting' : 'Checking'}
-      <HelpTip text="Green means the browser is connected for live updates. If it drops, Mosaic retries automatically." label="About connection status" direction="bottom" align="end" />
     </div>
   </div>
 </header>

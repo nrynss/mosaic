@@ -41,6 +41,9 @@
 html {
   max-width: 100%;
   overflow-x: clip;
+  /* Global type lift: every size in this sheet is rem-based, so scaling
+     the root inflates text ~25% while preserving the dense proportions. */
+  font-size: 125%;
 }
 
 body {
@@ -1378,14 +1381,17 @@ textarea { resize: vertical; }
 
 .help-tip-glyph.inline { margin: 0 0.15rem; vertical-align: middle; }
 
+/* The bubble is fixed-positioned; HelpTip.svelte computes top/left from
+   the trigger at show time and clamps to the viewport. This escapes both
+   the tiny positioned wrapper (which forced vertical one-word lines) and
+   every overflow-clipping ancestor at the layout extremities. */
 .help-tip-bubble {
-  position: absolute;
-  z-index: 500;
-  bottom: calc(100% + 0.4rem);
-  left: 50%;
-  transform: translateX(-50%);
+  position: fixed;
+  z-index: 3000;
+  top: 0;
+  left: 0;
   width: max-content;
-  max-width: min(16.5rem, calc(100vw - 1.5rem));
+  max-width: min(18rem, calc(100vw - 1.5rem));
   padding: 0.5rem 0.6rem;
   color: var(--ink);
   background: var(--bg2);
@@ -1402,43 +1408,6 @@ textarea { resize: vertical; }
   transition: opacity 0.12s ease;
   overflow-wrap: anywhere;
   white-space: normal;
-}
-
-.help-tip-bubble::after {
-  content: "";
-  position: absolute;
-  top: 100%;
-  left: 50%;
-  margin-left: -5px;
-  border: 5px solid transparent;
-  border-top-color: var(--amber);
-}
-
-.help-tip[data-direction="bottom"] .help-tip-bubble {
-  bottom: auto;
-  top: calc(100% + 0.4rem);
-}
-
-.help-tip[data-direction="bottom"] .help-tip-bubble::after {
-  top: auto;
-  bottom: 100%;
-  border-top-color: transparent;
-  border-bottom-color: var(--amber);
-}
-
-/* End-aligned variant: pins the bubble to the glyph's right edge instead of
-   centering it, so tips near the right viewport edge (e.g. masthead pills)
-   do not clip. */
-.help-tip[data-align="end"] .help-tip-bubble {
-  left: auto;
-  right: 0;
-  transform: none;
-}
-
-.help-tip[data-align="end"] .help-tip-bubble::after {
-  left: auto;
-  right: 0.32rem;
-  margin-left: 0;
 }
 
 .help-tip:hover .help-tip-bubble,
