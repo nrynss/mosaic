@@ -805,9 +805,28 @@ func (s *Server) handleAdvisories(w http.ResponseWriter, r *http.Request) {
 	if s.advisoryMode == "fixture_composed" || s.advisoryMode == "fixture-composed" {
 		advStatus = "fixture-composed"
 	}
+	advisoryModelRuns := make([]map[string]any, 0, len(history.ModelRuns))
+	for _, run := range history.ModelRuns {
+		advisoryModelRuns = append(advisoryModelRuns, map[string]any{
+			"model_run_id":      run.ModelRunID,
+			"agent":             run.Agent,
+			"provider":          run.Provider,
+			"model":             run.Model,
+			"validation_status": run.ValidationStatus,
+			"started_at":        run.StartedAt,
+			"completed_at":      run.CompletedAt,
+			"state_revision":    run.StateRevision,
+			"output_ids":        run.OutputIds,
+			"input_event_ids":   run.InputEventIds,
+		})
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"insights":        advisoriesInsights,
 		"recommendations": advisoriesRecommendations,
 		"status":          advStatus,
+		"audit_records":   history.AuditRecords,
+		"model_runs":      advisoryModelRuns,
+		"providers":       s.providerHints(),
 	}, nil)
 }
