@@ -89,3 +89,40 @@ The primary UI action is **Start simulation**.
 5. A new start creates a new session; it does not truncate or rewrite immutable event, insight, recommendation, handoff, or audit history.
 
 The current startup-only fixture composition is sufficient for Docker proof but is not this interactive lifecycle. Implementing it requires a dedicated synthetic simulation-session API and stream contract, scoped separately from the read/audit API.
+
+## The operator is real; the world is synthetic
+
+Only the incoming call/events, environmental data, and the reference scenario are
+simulated. The operator is a real logged-in user who drives the session:
+
+- **Synthetic:** the intake call, source events, environment, and reference COP.
+- **Real:** the logged-in operator presses **Analyze**, reviews findings, adds a
+  note, approves or prepares a dispatch/maintenance handoff, and records why.
+- **Safe:** the system records a proposed handoff; it does not autonomously
+  contact any real department.
+
+Operator identity flows into the audit trail: each recorded action carries the
+real operator's identity and role, not a fixed demo token.
+
+## Live models: opt-in, server-side, bounded
+
+The demo can run Luna/Terra/Sol against real OpenAI models, opt-in:
+
+- **Routing:** Luna for lightweight event interpretation, Terra for the primary
+  Analyze result, Sol only for an explicit operator-triggered deep briefing —
+  never automatic.
+- **Default and fallback:** without an explicit live selection and a present
+  server secret, each agent uses its deterministic fixture client. Invalid,
+  refused, or unavailable live output is recorded as a ModelRun and mutates
+  nothing — exactly as the fixture path.
+- **Budget:** an application budget cap, per-response output-token caps, and
+  per-session call limits, with usage recorded. A typical operator-triggered
+  session (one Terra analysis plus an optional Sol briefing) stays well within a
+  small budget; prompt caching is a bonus, never a budget assumption.
+- **Key handling:** the OpenAI key is a server-only runtime secret
+  (`OPENAI_API_KEY`). It never enters the browser, Git history, the Docker image,
+  or a committed compose file. The live path is opt-in; the fixture path is the
+  safe default.
+
+Say plainly in the demo: the models inform the operator; they never take an
+operational action, and the deterministic projection is never mutated by a model.
