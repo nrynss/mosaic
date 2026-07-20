@@ -43,8 +43,13 @@ The active, live demonstration service is hosted on Google Cloud Run:
 
 ## Next Steps
 
-The next increment will focus on implementing the durable, single-writer backup-and-restore replication for the SQLite database:
-* **Litestream Sidecar Packaging**: Update the production `Dockerfile` to bundle the Litestream binary and replication runner.
-* **GCS Replication Bucket**: Provision the Google Cloud Storage bucket in an Always Free region (`us-central1`, `us-east1`, or `us-west1`).
-* **Nonroot Access Setup**: Ensure the Litestream sidecar executes under the `nonroot:nonroot` UID/GID and inherits the GCS credentials securely.
-* **Budget & Alerting**: Configure a GCP billing budget alert to ensure operation costs stay within free allowances.
+> [!NOTE]
+> **Hackathon Scope Complete**: We have completed all functional code changes required for the hackathon. The previously listed tasks (Litestream sidecar replication, GCS WAL backups, and budget caps) are designated as **production-type** requirements for subsequent enterprise scaling, rather than hackathon milestones.
+
+The actual project next steps are:
+* **End-to-End Run with Paid API Key**: Execute a full live model test run (with active credits) to verify generative Terra, Sol, and Luna responses and outputs.
+* **UI Refinement & Polish**: Perform final visual and layout adjustments on the dashboard.
+* **Add UI Help Page**: Implement a dedicated help/info page in the Svelte dashboard to describe the system architecture, components, and evidence ledger design.
+* **Demo Preparation**: Prepare the interactive operator demo walkthrough and recording.
+* **Domain Update**: Configure custom domain mapping to route **mosaic.nryn.dev** through Cloudflare to the Cloud Run service.
+* **Project Details Page**: Author and publish a dedicated project description page on the **nryn.dev** site detailing the architecture, constraints, and results.
