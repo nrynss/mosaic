@@ -528,3 +528,5 @@ Format: `YYYY-MM-DD P## <claimed|ready|integrated|blocked> by <owner> — note`.
 - 2026-07-20 P43 claimed by external builder — base 3e75053368444d92c542887ca96d6aed263ee7c2, branch parcel/P43-ui-action-cards; implementing action cards and operator controls.
 - 2026-07-20 P43 ready for integration — 73e6b485aa3d850a519ac81dbfa492bba44c16e3; action cards and operator decision controls verified.
 - 2026-07-20 P43 integrated by coordinator — `6d95e53`; recipient action cards and operator decision controls added to separate ActionCards Svelte component; API integration and safety boundaries validated.
+- 2026-07-20 P44 claimed by coordinator/agent — base c2bc5a509549dda5c934082e89a43c31845dac95, branch parcel/P44-ui-provenance-tab; implementing UI provenance and action trail.
+- 2026-07-20 P45 claimed by coordinator/agent — base c2bc5a509549dda5c934082e89a43c31845dac95, branch parcel/P45-ui-recurrence-surface; implementing UI recurrence alerts and mode indicators.
