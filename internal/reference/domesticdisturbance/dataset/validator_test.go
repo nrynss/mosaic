@@ -65,7 +65,7 @@ func repositoryRoot(t *testing.T) string {
 	if !ok {
 		t.Fatal("locate test file")
 	}
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "..", ".."))
 }
 
 func copyDataset(t *testing.T, root string) string {

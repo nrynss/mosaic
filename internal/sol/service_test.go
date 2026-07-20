@@ -80,14 +80,15 @@ func newHarness(t *testing.T, client *fixtureClient, resolver *fixtureResolver) 
 	}
 	sequence := 0
 	service, err := sol.New(sol.Config{
-		Client:        client,
-		Resolver:      resolver,
-		Records:       database,
-		Validator:     validator,
-		PromptVersion: "1.0.0",
-		Provider:      "fixture",
-		Model:         "fixture-sol",
-		Clock:         func() time.Time { return solTime },
+		Client:            client,
+		RequiredRequester: authorizedRequester,
+		Resolver:          resolver,
+		Records:           database,
+		Validator:         validator,
+		PromptVersion:     "1.0.0",
+		Provider:          "fixture",
+		Model:             "fixture-sol",
+		Clock:             func() time.Time { return solTime },
 		NewModelRunID: func() string {
 			sequence++
 			return fmt.Sprintf("sol-run-%03d", sequence)
@@ -138,7 +139,7 @@ func TestBriefPersistsValidRecommendationWithoutMutatingCOP(t *testing.T) {
 	if client.calls != 1 || h.resolver.evidenceN != 1 || h.resolver.insightsN != 1 || h.resolver.revision != 7 {
 		t.Fatalf("client/resolver calls = %d/%d/%d at revision %d", client.calls, h.resolver.evidenceN, h.resolver.insightsN, h.resolver.revision)
 	}
-	if !json.Valid(client.request.SerializedCOP) || client.request.RequestedBy != sol.SupervisorIdentity {
+	if !json.Valid(client.request.SerializedCOP) || client.request.RequestedBy != authorizedRequester {
 		t.Fatalf("fixture client received invalid least-privilege request: %#v", client.request)
 	}
 	assertCount(t, h.store, "model_runs", 1)
@@ -156,7 +157,7 @@ func TestBriefRejectsNonSupervisorAndInvalidInputWithModelRun(t *testing.T) {
 		input contracts.SolInput
 		want  error
 	}{
-		{name: "viewer", input: withRequester(briefingInput(7), "viewer-demo"), want: sol.ErrSupervisorRequired},
+		{name: "unauthorized requester", input: withRequester(briefingInput(7), "unauthorized-requester"), want: sol.ErrSupervisorRequired},
 		{name: "missing revision", input: withRevision(briefingInput(7), 0), want: sol.ErrInvalidBriefing},
 	}
 	for _, test := range tests {
@@ -322,7 +323,7 @@ func TestBriefPersistsP04ExpectedRecommendationAtRevisionSeven(t *testing.T) {
 		},
 		Insights:    []gen.Insight{active},
 		Evidence:    evidenceFromReferences(recommendation.Evidence),
-		RequestedBy: sol.SupervisorIdentity,
+		RequestedBy: authorizedRequester,
 	}
 	h := newHarness(t, &fixtureClient{response: sol.Response{RecommendationJSON: recommendationJSON(t, recommendation)}}, &fixtureResolver{})
 	output, err := h.service.Brief(context.Background(), input)
@@ -335,6 +336,10 @@ func TestBriefPersistsP04ExpectedRecommendationAtRevisionSeven(t *testing.T) {
 	assertCount(t, h.store, "model_runs", 1)
 	assertCount(t, h.store, "recommendations", 1)
 }
+
+// authorizedRequester is a domain-neutral requester identity used to exercise
+// the configured requester-role guard without embedding a demo or domain token.
+const authorizedRequester = "authorized-requester"
 
 func briefingInput(revision int64) contracts.SolInput {
 	active := activeInsight("insight-access-001", revision)
@@ -349,7 +354,7 @@ func briefingInput(revision int64) contracts.SolInput {
 		Evidence: []gen.Evidence{
 			evidence("evidence-insight-access", "insight", active.InsightID, "The recommendation is limited to the cited derived assessment."),
 		},
-		RequestedBy: sol.SupervisorIdentity,
+		RequestedBy: authorizedRequester,
 	}
 }
 

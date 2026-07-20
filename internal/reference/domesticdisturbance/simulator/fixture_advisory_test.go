@@ -27,8 +27,8 @@ func TestFixtureAdvisoryReplayFreshSequence(t *testing.T) {
 
 	replay, err := NewAdvisoryReplay(AdvisoryReplayConfig{
 		Store:      database,
-		SchemaDir:  filepath.Join("..", "..", "ontology"),
-		FixtureDir: filepath.Join("..", "..", "datasets", DomesticDisturbance),
+		SchemaDir:  filepath.Join("..", "..", "..", "..", "ontology"),
+		FixtureDir: filepath.Join("..", "..", "..", "..", "datasets", DomesticDisturbance),
 	})
 	if err != nil {
 		t.Fatalf("new advisory replay: %v", err)
@@ -114,8 +114,8 @@ func TestFixtureAdvisoryReplayUsesHistoricalRevisionSnapshots(t *testing.T) {
 	solProbe := &recordingSolClient{}
 	replay, err := NewAdvisoryReplay(AdvisoryReplayConfig{
 		Store:       database,
-		SchemaDir:   filepath.Join("..", "..", "ontology"),
-		FixtureDir:  filepath.Join("..", "..", "datasets", DomesticDisturbance),
+		SchemaDir:   filepath.Join("..", "..", "..", "..", "ontology"),
+		FixtureDir:  filepath.Join("..", "..", "..", "..", "datasets", DomesticDisturbance),
 		TerraClient: terraProbe,
 		SolClient:   solProbe,
 	})
@@ -148,7 +148,7 @@ func TestFixtureAdvisoryReplayUsesHistoricalRevisionSnapshots(t *testing.T) {
 	if !roadStatus(decodeCOP(t, terraProbe.requests[1].SerializedCOP), "road-brook-lane", "open") {
 		t.Fatalf("rev-9 terra COP did not use the historical open Brook Lane snapshot: %s", terraProbe.requests[1].SerializedCOP)
 	}
-	if len(solProbe.requests) != 1 || solProbe.requests[0].StateRevision != 7 || solProbe.requests[0].RequestedBy != sol.SupervisorIdentity {
+	if len(solProbe.requests) != 1 || solProbe.requests[0].StateRevision != 7 || solProbe.requests[0].RequestedBy != "supervisor-demo" {
 		t.Fatalf("sol request = %#v", solProbe.requests)
 	}
 	if !roadStatus(decodeCOP(t, solProbe.requests[0].SerializedCOP), "road-brook-lane", "blocked") {
@@ -238,8 +238,8 @@ func TestFixtureAdvisoryReplayRefusalRecordsModelRunWithoutInsight(t *testing.T)
 
 	replay, err := NewAdvisoryReplay(AdvisoryReplayConfig{
 		Store:       database,
-		SchemaDir:   filepath.Join("..", "..", "ontology"),
-		FixtureDir:  filepath.Join("..", "..", "datasets", DomesticDisturbance),
+		SchemaDir:   filepath.Join("..", "..", "..", "..", "ontology"),
+		FixtureDir:  filepath.Join("..", "..", "..", "..", "datasets", DomesticDisturbance),
 		TerraClient: fixtureTerraClient{responseID: fixtureTerraActiveRespID, refuse: "fixture refused assessment"},
 	})
 	if err != nil {
@@ -286,8 +286,8 @@ func TestFixtureAdvisoryReplayInvalidResponseRecordsModelRunWithoutInsight(t *te
 
 	replay, err := NewAdvisoryReplay(AdvisoryReplayConfig{
 		Store:       database,
-		SchemaDir:   filepath.Join("..", "..", "ontology"),
-		FixtureDir:  filepath.Join("..", "..", "datasets", DomesticDisturbance),
+		SchemaDir:   filepath.Join("..", "..", "..", "..", "ontology"),
+		FixtureDir:  filepath.Join("..", "..", "..", "..", "datasets", DomesticDisturbance),
 		TerraClient: fixtureTerraClient{responseID: fixtureTerraActiveRespID, invalid: true},
 	})
 	if err != nil {
@@ -433,8 +433,8 @@ func mustAdvisoryReplay(t *testing.T, database *store.Store) *AdvisoryReplay {
 	t.Helper()
 	replay, err := NewAdvisoryReplay(AdvisoryReplayConfig{
 		Store:      database,
-		SchemaDir:  filepath.Join("..", "..", "ontology"),
-		FixtureDir: filepath.Join("..", "..", "datasets", DomesticDisturbance),
+		SchemaDir:  filepath.Join("..", "..", "..", "..", "ontology"),
+		FixtureDir: filepath.Join("..", "..", "..", "..", "datasets", DomesticDisturbance),
 	})
 	if err != nil {
 		t.Fatalf("new advisory replay: %v", err)

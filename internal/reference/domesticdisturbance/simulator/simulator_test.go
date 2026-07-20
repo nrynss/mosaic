@@ -52,7 +52,7 @@ func TestExactDuplicateDoesNotInvokeFixtureLuna(t *testing.T) {
 		t.Fatalf("run scenario: %v", err)
 	}
 	before := service.NormalizerCalls()
-	fixture, err := LoadFixture(filepath.Join("..", "..", "datasets", DomesticDisturbance))
+	fixture, err := LoadFixture(filepath.Join("..", "..", "..", "..", "datasets", DomesticDisturbance))
 	if err != nil {
 		t.Fatalf("load fixture: %v", err)
 	}
@@ -82,8 +82,8 @@ func TestCheckpointRecoveryMatchesFinalScenarioCOP(t *testing.T) {
 	}
 	restarted, err := New(Config{
 		Store:      database,
-		SchemaDir:  filepath.Join("..", "..", "ontology"),
-		FixtureDir: filepath.Join("..", "..", "datasets", DomesticDisturbance),
+		SchemaDir:  filepath.Join("..", "..", "..", "..", "ontology"),
+		FixtureDir: filepath.Join("..", "..", "..", "..", "datasets", DomesticDisturbance),
 	})
 	if err != nil {
 		t.Fatalf("restart simulator: %v", err)
@@ -114,8 +114,8 @@ func newTestService(t *testing.T, ctx context.Context) (*Service, *store.Store) 
 	t.Cleanup(func() { _ = database.Close() })
 	service, err := New(Config{
 		Store:      database,
-		SchemaDir:  filepath.Join("..", "..", "ontology"),
-		FixtureDir: filepath.Join("..", "..", "datasets", DomesticDisturbance),
+		SchemaDir:  filepath.Join("..", "..", "..", "..", "ontology"),
+		FixtureDir: filepath.Join("..", "..", "..", "..", "datasets", DomesticDisturbance),
 	})
 	if err != nil {
 		t.Fatalf("new simulator: %v", err)

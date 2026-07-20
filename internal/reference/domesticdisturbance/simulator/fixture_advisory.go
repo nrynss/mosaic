@@ -398,15 +398,16 @@ func (r *AdvisoryReplay) newSolService(client sol.StructuredClient, modelRunID s
 		return nil, err
 	}
 	return sol.New(sol.Config{
-		Client:        client,
-		Resolver:      r.resolver,
-		Records:       r.records,
-		Validator:     validator,
-		PromptVersion: fixtureAdvisoryPrompt,
-		Provider:      fixtureAdvisoryProvider,
-		Model:         fixtureSolModel,
-		Clock:         func() time.Time { return clock },
-		NewModelRunID: func() string { return modelRunID },
+		Client:            client,
+		RequiredRequester: r.fixture.Expectation.SolRequest.RequestedBy,
+		Resolver:          r.resolver,
+		Records:           r.records,
+		Validator:         validator,
+		PromptVersion:     fixtureAdvisoryPrompt,
+		Provider:          fixtureAdvisoryProvider,
+		Model:             fixtureSolModel,
+		Clock:             func() time.Time { return clock },
+		NewModelRunID:     func() string { return modelRunID },
 	})
 }
 

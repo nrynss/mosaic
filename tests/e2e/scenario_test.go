@@ -19,7 +19,7 @@ import (
 	"mosaic.local/mosaic/internal/api"
 	"mosaic.local/mosaic/internal/contracts"
 	"mosaic.local/mosaic/internal/ontology/gen"
-	"mosaic.local/mosaic/internal/simulator"
+	"mosaic.local/mosaic/internal/reference/domesticdisturbance/simulator"
 	"mosaic.local/mosaic/internal/sol"
 	"mosaic.local/mosaic/internal/store"
 	"mosaic.local/mosaic/internal/stream"
@@ -161,15 +161,16 @@ func appendFixtureAdvisories(
 		t.Fatalf("load Sol validator: %v", err)
 	}
 	solService, err := sol.New(sol.Config{
-		Client:        solFixtureClient{recommendation: recommendation},
-		Resolver:      persistedSolResolver{resolver: persisted},
-		Records:       database,
-		Validator:     solValidator,
-		PromptVersion: "p12-e2e-fixture-v1",
-		Provider:      "fixture",
-		Model:         "fixture-sol",
-		Clock:         fixtureClock,
-		NewModelRunID: func() string { return "modelrun-p12-sol-001" },
+		Client:            solFixtureClient{recommendation: recommendation},
+		RequiredRequester: "supervisor-demo",
+		Resolver:          persistedSolResolver{resolver: persisted},
+		Records:           database,
+		Validator:         solValidator,
+		PromptVersion:     "p12-e2e-fixture-v1",
+		Provider:          "fixture",
+		Model:             "fixture-sol",
+		Clock:             fixtureClock,
+		NewModelRunID:     func() string { return "modelrun-p12-sol-001" },
 	})
 	if err != nil {
 		t.Fatalf("compose Sol fixture adapter: %v", err)
@@ -181,7 +182,7 @@ func appendFixtureAdvisories(
 		Evidence: []gen.Evidence{
 			fixtureEvidence("evidence-insight-access", "insight", active.InsightID, "The recommendation is limited to the cited derived assessment."),
 		},
-		RequestedBy: sol.SupervisorIdentity,
+		RequestedBy: "supervisor-demo",
 	})
 	if err != nil {
 		t.Fatalf("append fixture Sol recommendation: %v", err)

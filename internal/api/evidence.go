@@ -33,15 +33,26 @@ type EvidenceResolver interface {
 // performs SELECT-only queries through Store.SQLDB and does not extend or alter
 // any P03 persistence contract.
 type SQLiteEvidenceResolver struct {
-	db *sql.DB
+	db         *sql.DB
+	stateFacts StateFactResolver
 }
 
 // NewSQLiteEvidenceResolver creates a read-only resolver for a P03 store.
-func NewSQLiteEvidenceResolver(source *store.Store) (*SQLiteEvidenceResolver, error) {
+// A selected domain may optionally supply a StateFactResolver. Without one,
+// state_fact evidence remains explicitly unavailable while persisted artifact
+// resolution continues to work.
+func NewSQLiteEvidenceResolver(source *store.Store, stateFacts ...StateFactResolver) (*SQLiteEvidenceResolver, error) {
 	if source == nil || source.SQLDB() == nil {
 		return nil, errors.New("SQLite store is required for evidence resolution")
 	}
-	return &SQLiteEvidenceResolver{db: source.SQLDB()}, nil
+	if len(stateFacts) > 1 {
+		return nil, errors.New("at most one state-fact resolver may be configured")
+	}
+	resolver := &SQLiteEvidenceResolver{db: source.SQLDB()}
+	if len(stateFacts) == 1 {
+		resolver.stateFacts = stateFacts[0]
+	}
+	return resolver, nil
 }
 
 // Resolve finds one evidence target. Supported evidence target kinds are the
@@ -56,7 +67,11 @@ func (r *SQLiteEvidenceResolver) Resolve(ctx context.Context, kind, id string, c
 
 	switch kind {
 	case "state_fact":
-		return resolveStateFact(resolution, cop), nil
+		if r.stateFacts == nil {
+			resolution.Reason = "state_fact evidence is unavailable for this composition"
+			return resolution, nil
+		}
+		return r.stateFacts.ResolveStateFact(ctx, id, cop)
 	case "raw_event", "canonical_event", "luna_result", "insight", "recommendation", "model_run", "audit_record", "checkpoint":
 		return r.resolveStored(ctx, resolution)
 	default:
@@ -118,73 +133,9 @@ func artifactTable(kind string) (table, idColumn string, ok bool) {
 	}
 }
 
-func resolveStateFact(resolution Resolution, cop map[string]any) Resolution {
-	if cop == nil {
-		resolution.Reason = "no COP snapshot is available"
-		return resolution
-	}
-	for _, eventID := range stringsAt(cop["effective_event_ids"]) {
-		if eventID == resolution.ID {
-			resolution.Resolved = true
-			resolution.Artifact = map[string]any{
-				"fact_kind":          "effective_event",
-				"canonical_event_id": eventID,
-				"state_revision":     cop["state_revision"],
-			}
-			return resolution
-		}
-	}
-
-	for _, candidate := range []struct {
-		collection string
-		idField    string
-	}{
-		{collection: "incidents", idField: "incident_id"},
-		{collection: "units", idField: "unit_id"},
-		{collection: "resources", idField: "resource_id"},
-		{collection: "roads", idField: "road_id"},
-		{collection: "weather_alerts", idField: "weather_alert_id"},
-	} {
-		for _, fact := range objectsAt(cop[candidate.collection]) {
-			if id, _ := fact[candidate.idField].(string); id == resolution.ID {
-				resolution.Resolved = true
-				resolution.Artifact = fact
-				return resolution
-			}
-		}
-	}
-
-	resolution.Reason = "state fact is not present in the current COP"
-	return resolution
-}
-
-func stringsAt(value any) []string {
-	values, ok := value.([]any)
-	if !ok {
-		if strings, isStrings := value.([]string); isStrings {
-			return strings
-		}
-		return nil
-	}
-	result := make([]string, 0, len(values))
-	for _, value := range values {
-		if stringValue, ok := value.(string); ok {
-			result = append(result, stringValue)
-		}
-	}
-	return result
-}
-
-func objectsAt(value any) []map[string]any {
-	values, ok := value.([]any)
-	if !ok {
-		return nil
-	}
-	result := make([]map[string]any, 0, len(values))
-	for _, value := range values {
-		if object, ok := value.(map[string]any); ok {
-			result = append(result, object)
-		}
-	}
-	return result
+// StateFactResolver interprets state_fact evidence for one selected domain.
+// The generic API owns stored-record resolution only; a domain profile owns
+// the shape and identifiers of its deterministic COP facts.
+type StateFactResolver interface {
+	ResolveStateFact(context.Context, string, map[string]any) (Resolution, error)
 }

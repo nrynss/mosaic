@@ -17,13 +17,13 @@ import (
 	"os/signal"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
 
 	"mosaic.local/mosaic/internal/api"
-	"mosaic.local/mosaic/internal/dataset"
-	"mosaic.local/mosaic/internal/simulator"
+	"mosaic.local/mosaic/internal/reference/registry"
 	"mosaic.local/mosaic/internal/store"
 	"mosaic.local/mosaic/internal/stream"
 )
@@ -53,7 +53,7 @@ func parseConfig(args []string, getenv func(string) string) (config, error) {
 	flags := flag.NewFlagSet("mosaicdemo", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	listen := flags.String("listen-addr", valueOrDefault(getenv("MOSAIC_LISTEN_ADDR"), defaultListenAddress), "HTTP listen address")
-	database := flags.String("db", valueOrDefault(getenv("MOSAIC_DB_PATH"), simulator.DefaultDBPath()), "SQLite database path or DSN")
+	database := flags.String("db", valueOrDefault(getenv("MOSAIC_DB_PATH"), defaultDatabasePath()), "SQLite database path or DSN")
 	ui := flags.String("ui-dir", valueOrDefault(getenv("MOSAIC_UI_DIR"), defaultUIDirectory), "prebuilt dashboard directory")
 	assets := flags.String("asset-root", valueOrDefault(getenv("MOSAIC_ASSET_ROOT"), defaultAssetRoot), "directory containing ontology and datasets")
 	if err := flags.Parse(args); err != nil {
@@ -131,13 +131,22 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 	}
 }
 
+// newApplication composes exactly one internal domain profile and one
+// separately configured UI asset directory. It deliberately holds no direct
+// reference to a domestic-domain fixture, event identifier, or reducer; the
+// selected profile owns deterministic startup, recovery, and state-fact
+// evidence, while this host owns only generic persistence and API plumbing.
 func newApplication(ctx context.Context, configuration config) (*application, error) {
 	configuration, err := normalizeConfig(configuration)
 	if err != nil {
 		return nil, err
 	}
-	if err := dataset.Validate(configuration.AssetRoot); err != nil {
-		return nil, fmt.Errorf("validate frozen dataset from %q: %w", configuration.AssetRoot, err)
+	selected, err := registry.Resolve(registry.DefaultID)
+	if err != nil {
+		return nil, fmt.Errorf("select domain profile: %w", err)
+	}
+	if err := selected.Validate(configuration.AssetRoot); err != nil {
+		return nil, fmt.Errorf("validate frozen assets for profile %q from %q: %w", selected.ID(), configuration.AssetRoot, err)
 	}
 	dashboard, err := newDashboardHandler(configuration.UIDirectory)
 	if err != nil {
@@ -150,61 +159,35 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 	}
 	closeDatabase := func() error { return database.Close() }
 
-	scenario, err := simulator.New(simulator.Config{
-		Store:      database,
-		SchemaDir:  filepath.Join(configuration.AssetRoot, "ontology"),
-		FixtureDir: filepath.Join(configuration.AssetRoot, "datasets", simulator.DomesticDisturbance),
-	})
+	// Compose builds the profile's deterministic scenario, fixture advisory
+	// replay, and evidence resolver over the shared store. Run then seeds them:
+	// P05's durable source idempotency means a later start verifies and recovers
+	// the original history without appending duplicate events or advisory records.
+	domainRuntime, err := selected.Compose(ctx, database, configuration.AssetRoot)
 	if err != nil {
 		_ = closeDatabase()
-		return nil, fmt.Errorf("compose frozen scenario: %w", err)
+		return nil, fmt.Errorf("compose domain profile %q: %w", selected.ID(), err)
 	}
-	// Run intentionally re-delivers the same frozen raw-event IDs on every
-	// startup. P05's durable source idempotency returns existing results, so a
-	// later start verifies and recovers the original scenario without appending
-	// a second event, model-run, or checkpoint history.
-	run, err := scenario.Run(ctx)
-	if err != nil {
+	if err := domainRuntime.Run(ctx); err != nil {
 		_ = closeDatabase()
-		return nil, fmt.Errorf("seed frozen scenario: %w", err)
-	}
-	advisoryReplay, err := simulator.NewAdvisoryReplay(simulator.AdvisoryReplayConfig{
-		Store:      database,
-		SchemaDir:  filepath.Join(configuration.AssetRoot, "ontology"),
-		FixtureDir: filepath.Join(configuration.AssetRoot, "datasets", simulator.DomesticDisturbance),
-	})
-	if err != nil {
-		_ = closeDatabase()
-		return nil, fmt.Errorf("compose fixture advisory replay: %w", err)
-	}
-	timeline, err := advisoryTimeline(ctx, configuration, run)
-	if err != nil {
-		_ = closeDatabase()
-		return nil, fmt.Errorf("prepare fixture advisory timeline: %w", err)
-	}
-	if _, err := advisoryReplay.Replay(ctx, timeline); err != nil {
-		_ = closeDatabase()
-		return nil, fmt.Errorf("compose fixture advisory history: %w", err)
+		return nil, fmt.Errorf("seed domain profile %q: %w", selected.ID(), err)
 	}
 
-	resolver, err := api.NewSQLiteEvidenceResolver(database)
-	if err != nil {
-		_ = closeDatabase()
-		return nil, fmt.Errorf("compose governed evidence resolver: %w", err)
-	}
 	operations, err := api.NewSQLiteOperationsReader(database)
 	if err != nil {
 		_ = closeDatabase()
 		return nil, fmt.Errorf("compose SQLite operations reader: %w", err)
 	}
+	identities := selected.Identities()
 	apiServer, err := api.New(api.Config{
-		Recovery:        scenario,
+		Recovery:        domainRuntime,
 		Records:         database,
-		Evidence:        resolver,
+		Evidence:        domainRuntime,
 		Operations:      operations,
 		AdvisoryHistory: database,
 		AdvisoryMode:    "fixture_composed",
 		Stream:          stream.NewBroker(),
+		Actors:          api.PublicActorResolver{ViewerIdentity: identities.Viewer, SupervisorIdentity: identities.Supervisor},
 		Version:         "v0.1",
 	})
 	if err != nil {
@@ -218,47 +201,13 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 	}, nil
 }
 
-// advisoryTimeline preserves the frozen rev-7/rev-9 snapshots required by P24
-// when a retained main database makes P05 deliveries idempotent. The fallback
-// uses a transient local SQLite store and the same checked-in scenario; it
-// never changes the retained database or invokes a model/network client.
-func advisoryTimeline(ctx context.Context, configuration config, run simulator.RunResult) ([]simulator.TimelineEntry, error) {
-	if timelineHasRevision(run.Timeline, 7) && timelineHasRevision(run.Timeline, 9) {
-		return run.Timeline, nil
-	}
-
-	temporary, err := store.Open(ctx, ":memory:")
-	if err != nil {
-		return nil, fmt.Errorf("open transient fixture timeline store: %w", err)
-	}
-	defer temporary.Close()
-
-	shadow, err := simulator.New(simulator.Config{
-		Store:      temporary,
-		SchemaDir:  filepath.Join(configuration.AssetRoot, "ontology"),
-		FixtureDir: filepath.Join(configuration.AssetRoot, "datasets", simulator.DomesticDisturbance),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("compose transient fixture timeline: %w", err)
-	}
-	result, err := shadow.Run(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("run transient fixture timeline: %w", err)
-	}
-	if !timelineHasRevision(result.Timeline, 7) || !timelineHasRevision(result.Timeline, 9) {
-		return nil, errors.New("transient fixture timeline is missing required revisions")
-	}
-	return result.Timeline, nil
+// defaultDatabasePath keeps the interactive demo database outside the
+// repository. It mirrors the generic local default without importing a domain
+// package into this composition root.
+func defaultDatabasePath() string {
+	return filepath.Join(os.TempDir(), "mosaic-v0.1-demo.db")
 }
 
-func timelineHasRevision(timeline []simulator.TimelineEntry, revision int64) bool {
-	for _, entry := range timeline {
-		if entry.StateRevision == revision {
-			return true
-		}
-	}
-	return false
-}
 func normalizeConfig(configuration config) (config, error) {
 	configuration.ListenAddress = strings.TrimSpace(configuration.ListenAddress)
 	configuration.DatabasePath = strings.TrimSpace(configuration.DatabasePath)
@@ -373,10 +322,8 @@ func safeUIRelativePath(r *http.Request) (string, error) {
 	if strings.Contains(decoded, "\\") {
 		return "", errors.New("backslash path separators are not allowed")
 	}
-	for _, segment := range strings.Split(decoded, "/") {
-		if segment == ".." {
-			return "", errors.New("parent path segments are not allowed")
-		}
+	if slices.Contains(strings.Split(decoded, "/"), "..") {
+		return "", errors.New("parent path segments are not allowed")
 	}
 	cleaned := path.Clean("/" + decoded)
 	relative := strings.TrimPrefix(cleaned, "/")

@@ -6,13 +6,14 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"testing"
 
 	"mosaic.local/mosaic/internal/contracts"
 	"mosaic.local/mosaic/internal/ontology/gen"
+	"mosaic.local/mosaic/internal/reference/domesticdisturbance/state"
 	"mosaic.local/mosaic/internal/replay"
-	"mosaic.local/mosaic/internal/state"
 	"mosaic.local/mosaic/internal/store"
 )
 
@@ -218,7 +219,7 @@ func appendEvents(t *testing.T, ctx context.Context, s *store.Store, events []ge
 
 func domesticEvents(t *testing.T) []gen.CanonicalEvent {
 	t.Helper()
-	bytes, err := os.ReadFile(filepath.Join("..", "..", "datasets", "domestic-disturbance", "expected-outcomes.json"))
+	bytes, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "datasets", "domestic-disturbance", "expected-outcomes.json"))
 	if err != nil {
 		t.Fatalf("read expected scenario: %v", err)
 	}
@@ -278,12 +279,9 @@ func assertStateField(t *testing.T, values []map[string]any, idKey, id, field, w
 
 func assertContains(t *testing.T, values []string, want string) {
 	t.Helper()
-	for _, value := range values {
-		if value == want {
-			return
-		}
+	if !slices.Contains(values, want) {
+		t.Fatalf("%q not found in %v", want, values)
 	}
-	t.Fatalf("%q not found in %v", want, values)
 }
 
 func assertNotContains(t *testing.T, values []string, unwanted string) {

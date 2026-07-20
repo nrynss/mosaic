@@ -15,13 +15,7 @@ import (
 	"mosaic.local/mosaic/internal/ontology/gen"
 )
 
-const (
-	// SupervisorIdentity is the only local demo identity permitted to request a
-	// Sol briefing. It deliberately matches P08's fixed role boundary without
-	// importing its HTTP package.
-	SupervisorIdentity = "supervisor-demo"
-	schemaVersion      = "1.0.0"
-)
+const schemaVersion = "1.0.0"
 
 var (
 	// ErrInvalidBriefing means a briefing attempt violated an input, schema,
@@ -37,9 +31,11 @@ var (
 	// response. The ModelRun remains durable and no Recommendation is written.
 	ErrBriefingFailed = errors.New("Sol briefing failed")
 
-	// ErrSupervisorRequired makes the fixed-demo-role policy testable without
-	// treating a viewer request as a model or operational action.
-	ErrSupervisorRequired = errors.New("supervisor-demo identity is required")
+	// ErrSupervisorRequired makes the configured requester-role policy testable
+	// without treating an unauthorized request as a model or operational action.
+	// The authorized requester identity is supplied by the composition, not
+	// named by this reusable package.
+	ErrSupervisorRequired = errors.New("authorized requester identity is required")
 )
 
 // StructuredClient is the deliberately narrow model seam. It sees a committed
@@ -82,30 +78,35 @@ type Response struct {
 // Config supplies deterministic policy dependencies. No runtime model,
 // network client, API server, or operational system is constructed here.
 type Config struct {
-	Client        StructuredClient
-	Resolver      Resolver
-	Records       contracts.ImmutableRecordRepository
-	Validator     *SchemaValidator
-	PromptVersion string
-	Provider      string
-	Model         string
-	Clock         func() time.Time
-	NewModelRunID func() string
+	Client StructuredClient
+	// RequiredRequester is the composition-supplied identity permitted to
+	// request a briefing. The reusable package validates against this value but
+	// does not name any specific demo or domain identity itself.
+	RequiredRequester string
+	Resolver          Resolver
+	Records           contracts.ImmutableRecordRepository
+	Validator         *SchemaValidator
+	PromptVersion     string
+	Provider          string
+	Model             string
+	Clock             func() time.Time
+	NewModelRunID     func() string
 }
 
 // Service implements contracts.SolAdapter and appends only immutable briefing
 // artifacts. It deliberately has no projector, API, dispatcher, or action
 // client, so it cannot mutate a COP or execute an operational command.
 type Service struct {
-	client        StructuredClient
-	resolver      Resolver
-	records       contracts.ImmutableRecordRepository
-	validator     *SchemaValidator
-	promptVersion string
-	provider      string
-	model         string
-	clock         func() time.Time
-	newModelRunID func() string
+	client            StructuredClient
+	requiredRequester string
+	resolver          Resolver
+	records           contracts.ImmutableRecordRepository
+	validator         *SchemaValidator
+	promptVersion     string
+	provider          string
+	model             string
+	clock             func() time.Time
+	newModelRunID     func() string
 }
 
 // New rejects partial wiring so every Sol attempt can produce a valid,
@@ -113,6 +114,9 @@ type Service struct {
 func New(config Config) (*Service, error) {
 	if config.Client == nil {
 		return nil, errors.New("Sol structured client is required")
+	}
+	if strings.TrimSpace(config.RequiredRequester) == "" {
+		return nil, errors.New("Sol required requester identity is required")
 	}
 	if config.Resolver == nil {
 		return nil, errors.New("Sol resolver is required")
@@ -139,15 +143,16 @@ func New(config Config) (*Service, error) {
 		config.NewModelRunID = newModelRunID
 	}
 	return &Service{
-		client:        config.Client,
-		resolver:      config.Resolver,
-		records:       config.Records,
-		validator:     config.Validator,
-		promptVersion: config.PromptVersion,
-		provider:      config.Provider,
-		model:         config.Model,
-		clock:         config.Clock,
-		newModelRunID: config.NewModelRunID,
+		client:            config.Client,
+		requiredRequester: config.RequiredRequester,
+		resolver:          config.Resolver,
+		records:           config.Records,
+		validator:         config.Validator,
+		promptVersion:     config.PromptVersion,
+		provider:          config.Provider,
+		model:             config.Model,
+		clock:             config.Clock,
+		newModelRunID:     config.NewModelRunID,
 	}, nil
 }
 
@@ -211,7 +216,7 @@ func (s *Service) Brief(ctx context.Context, input contracts.SolInput) (contract
 }
 
 func (s *Service) prepareRequest(input contracts.SolInput) (Request, error) {
-	if input.RequestedBy != SupervisorIdentity {
+	if input.RequestedBy != s.requiredRequester {
 		return Request{}, fmt.Errorf("%w: got %q", ErrSupervisorRequired, input.RequestedBy)
 	}
 	if input.StateRevision < 1 {

@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"mosaic.local/mosaic/internal/simulator"
+	"mosaic.local/mosaic/internal/reference/domesticdisturbance/simulator"
 	"mosaic.local/mosaic/internal/store"
 )
 

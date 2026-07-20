@@ -25,12 +25,31 @@ Add an additive internal profile contract with these responsibilities:
 
 - validate the selected frozen assets;
 - compose a deterministic scenario/recovery runner and fixture advisory replay;
-- resolve domain state facts for the bounded evidence read model; and
-- describe the profile identifier used by the executable composition root.
+- resolve domain state facts for the bounded evidence read model;
+- describe the profile identifier used by the executable composition root; and
+- supply the demo actor identities the generic host composes into the public
+  actor resolver and the Sol briefing guard.
 
 `cmd/mosaicdemo` selects its profile explicitly and receives the UI directory as configuration. It may know the registered profile name, but it may not directly reference a fixture directory, domestic event identifier, police role, or domain reducer.
 
 `internal/api` continues to resolve persisted immutable artifacts itself. It delegates only `state_fact` interpretation to the selected profile, preserving the API's bounded serialization and raw-payload exclusion.
+
+### Identity decoupling
+
+The scenario's actor identities (`viewer-demo`, `supervisor-demo`) are domain
+data, not core constants. They remain present in the frozen dataset's audit
+records as observable output, but the reusable core packages must not name them:
+
+- `internal/sol` takes the authorized briefing requester as a `RequiredRequester`
+  configuration value rather than a hardcoded identity. The reusable service
+  validates against the configured value; the profile supplies it.
+- `internal/api`'s `PublicActorResolver` carries the viewer/supervisor identity
+  tokens as configurable fields. A zero-value resolver never elevates a request.
+  The composition root wires the tokens from the selected profile's identities.
+
+This keeps the identity-header display feature and Sol's supervisor-only guard
+byte-identical in the composed demo while removing the domain literals from the
+core Go packages.
 
 ## Migration and safety
 
@@ -38,8 +57,8 @@ This is a source-layout and composition refactor. SQLite schema, persisted recor
 
 ## Acceptance
 
-- Core packages contain no domestic-disturbance IDs, `supervisor-demo`, or police-domain state-fact collection names.
-- The reference profile owns the domestic fixture validator, deterministic reducer, fixture simulation/advisory replay, and state-fact resolver.
+- Core packages contain no domestic-disturbance IDs, `supervisor-demo`, or police-domain state-fact collection names. The value survives only as frozen dataset data and profile-supplied composition configuration.
+- The reference profile owns the domestic fixture validator, deterministic reducer, fixture simulation/advisory replay, state-fact resolver, and demo actor identities.
 - `mosaicdemo` composes one explicit profile plus one separately configured UI asset directory, without direct domestic-domain imports.
 - Existing simulator, API, UI, E2E, Docker, dataset, replay, and quality checks preserve the current observable demo behavior.
 

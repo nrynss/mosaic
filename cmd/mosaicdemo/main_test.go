@@ -16,7 +16,7 @@ import (
 
 	"mosaic.local/mosaic/internal/api"
 	"mosaic.local/mosaic/internal/ontology/gen"
-	"mosaic.local/mosaic/internal/simulator"
+	"mosaic.local/mosaic/internal/reference/domesticdisturbance/simulator"
 	"mosaic.local/mosaic/internal/store"
 )
 

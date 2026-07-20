@@ -21,8 +21,8 @@ import (
 	"mosaic.local/mosaic/internal/ingestion"
 	"mosaic.local/mosaic/internal/luna"
 	"mosaic.local/mosaic/internal/ontology/gen"
+	"mosaic.local/mosaic/internal/reference/domesticdisturbance/state"
 	"mosaic.local/mosaic/internal/replay"
-	"mosaic.local/mosaic/internal/state"
 	"mosaic.local/mosaic/internal/store"
 )
 

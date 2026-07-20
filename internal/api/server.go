@@ -25,9 +25,7 @@ const (
 	// authentication and never gates a request in the demo.
 	IdentityHeader = "X-Mosaic-Demo-Identity"
 
-	viewerIdentity     = "viewer-demo"
-	supervisorIdentity = "supervisor-demo"
-	schemaVersion      = "1.0.0"
+	schemaVersion = "1.0.0"
 )
 
 // RecoveryReader is implemented by replay.Runner. It is kept local to avoid
@@ -82,16 +80,21 @@ type ActionPolicy interface {
 // PublicActorResolver is the open-demo default. The optional identity header
 // changes only display metadata and the schema-valid audit display role; every
 // caller is still the same public actor and every request remains public.
-type PublicActorResolver struct{}
+//
+// The identity tokens are supplied by the composition (the selected profile),
+// not named by this reusable package. A zero-value resolver never elevates any
+// request and simply reports the anonymous public viewer.
+type PublicActorResolver struct {
+	ViewerIdentity     string
+	SupervisorIdentity string
+}
 
 // ResolveActor returns the stable public demo actor for every request.
-func (PublicActorResolver) ResolveActor(_ context.Context, request *http.Request) (Actor, error) {
-	mode := viewerIdentity
-	if request != nil && request.Header.Get(IdentityHeader) == supervisorIdentity {
-		mode = supervisorIdentity
-	}
+func (r PublicActorResolver) ResolveActor(_ context.Context, request *http.Request) (Actor, error) {
+	mode := r.ViewerIdentity
 	role := "viewer"
-	if mode == supervisorIdentity {
+	if r.SupervisorIdentity != "" && request != nil && request.Header.Get(IdentityHeader) == r.SupervisorIdentity {
+		mode = r.SupervisorIdentity
 		role = "supervisor"
 	}
 	return Actor{
@@ -367,10 +370,7 @@ func (s *Server) handleOperations(w http.ResponseWriter, r *http.Request) {
 	}
 
 	observedAt := s.clock().UTC()
-	uptime := observedAt.Sub(s.startedAt)
-	if uptime < 0 {
-		uptime = 0
-	}
+	uptime := max(observedAt.Sub(s.startedAt), 0)
 	metadata := s.stream.Metadata()
 	writeJSON(w, http.StatusOK, operationsResponse{
 		ObservedAt:             observedAt,

@@ -10,8 +10,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"mosaic.local/mosaic/internal/dataset"
-	"mosaic.local/mosaic/internal/simulator"
+	"mosaic.local/mosaic/internal/reference/domesticdisturbance/dataset"
+	"mosaic.local/mosaic/internal/reference/domesticdisturbance/simulator"
 	"mosaic.local/mosaic/internal/store"
 )
 

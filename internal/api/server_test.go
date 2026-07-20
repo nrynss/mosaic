@@ -15,8 +15,8 @@ import (
 
 	"mosaic.local/mosaic/internal/contracts"
 	"mosaic.local/mosaic/internal/ontology/gen"
+	"mosaic.local/mosaic/internal/reference/domesticdisturbance/state"
 	"mosaic.local/mosaic/internal/replay"
-	"mosaic.local/mosaic/internal/state"
 	"mosaic.local/mosaic/internal/store"
 	"mosaic.local/mosaic/internal/stream"
 )
@@ -37,7 +37,6 @@ func TestPublicReadSurfaceReturnsCOPAndResolvableEvidenceWithoutWriting(t *testi
 	for _, path := range []string{
 		"/api/v1/evidence/raw_event/raw-1",
 		"/api/v1/evidence/canonical_event/canonical-1",
-		"/api/v1/evidence/state_fact/incident-1",
 		"/api/v1/artifacts/recommendation/recommendation-1",
 	} {
 		response := request(t, fixture.handler, http.MethodGet, path, "", "")
@@ -58,6 +57,64 @@ func TestPublicReadSurfaceReturnsCOPAndResolvableEvidenceWithoutWriting(t *testi
 	}
 	if after := durableCounts(t, fixture.store); !reflect.DeepEqual(after, before) {
 		t.Fatalf("GET requests mutated durable history: before=%#v after=%#v", before, after)
+	}
+}
+
+// stubStateFacts is a domain-neutral StateFactResolver used to prove the core
+// evidence resolver delegates state_fact interpretation without embedding any
+// domain-specific collection or identifier.
+type stubStateFacts struct {
+	resolved map[string]any
+}
+
+func (s stubStateFacts) ResolveStateFact(_ context.Context, id string, _ map[string]any) (Resolution, error) {
+	resolution := Resolution{Kind: "state_fact", ID: id}
+	if artifact, ok := s.resolved[id]; ok {
+		resolution.Resolved = true
+		resolution.Artifact = artifact
+		return resolution, nil
+	}
+	resolution.Reason = "not present"
+	return resolution, nil
+}
+
+func TestStateFactEvidenceDelegatesToProfile(t *testing.T) {
+	ctx := context.Background()
+	database, err := store.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	// Without an injected resolver the core reports state_fact as unavailable
+	// rather than inventing a domain interpretation.
+	bare, err := NewSQLiteEvidenceResolver(database)
+	if err != nil {
+		t.Fatalf("new bare resolver: %v", err)
+	}
+	unavailable, err := bare.Resolve(ctx, "state_fact", "fact-1", map[string]any{})
+	if err != nil {
+		t.Fatalf("resolve without profile: %v", err)
+	}
+	if unavailable.Resolved {
+		t.Fatalf("state_fact resolved without a profile resolver: %#v", unavailable)
+	}
+
+	// With an injected resolver the core delegates and surfaces its result.
+	wired, err := NewSQLiteEvidenceResolver(database, stubStateFacts{resolved: map[string]any{"fact-1": map[string]any{"ok": true}}})
+	if err != nil {
+		t.Fatalf("new wired resolver: %v", err)
+	}
+	resolved, err := wired.Resolve(ctx, "state_fact", "fact-1", map[string]any{})
+	if err != nil {
+		t.Fatalf("resolve with profile: %v", err)
+	}
+	if !resolved.Resolved {
+		t.Fatalf("delegated state_fact did not resolve: %#v", resolved)
+	}
+
+	if _, err := NewSQLiteEvidenceResolver(database, stubStateFacts{}, stubStateFacts{}); err == nil {
+		t.Fatal("expected error when configuring more than one state-fact resolver")
 	}
 }
 
@@ -94,7 +151,7 @@ func TestPublicAuditWritesNeverExecuteAnAction(t *testing.T) {
 
 func TestIdentityHeaderIsDisplayMetadataNotAccessControl(t *testing.T) {
 	fixture := newFixture(t)
-	for _, identity := range []string{"", viewerIdentity, supervisorIdentity, "unrecognised"} {
+	for _, identity := range []string{"", "viewer-token", "supervisor-token", "unrecognised"} {
 		response := request(t, fixture.handler, http.MethodGet, "/api/v1/cop", identity, "")
 		if response.Code != http.StatusOK {
 			t.Fatalf("COP with identity %q status = %d, body = %s", identity, response.Code, response.Body.String())

@@ -10,8 +10,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"mosaic.local/mosaic/internal/dataset"
 	"mosaic.local/mosaic/internal/datasetgen"
+	"mosaic.local/mosaic/internal/reference/domesticdisturbance/dataset"
 )
 
 func main() {
