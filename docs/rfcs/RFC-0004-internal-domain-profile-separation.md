@@ -42,3 +42,9 @@ This is a source-layout and composition refactor. SQLite schema, persisted recor
 - The reference profile owns the domestic fixture validator, deterministic reducer, fixture simulation/advisory replay, and state-fact resolver.
 - `mosaicdemo` composes one explicit profile plus one separately configured UI asset directory, without direct domestic-domain imports.
 - Existing simulator, API, UI, E2E, Docker, dataset, replay, and quality checks preserve the current observable demo behavior.
+
+## Product direction and non-claims
+
+The reference UI should become incident-centred: a synthetic intake identifier, elapsed counter, evidence-backed context, an Analyze affordance, recipient-specific handoff cards, and a provenance/actions tab. The current connection/health panel is developer diagnostics and belongs in a compact status view.
+
+A future recurrent-issue feature may deterministically surface prior recorded handoffs for the same configured area after a configurable window. It may prepare a pending note for review and expose it to a separate local feed. It must not imply autonomous external contact, multi-instance delivery, or LLM self-healing; current and near-term actions remain immutable records with executed: false.
