@@ -1,0 +1,84 @@
+{
+  "banked_at": "2026-07-21T10:01:01.019538Z",
+  "canonical_event_json": {
+    "canonical_event_id": "canon-raw-live-bank-full-001",
+    "canonical_seq": 1,
+    "confidence": {
+      "basis": "The Base64-encoded application/json payload decoded successfully and contains all fields required for an incident report; timestamps and identifiers are explicit.",
+      "reasoning_support": "high",
+      "source_quality": "high",
+      "transformation_certainty": "high"
+    },
+    "entity_refs": [
+      {
+        "id": "incident-live-bank-001",
+        "kind": "incident"
+      },
+      {
+        "id": "location-brook-lane",
+        "kind": "location"
+      }
+    ],
+    "event_type": "incident_reported",
+    "incident_refs": [
+      "incident-live-bank-001"
+    ],
+    "occurred_at": "2026-07-18T10:00:00Z",
+    "payload": {
+      "category": "domestic_disturbance",
+      "incident_id": "incident-live-bank-001",
+      "location_id": "location-brook-lane",
+      "summary": "Neighbor reports loud domestic disturbance at 14 Brook Lane."
+    },
+    "provenance": {
+      "normalizer": "luna-json-base64-normalizer/1.0.0",
+      "raw_event_id": "raw-live-bank-full-001"
+    },
+    "raw_event_id": "raw-live-bank-full-001",
+    "received_at": "2026-07-18T10:00:01Z",
+    "schema_version": "1.0.0"
+  },
+  "refusal_detail": "",
+  "request_raw_event": {
+    "content_type": "application/json",
+    "payload_bytes_b64": "eyJjYXRlZ29yeSI6ImRvbWVzdGljX2Rpc3R1cmJhbmNlIiwiaW5jaWRlbnRfaWQiOiJpbmNpZGVudC1saXZlLWJhbmstMDAxIiwibG9jYXRpb25faWQiOiJsb2NhdGlvbi1icm9vay1sYW5lIiwic3VtbWFyeSI6Ik5laWdoYm9yIHJlcG9ydHMgbG91ZCBkb21lc3RpYyBkaXN0dXJiYW5jZSBhdCAxNCBCcm9vayBMYW5lLiJ9",
+    "raw_event_id": "raw-live-bank-full-001",
+    "raw_sha256": "857ddc7e360eded7574cf1f73121235fcf5199260abdc75af5eb036116648d76",
+    "received_at": "2026-07-18T10:00:01Z",
+    "schema_version": "1.0.0",
+    "source": {
+      "source_id": "sim",
+      "source_record_id": "src-live-bank-full-1"
+    },
+    "source_occurred_at": "2026-07-18T10:00:00Z"
+  },
+  "response_id": "resp_05b252840c94975e016a5f43512814819f83e7ad11531c82f2",
+  "result_json": {
+    "canonical_event_id": "canon-raw-live-bank-full-001",
+    "created_at": "2026-07-18T10:00:01Z",
+    "evidence": [
+      {
+        "explanation": "The decoded payload explicitly identifies the incident category.",
+        "json_pointer": "/payload_bytes_b64",
+        "target_id": "raw-live-bank-full-001",
+        "target_kind": "raw_event"
+      },
+      {
+        "explanation": "The decoded payload explicitly supplies the incident, location, and summary fields.",
+        "json_pointer": "/payload_bytes_b64",
+        "target_id": "raw-live-bank-full-001",
+        "target_kind": "raw_event"
+      },
+      {
+        "explanation": "The source occurrence timestamp provides the canonical occurrence time.",
+        "json_pointer": "/source_occurred_at",
+        "target_id": "raw-live-bank-full-001",
+        "target_kind": "raw_event"
+      }
+    ],
+    "luna_result_id": "luna-result-raw-live-bank-full-001",
+    "raw_event_id": "raw-live-bank-full-001",
+    "schema_version": "1.0.0",
+    "status": "accepted"
+  }
+}

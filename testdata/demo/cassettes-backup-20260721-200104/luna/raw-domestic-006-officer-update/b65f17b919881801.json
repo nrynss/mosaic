@@ -1,0 +1,65 @@
+{
+  "schema_version": "1.0.0",
+  "key": "luna/raw-domestic-006-officer-update/b65f17b919881801",
+  "agent": "luna",
+  "state_revision": 0,
+  "request_fingerprint": "b65f17b9198818016511fff882197d503ebeb6dd84a41b4923f4914850e1d8e9",
+  "prompt_version": "v1.0.0",
+  "prompt_hash": "3f943e46d22b34c339ec0dc59293500b8f29eef097ec8816e05781a2f90fe3c4",
+  "response_id": "resp_07cfa7e9ecb8520f016a5f5b560008819da80d238e7b12efce",
+  "result_json": {
+    "canonical_event_id": "canonical-live-raw-domestic-006-officer-update",
+    "created_at": "2026-07-18T10:04:10Z",
+    "evidence": [
+      {
+        "explanation": "Structured intake attributes directly identify a unit status change for unit-017, set availability to assigned, and associate incident-domestic-001.",
+        "json_pointer": "/attributes",
+        "target_id": "raw-domestic-006-officer-update",
+        "target_kind": "raw_event"
+      }
+    ],
+    "luna_result_id": "luna-live-raw-domestic-006-officer-update",
+    "raw_event_id": "raw-domestic-006-officer-update",
+    "schema_version": "1.0.0",
+    "status": "accepted"
+  },
+  "canonical_event_json": {
+    "canonical_event_id": "canonical-live-raw-domestic-006-officer-update",
+    "canonical_seq": 705925006,
+    "confidence": {
+      "basis": "Authoritative structured attributes directly supply the event type, unit identifier, availability, and incident identifier; the decoded radio text supports a Unit 17 status update.",
+      "reasoning_support": "high",
+      "source_quality": "high",
+      "transformation_certainty": "high"
+    },
+    "entity_refs": [
+      {
+        "id": "unit-017",
+        "kind": "unit"
+      },
+      {
+        "id": "incident-domestic-001",
+        "kind": "incident"
+      }
+    ],
+    "event_type": "unit_status_changed",
+    "incident_refs": [
+      "incident-domestic-001"
+    ],
+    "occurred_at": "2026-07-18T10:04:00Z",
+    "payload": {
+      "availability": "assigned",
+      "incident_id": "incident-domestic-001",
+      "unit_id": "unit-017"
+    },
+    "provenance": {
+      "model_run_id": "modelrun-live-luna-raw-domestic-006-officer-update",
+      "normalizer": "openai-luna",
+      "raw_event_id": "raw-domestic-006-officer-update"
+    },
+    "raw_event_id": "raw-domestic-006-officer-update",
+    "received_at": "2026-07-18T10:04:10Z",
+    "schema_version": "1.0.0"
+  },
+  "recorded_at": "2026-07-21T11:43:28.5660371Z"
+}

@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.0.0",
+  "key": "sol/rev9/cb2f1eb2bb2536dc",
+  "agent": "sol",
+  "state_revision": 9,
+  "request_fingerprint": "cb2f1eb2bb2536dc2b0c53ec791836100bcf33950ac28fda3bff82a70ec23ab9",
+  "prompt_version": "v1.0.0",
+  "prompt_hash": "293cfa720c5885099060d3000f98eb4eb56c3a5d716432855b64769bb82fb378",
+  "response_id": "resp_00acdbe93537970a016a5f5b92a24c819ea25020c5eb569422",
+  "recommendation_json": {
+    "schema_version": "1.0.0",
+    "recommendation_id": "recommendation-2f71af46-5263-4d14-9f39-cc51a5410098",
+    "state_revision": 9,
+    "text": "Consider reviewing the reported open incident context, including the linked unit and resource availability statuses, before determining whether any supervisory follow-up may be appropriate.",
+    "evidence": [
+      {
+        "target_kind": "raw_event",
+        "target_id": "raw-domestic-001-call",
+        "explanation": "live bank evidence"
+      }
+    ],
+    "created_at": "2026-07-21T11:44:18.454409Z"
+  },
+  "recorded_at": "2026-07-21T11:44:26.6133972Z"
+}

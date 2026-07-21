@@ -1,0 +1,65 @@
+{
+  "schema_version": "1.0.0",
+  "key": "luna/raw-domestic-009-late-ems/ed1389d5314fc711",
+  "agent": "luna",
+  "state_revision": 0,
+  "request_fingerprint": "ed1389d5314fc71108348eb56ed8ee499ac48ffb940db5b27eaeb11f2a4d35ed",
+  "prompt_version": "v1.0.0",
+  "prompt_hash": "3f943e46d22b34c339ec0dc59293500b8f29eef097ec8816e05781a2f90fe3c4",
+  "response_id": "resp_0a07a6124ac57107016a5f5b6f48b4819eaa74cc5b1c94af0b",
+  "result_json": {
+    "canonical_event_id": "canonical-live-raw-domestic-009-late-ems",
+    "created_at": "2026-07-18T10:09:00Z",
+    "evidence": [
+      {
+        "explanation": "Structured attributes identify a resource status change for resource-ems-004, set availability to unavailable, and directly associate incident-domestic-001.",
+        "json_pointer": "/attributes",
+        "target_id": "raw-domestic-009-late-ems",
+        "target_kind": "raw_event"
+      }
+    ],
+    "luna_result_id": "luna-live-raw-domestic-009-late-ems",
+    "raw_event_id": "raw-domestic-009-late-ems",
+    "schema_version": "1.0.0",
+    "status": "accepted"
+  },
+  "canonical_event_json": {
+    "canonical_event_id": "canonical-live-raw-domestic-009-late-ems",
+    "canonical_seq": 1,
+    "confidence": {
+      "basis": "Structured intake attributes directly supply the event type, resource identifier, availability, and incident identifier; the source payload confirms the unavailable status.",
+      "reasoning_support": "high",
+      "source_quality": "high",
+      "transformation_certainty": "high"
+    },
+    "entity_refs": [
+      {
+        "id": "resource-ems-004",
+        "kind": "resource"
+      },
+      {
+        "id": "incident-domestic-001",
+        "kind": "incident"
+      }
+    ],
+    "event_type": "resource_status_changed",
+    "incident_refs": [
+      "incident-domestic-001"
+    ],
+    "occurred_at": "2026-07-18T10:02:30Z",
+    "payload": {
+      "availability": "unavailable",
+      "incident_id": "incident-domestic-001",
+      "resource_id": "resource-ems-004"
+    },
+    "provenance": {
+      "model_run_id": "modelrun-live-luna-raw-domestic-009-late-ems",
+      "normalizer": "openai-luna",
+      "raw_event_id": "raw-domestic-009-late-ems"
+    },
+    "raw_event_id": "raw-domestic-009-late-ems",
+    "received_at": "2026-07-18T10:09:00Z",
+    "schema_version": "1.0.0"
+  },
+  "recorded_at": "2026-07-21T11:43:55.4794787Z"
+}
