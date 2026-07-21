@@ -1,15 +1,34 @@
 # Task: Scripted demo recorder — bank the full demo for $0 offline replay
 
-**Goal:** Build a deterministic, scripted recorder that captures the entire demo
+**Goal:** **Design the demo beats and work out every determinism kink entirely
+offline (no live runs), then do exactly ONE live run to bank real model responses.**
+The deliverable is a deterministic, scripted recorder that captures the entire demo
 timeline (all 10 beats + the Terra/Sol/Luna model interactions) into a committed
 cassette bank, plus a **no-live** verification test that replays that bank and
-asserts every interaction hits. One deliberate live pass records; everything else
-(CI, dev, the demo itself) runs from the bank at `$0`, offline.
+asserts every interaction hits. After the single live pass, everything (CI, dev,
+the demo) runs from the bank at `$0`, offline.
 
-**Why now:** Replay is fingerprint-sensitive (see §2). A hand-driven record run is
-not reproducible — the request identity must live in a **single committed manifest**
-that both the recorder and the replay-verifier consume, so record-time and
-replay-time requests are byte-identical.
+**The key enabler:** a cassette's **key is computed from the request, not the model
+response** (Luna: SHA-256 of the exact `RawEventJSON`; Sol/Terra: COP revision +
+evidence set + insights + `requested_by`). So **all** the hard parts — fingerprint
+stability, Sol insight hydration, evidence exact-match, reaching COP rev 9 — are
+**response-independent and can be fully validated with stub responses, no OpenAI.**
+The one live run only fills in *real response content* behind requests whose
+identity you already proved stable offline.
+
+**Why scripted:** Replay is fingerprint-sensitive (see §2). A hand-driven record run
+is not reproducible — the request identity must live in a **single committed
+manifest** that the offline loop, the live recorder, and the replay-verifier all
+consume, so requests are byte-identical across all three.
+
+**Workflow:**
+1. **Offline loop (§2.5, no live):** drive the manifest with **stub** model clients;
+   iterate until record→bank→replay hits for every step and keys are stable. This is
+   where the beats get designed and the kinks get worked out.
+2. **One live run (§3b):** swap stubs → real OpenAI client, run the *same* manifest
+   once in record mode → banks real responses. Keys already validated ⇒ guaranteed
+   replay hits.
+3. **Forever after (§3c, no live):** committed bank + replay verifier in CI.
 
 **Branch:** `feat/v0.4-pluggable-event-spine`
 **Prereqs (already landed):** live OpenAI path for Terra/Sol/Luna + cassette record/
@@ -117,6 +136,42 @@ UI-typed free text at record time. The manifest is the contract.
 
 ---
 
+## 2.5 Offline development loop (NO live runs — this is where the beats get designed)
+
+Design and debug the whole pipeline with **stub model clients** that return canned,
+schema-valid responses. This exercises the *real* Play, the *real* operator handlers
+(hydration, evidence match, COP recovery), the *real* cassette record→FileStore→
+replay path, and the *real* key/fingerprint computation — with **zero OpenAI calls**.
+
+**Enabling seam (small change):** `composeModels` already injects stub inners for
+Terra and Sol via `testLiveTerra` / `testLiveSol`
+([cmd/mosaicdemo/models.go:60](../../cmd/mosaicdemo/models.go)). **Add the missing
+`testLiveLuna` seam** (an `openaimodel.LunaStructuredClient` stub slot) so all three
+agents can be driven offline. Alternatively, wire an `MOSAIC_OPENAI_BASE_URL`
+override into the live `openaimodel.Config` (the transport already accepts
+`Endpoint`) and point it at a tiny local mock Responses server — pick whichever fits
+the harness; the stub seam is less plumbing for a Go test.
+
+**What the offline loop proves (the actual kinks):**
+1. **Play determinism** — every run reaches COP `state_revision 9` with the same COP
+   hash (seeded off, fixed dataset, `MOSAIC_SIM_BEAT_SPACING=1ms`).
+2. **Hydration** — Sol's `hydrateOperatorInsights` resolves `insight-domestic-access-001`
+   from the store at rev 9 (present after Play).
+3. **Evidence exact-match** — each Terra/Sol step's canned response cites exactly the
+   manifest's evidence set (`sameEvidence` passes). Tune the stub to echo the
+   manifest evidence so this is green by construction.
+4. **Key stability** — run the manifest twice; assert identical cassette keys both
+   times, and that the **record-path key == replay-path key** for every step (no
+   `ErrReplayMiss`). This is the guarantee that makes the single live run safe.
+
+**Definition of done for the offline loop:** stub record → stub replay hits 100% of
+manifest steps, keys stable across repeated runs, no misses. Only then spend on live.
+
+> The stub bank is disposable (canned content). It validates *identity and flow*, not
+> model quality. The committed CI bank comes from the single live run (§3b).
+
+---
+
 ## 3. Deliverables
 
 ### 3a. Request manifest (committed, single source of truth)
@@ -151,14 +206,19 @@ demo order with fully literal payloads. Suggested shape:
   the marshaled bytes match at record and replay.
 - All `explanation` strings are fixed literals (identity-bearing).
 
-### 3b. Recorder (deliberate live pass; gated, not in CI)
-Reads the manifest, starts `mosaicdemo` in **record** mode with live providers +
-key, drives Play, then issues each step in order, and asserts each banks a cassette.
-Recommended form: a Go integration entrypoint gated by env (e.g.
-`MOSAIC_RECORD_LIVE=1`) or a `cmd/democast` tool, mirroring the existing e2e harness
-(`startMosaicDemoProgressive` in
-[tests/e2e/interactive_simulation_test.go](../../tests/e2e/interactive_simulation_test.go)).
-Output: cassette files written under the committed bank path (§3d).
+### 3b. Recorder — ONE live pass (gated, run once, not in CI)
+Same harness as the offline loop (§2.5) with the model inner swapped from stub to the
+**real** OpenAI client: reads the manifest, starts `mosaicdemo` in **record** mode
+with live providers + key, drives Play, issues each step, asserts each banks a
+cassette. Because the requests are identical to the already-validated offline loop,
+every recorded key matches what replay will compute — the live run cannot introduce a
+fingerprint kink, only real response content.
+
+Recommended form: a Go integration entrypoint gated by env (e.g. `MOSAIC_RECORD_LIVE=1`)
+or a `cmd/democast` tool, mirroring the existing e2e harness (`startMosaicDemoProgressive`
+in [tests/e2e/interactive_simulation_test.go](../../tests/e2e/interactive_simulation_test.go)).
+Output: cassette files written under the committed bank path (§3d). Run it **once**;
+re-run only if the manifest changes.
 
 ### 3c. Replay verifier — **NO LIVE RUNS** (this is the CI/test deliverable)
 Reads the **same** manifest, starts `mosaicdemo` in **replay** mode
@@ -185,7 +245,10 @@ the FileStore-keyed cassettes (`{agent}/…/{hash16}.json`) belong there.
 ## 4. Acceptance criteria
 
 - [ ] Manifest committed; covers Play + all 10 beats' Luna + Terra + Sol.
-- [ ] Recorder produces the bank from one live pass; documented, gated, not in CI.
+- [ ] **Offline loop (§2.5) green with NO live calls:** stub record→replay hits 100%
+      of steps, keys stable across repeated runs, zero `ErrReplayMiss`. `testLiveLuna`
+      seam (or endpoint override) added so all three agents run offline.
+- [ ] Recorder produces the bank from **one** live pass; documented, gated, not in CI.
 - [ ] **No-live replay test passes with no `OPENAI_API_KEY` and no network**, asserting
       every step hits (no `ErrReplayMiss`) and returns the expected status; runs in CI.
 - [ ] Committed cassette bank under a non-gitignored testdata path; contains only
