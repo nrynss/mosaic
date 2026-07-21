@@ -7,17 +7,17 @@
 // path under internal/simulation (or the retired internal/simsession path).
 // Simulation packages import framework packages and orchestrate over time.
 //
-// Framework packages (non-exhaustive):
+// Framework packages (non-exhaustive; the guard covers all of internal/ except
+// this tree):
 //
-//   - internal/ingestion
+//   - internal/ingestion, internal/eventlog
 //   - internal/store
 //   - internal/terra, internal/sol, internal/luna
 //   - internal/ontology (and gen)
 //   - internal/contracts
-//   - internal/stream
-//   - internal/replay
+//   - internal/stream, internal/replay
 //   - internal/api (production code)
-//   - domain projectors under internal/reference/.../state
+//   - domain packages under internal/reference/...
 //
 // All pacing and timing lives only under this tree. The framework has no notion
 // of "beat" or "delay" beyond the schedule/session types already defined in
@@ -31,6 +31,6 @@
 //   - session: domain-agnostic interactive session controller (start/status/
 //     end/reset) and schedule-driven beat emission on a session-scoped stream.
 //
-// Dependency direction is enforced by TestFrameworkPackagesDoNotImportSimulation
-// in this package.
+// Dependency direction is enforced by TestInternalPackagesDoNotImportSimulation
+// in this package (deny-by-default over internal/, excluding this tree).
 package simulation

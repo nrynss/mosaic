@@ -10,31 +10,13 @@ import (
 	"testing"
 )
 
-// frameworkRoots are package path prefixes under the module that must never
-// import internal/simulation (or the retired internal/simsession path).
-// Composition roots (cmd/) and this tree may import simulation; tests under
-// framework packages may also wire the real controller, so only non-test
-// production sources are scanned.
-var frameworkRoots = []string{
-	"internal/ingestion",
-	"internal/store",
-	"internal/terra",
-	"internal/sol",
-	"internal/luna",
-	"internal/ontology",
-	"internal/contracts",
-	"internal/stream",
-	"internal/replay",
-	"internal/api",
-	"internal/reference/domesticdisturbance/state",
-	"internal/reference/domesticdisturbance/dataset",
-	"internal/reference/registry",
-	"internal/openaimodel",
-	"internal/usage",
-	"internal/profile",
-	"internal/recurrence",
-	"internal/datasetgen",
-}
+// Dependency direction (C1): framework and domain packages never import
+// internal/simulation. Composition roots (cmd/) may. Production sources under
+// internal/ are scanned deny-by-default so new packages (e.g. eventlog) are
+// covered without maintaining a stale allowlist.
+//
+// Tests (*_test.go) under framework packages may import simulation for wiring
+// the real controller; only non-test production sources are restricted.
 
 const (
 	modulePath          = "mosaic.local/mosaic"
@@ -42,60 +24,58 @@ const (
 	forbiddenSimSession = modulePath + "/internal/simsession"
 )
 
-func TestFrameworkPackagesDoNotImportSimulation(t *testing.T) {
+func TestInternalPackagesDoNotImportSimulation(t *testing.T) {
 	repoRoot := findRepoRoot(t)
+	internalRoot := filepath.Join(repoRoot, "internal")
+	simulationRoot := filepath.Join(internalRoot, "simulation")
+
 	fset := token.NewFileSet()
 	var violations []string
 
-	for _, root := range frameworkRoots {
-		absRoot := filepath.Join(repoRoot, filepath.FromSlash(root))
-		info, err := os.Stat(absRoot)
-		if err != nil || !info.IsDir() {
-			continue
+	err := filepath.WalkDir(internalRoot, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-		err = filepath.WalkDir(absRoot, func(path string, d os.DirEntry, err error) error {
-			if err != nil {
-				return err
+		if d.IsDir() {
+			name := d.Name()
+			if name == "testdata" || name == "vendor" {
+				return filepath.SkipDir
 			}
-			if d.IsDir() {
-				name := d.Name()
-				if name == "testdata" || name == "vendor" {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if !strings.HasSuffix(path, ".go") {
-				return nil
-			}
-			base := filepath.Base(path)
-			if strings.HasSuffix(base, "_test.go") {
-				// API and other framework tests may compose the real session
-				// controller; production sources must stay simulation-free.
-				return nil
-			}
-			file, parseErr := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
-			if parseErr != nil {
-				return parseErr
-			}
-			rel, relErr := filepath.Rel(repoRoot, path)
-			if relErr != nil {
-				rel = path
-			}
-			for _, imp := range file.Imports {
-				importPath := strings.Trim(imp.Path.Value, `"`)
-				if isForbiddenSimulationImport(importPath) {
-					violations = append(violations, filepath.ToSlash(rel)+" imports "+importPath)
-				}
+			// Simulation tree may import itself; skip the whole subtree.
+			if path == simulationRoot {
+				return filepath.SkipDir
 			}
 			return nil
-		})
-		if err != nil {
-			t.Fatalf("walk %s: %v", root, err)
 		}
+		if !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		base := filepath.Base(path)
+		if strings.HasSuffix(base, "_test.go") {
+			// Framework tests may compose the real session controller.
+			return nil
+		}
+		file, parseErr := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
+		if parseErr != nil {
+			return parseErr
+		}
+		rel, relErr := filepath.Rel(repoRoot, path)
+		if relErr != nil {
+			rel = path
+		}
+		for _, imp := range file.Imports {
+			importPath := strings.Trim(imp.Path.Value, `"`)
+			if isForbiddenSimulationImport(importPath) {
+				violations = append(violations, filepath.ToSlash(rel)+" imports "+importPath)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk internal/: %v", err)
 	}
-
 	if len(violations) > 0 {
-		t.Fatalf("framework packages must not import simulation (dependency direction):\n  %s",
+		t.Fatalf("packages under internal/ (outside simulation) must not import simulation:\n  %s",
 			strings.Join(violations, "\n  "))
 	}
 }
@@ -104,6 +84,7 @@ func TestNoPackageImportsRetiredSimsessionPath(t *testing.T) {
 	repoRoot := findRepoRoot(t)
 	fset := token.NewFileSet()
 	var violations []string
+	var parseErrors []string
 
 	err := filepath.WalkDir(repoRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -112,7 +93,8 @@ func TestNoPackageImportsRetiredSimsessionPath(t *testing.T) {
 		if d.IsDir() {
 			name := d.Name()
 			switch name {
-			case ".git", "node_modules", "ui", "localmodels", "vendor", "pw-e2e", ".claude", ".worktrees", "worktrees":
+			case ".git", "node_modules", "ui", "localmodels", "vendor", "pw-e2e",
+				".claude", ".worktrees", "worktrees":
 				return filepath.SkipDir
 			}
 			return nil
@@ -122,6 +104,11 @@ func TestNoPackageImportsRetiredSimsessionPath(t *testing.T) {
 		}
 		file, parseErr := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
 		if parseErr != nil {
+			rel, relErr := filepath.Rel(repoRoot, path)
+			if relErr != nil {
+				rel = path
+			}
+			parseErrors = append(parseErrors, filepath.ToSlash(rel)+": "+parseErr.Error())
 			return nil
 		}
 		rel, relErr := filepath.Rel(repoRoot, path)
@@ -138,6 +125,10 @@ func TestNoPackageImportsRetiredSimsessionPath(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("walk repo: %v", err)
+	}
+	if len(parseErrors) > 0 {
+		t.Fatalf("failed to parse Go files while checking retired simsession path:\n  %s",
+			strings.Join(parseErrors, "\n  "))
 	}
 	if len(violations) > 0 {
 		t.Fatalf("retired import path internal/simsession still referenced:\n  %s",

@@ -116,6 +116,22 @@ func TestSimulationContracts(t *testing.T) {
 	if ErrSimulationAlreadyRunning == nil || ErrSimulationAlreadyRunning.Error() == "" {
 		t.Errorf("ErrSimulationAlreadyRunning must be a non-empty sentinel")
 	}
-	// SimulationStreamSubscription is a seam; concrete types live under simulation.
-	var _ SimulationStreamSubscription
+	// SimulationStreamSubscription is a seam; concrete types live under
+	// internal/simulation. Assert the method set exists via a stub.
+	var sub SimulationStreamSubscription = stubSimulationStreamSubscription{}
+	if sub.Events() == nil {
+		t.Errorf("SimulationStreamSubscription.Events must be callable")
+	}
+	sub.Cancel()
 }
+
+// stubSimulationStreamSubscription proves the contracts seam method set.
+type stubSimulationStreamSubscription struct{}
+
+func (stubSimulationStreamSubscription) Events() <-chan SimulationStreamEvent {
+	ch := make(chan SimulationStreamEvent)
+	close(ch)
+	return ch
+}
+
+func (stubSimulationStreamSubscription) Cancel() {}

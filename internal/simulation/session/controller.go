@@ -38,9 +38,24 @@ import (
 
 const defaultSubscriberBuffer = 64
 
-// Compile-time seam checks: *Controller satisfies the HTTP adapter surface via
-// contracts.SimulationStreamSubscription without the adapter importing session.
-var _ contracts.SimulationStreamSubscription = (*Subscription)(nil)
+// Compile-time seam checks: concrete types satisfy contracts/adapters without
+// those packages importing session. Keep sessionControllerSurface aligned with
+// api.SimulationController (composition wires *Controller there).
+var (
+	_ contracts.SimulationStreamSubscription = (*Subscription)(nil)
+	_ sessionControllerSurface               = (*Controller)(nil)
+)
+
+// sessionControllerSurface is the method set HTTP adapters and composition
+// require. Defined here (not in contracts) so contracts stay free of a
+// controller interface while still catching signature drift at compile time.
+type sessionControllerSurface interface {
+	Start(ctx context.Context) (contracts.SimulationSession, error)
+	Status() contracts.SimulationSession
+	End(ctx context.Context) (contracts.SimulationSession, error)
+	Reset(ctx context.Context) (contracts.SimulationSession, error)
+	Subscribe() contracts.SimulationStreamSubscription
+}
 
 var (
 	// ErrNilSchedule means Config.Schedule was not provided.
@@ -472,8 +487,14 @@ func randomSessionID() string {
 	return "sim-" + hex.EncodeToString(bytes)
 }
 
-func closedEvents() <-chan contracts.SimulationStreamEvent {
+// closedEventsChan is a permanently closed channel shared by nil-safe
+// Subscription.Events and Subscribe on a nil controller.
+var closedEventsChan = func() <-chan contracts.SimulationStreamEvent {
 	ch := make(chan contracts.SimulationStreamEvent)
 	close(ch)
 	return ch
+}()
+
+func closedEvents() <-chan contracts.SimulationStreamEvent {
+	return closedEventsChan
 }

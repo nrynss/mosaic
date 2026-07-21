@@ -14,6 +14,10 @@ import (
 	"mosaic.local/mosaic/internal/simulation/session"
 )
 
+// Compile-time: composition wires *session.Controller into Server via this
+// interface. Production api sources must not import internal/simulation.
+var _ SimulationController = (*session.Controller)(nil)
+
 type testSchedule struct {
 	beats []contracts.ScheduledBeat
 }
