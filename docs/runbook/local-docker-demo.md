@@ -4,16 +4,16 @@ The image packages the dedicated mosaicdemo composition root, including the
 deterministic fixture-only Terra/Sol advisory replay. The in-process
 acceptance check remains available with:
 
-~~~powershell
+```powershell
 go test ./tests/e2e -count=1
-~~~
+```
 
 ## Scope and prerequisites
 
 This is one local, synthetic, single-instance demo. Docker Desktop (or an
 equivalent Docker Engine with Compose v2) is required. The running container
 uses no model, API key, network model provider, localmodels directory, or GGUF
-artifact.
+artifact unless you inject a live OpenAI key (optional).
 
 Access is intentionally open for this demo: there is no login, token, session,
 or configured access restriction; the public actor/policy defaults permit these
@@ -25,9 +25,39 @@ The image builds two deterministic artifacts:
 - the public Svelte dashboard, bounded API, and fixture-only advisory history; and
 - the domestic-disturbance fixture and its ontology schemas.
 
-The Compose setup defines a two-service topology: the application runs in a stateless container (`mosaic`), while persistent storage is provided by a PostgreSQL 16 container (`db`). The database volume is backed by a named `postgres-data` volume which survives restarts.
+## Topology: two containers, one durable store
 
-Before the application starts, it waits for the database service to be healthy (`pg_isready` check). The application container remains nonroot, read-only, and without Linux capabilities.
+Compose defines a **two-service** topology:
+
+| Service | Role | Durable? |
+|---------|------|----------|
+| `db` | PostgreSQL 16 (`postgres:16-alpine`) | Yes — named volume `postgres-data` |
+| `mosaic` | Stateless app image (`cmd/mosaicdemo`) | No — `read_only` rootfs, `tmpfs` `/tmp` only |
+
+```text
+┌─────────────────┐     postgres://mosaic:mosaic@db:5432/mosaic
+│ mosaic (app)    │ ──────────────────────────────────────────► │ db (Postgres) │
+│ :8080           │                                             │ postgres-data │
+└─────────────────┘                                             └───────────────┘
+```
+
+- `MOSAIC_DB_PATH` for the app service is a **Postgres DSN**, not a SQLite file:
+  `postgres://mosaic:mosaic@db:5432/mosaic?sslmode=disable`
+- Seed (domain scenario + fixture advisories), records, advisory history,
+  operations telemetry, evidence resolution, and COP recovery all use **that
+  single pgstore backend**. There is no parallel in-memory SQLite on the
+  Compose path.
+- The app image is intentionally **stateless**: no `/var/lib/mosaic` volume, no
+  baked-in SQLite path. Durability is the Postgres volume alone.
+- Before the app starts, Compose waits for `db` to pass `pg_isready`. The app
+  container remains nonroot, read-only, and capability-dropped.
+
+### Single-process local (SQLite) still works
+
+Outside Compose, `mosaicdemo` defaults to a SQLite file under the process temp
+directory when `MOSAIC_DB_PATH` is unset. Pass a `postgres://` or
+`postgresql://` DSN to use Postgres instead. Do not mix: one process, one
+backend.
 
 This demo has no real data, privacy classification, retention workflow, or
 deletion automation. Its checked-in records are synthetic only.
@@ -36,33 +66,33 @@ deletion automation. Its checked-in records are synthetic only.
 
 From the repository root in PowerShell:
 
-~~~powershell
+```powershell
 docker compose up --build --detach
 docker compose ps
-~~~
+```
 
-Expected: mosaic is running with 0.0.0.0:8080->8080/tcp. Open
-<http://localhost:8080>; the public evidence ledger and its operations receipt
-should show synthetic facts at COP state revision 9 and historical advisory
-cards. The rev-7 assessment is labelled superseded and its recommendation is
-labelled not current; neither is current operational advice.
+Expected: `db` is healthy; `mosaic` is running with `0.0.0.0:8080->8080/tcp`.
+Open <http://localhost:8080>; the public evidence ledger and its operations
+receipt should show synthetic facts at COP state revision 9 and historical
+advisory cards. The rev-7 assessment is labelled superseded and its
+recommendation is labelled not current; neither is current operational advice.
 
 If port 8080 is already in use, select a different host port for this
 PowerShell session before starting:
 
-~~~powershell
+```powershell
 $env:MOSAIC_PORT = '8088'
 docker compose up --build --detach
-~~~
+```
 
 Use http://localhost:8088 for the checks below. Remove the session setting when
-finished with Remove-Item Env:MOSAIC_PORT.
+finished with `Remove-Item Env:MOSAIC_PORT`.
 
 ## Verify the public API and evidence boundary
 
 No header is required:
 
-~~~powershell
+```powershell
 $port = if ($env:MOSAIC_PORT) { $env:MOSAIC_PORT } else { '8080' }
 $base = "http://localhost:$port"
 
@@ -74,38 +104,39 @@ Invoke-RestMethod "$base/api/v1/evidence/canonical_event/canonical-domestic-009-
 Invoke-RestMethod "$base/api/v1/advisories"
 Invoke-RestMethod "$base/api/v1/evidence/insight/insight-domestic-access-001"
 Invoke-RestMethod "$base/api/v1/operations"
-~~~
+```
 
-Expected salient fields are dashboard HTTP 200, health data.status: ok, version
-data.api_version: v1, COP data.state_revision: 9, and evidence data.resolved:
-True. The advisory response is bounded: it reports fixture-composed status,
-two superseded Insights, and one not-current Recommendation. It does not
-return raw payload bytes, checksums, prompts, model responses, or credentials.
+Expected salient fields are dashboard HTTP 200, health `data.status: ok`, version
+`data.api_version: v1`, COP `data.state_revision: 9`, and evidence
+`data.resolved: True`. The advisory response is bounded: it reports
+fixture-composed status, two superseded Insights, and one not-current
+Recommendation. It does not return raw payload bytes, checksums, prompts, model
+responses, or credentials.
 
 The operations response is a bounded receipt, not a record export. On a fresh
 startup it reports the recovered COP revision and fixture raw/canonical/
-projection/lifecycle counts. It labels Terra and Sol as fixture-composed from
-local checked-in artifacts, not as live model transport; durable
-reconciliation remains unavailable and external operational action remains
-permanently unavailable. It does not expose raw payload bytes, raw checksums,
-prompts, or model responses.
+projection/lifecycle counts (read from Postgres). It labels Terra and Sol as
+fixture-composed from local checked-in artifacts, not as live model transport;
+durable reconciliation remains unavailable and external operational action
+remains permanently unavailable. It does not expose raw payload bytes, raw
+checksums, prompts, or model responses.
 
 A public review request appends an immutable audit record and always reports
-executed: False:
+`executed: False`:
 
-~~~powershell
+```powershell
 $briefing = @{
   briefing_id = 'briefing-local-demo'
   note = 'Synthetic demo review.'
 } | ConvertTo-Json
 Invoke-RestMethod "$base/api/v1/briefings" -Method Post -ContentType 'application/json' -Body $briefing
-~~~
+```
 
 This request does not invoke Sol or take an operational action. The
 audit-actions route is public and now has a fixture Recommendation target; it
 still appends only an immutable `executed: false` review record:
 
-~~~powershell
+```powershell
 $review = @{
   action = 'acknowledged'
   target_kind = 'recommendation'
@@ -113,29 +144,29 @@ $review = @{
   note = 'Synthetic fixture review only.'
 } | ConvertTo-Json
 Invoke-RestMethod "$base/api/v1/audit-actions" -Method Post -ContentType 'application/json' -Body $review
-~~~
+```
 
 ## Verify interactive simulation and operator actions
 
 Start a new simulation session:
 
-~~~powershell
+```powershell
 Invoke-RestMethod "$base/api/v1/simulation/start" -Method Post
-~~~
+```
 
 Expected: Response status is HTTP 200, returning a `session_id` and the status `running`.
 
 Poll the status until the simulation naturally ends (since fixture beats have zero delay in this demo, it will complete immediately):
 
-~~~powershell
+```powershell
 Invoke-RestMethod "$base/api/v1/simulation/status"
-~~~
+```
 
 Expected: Status field is `ended` and the `beats` array contains the replayed simulation beats.
 
 Perform an interactive Analyze operator request (Terra):
 
-~~~powershell
+```powershell
 $analyze = @{
   evidence = @(
     @{
@@ -147,13 +178,13 @@ $analyze = @{
   note = 'Analyze road closure reports.'
 } | ConvertTo-Json -Depth 5
 Invoke-RestMethod "$base/api/v1/operator/analyze" -Method Post -ContentType 'application/json' -Body $analyze
-~~~
+```
 
 Expected: Returns status `refused` (under fixture mode) with `executed: false`, appending an audit record for the `public-demo` actor.
 
 Prepare a Maintenance Handoff:
 
-~~~powershell
+```powershell
 $handoff = @{
   recipient = 'maintenance'
   target_kind = 'system'
@@ -161,105 +192,119 @@ $handoff = @{
   note = 'A prior road-condition handoff exists for area loc-road-brook-lane.'
 } | ConvertTo-Json
 Invoke-RestMethod "$base/api/v1/operator/prepare-handoff" -Method Post -ContentType 'application/json' -Body $handoff
-~~~
+```
 
 Expected: Status HTTP 201, returning `executed: false`, `delivered: false`, and `handoff_status: "recorded"`. No external system is contacted.
 
 Verify that `/api/v1/advisories` includes the newly recorded provenance trace and that no forbidden fields are leaked:
 
-~~~powershell
+```powershell
 $advisories = Invoke-RestMethod "$base/api/v1/advisories"
 $advisories.audit_records | Format-Table audit_record_id, action, target_kind, target_id, note
-~~~
+```
 
 Expected: The table includes the analyze and handoff audit records, showing they are correctly persisted. No prompts, model responses, raw bytes, or SHA256 fields are present.
 
 Confirm that the operational projection (COP) is unchanged by the review actions:
 
-~~~powershell
+```powershell
 Invoke-RestMethod "$base/api/v1/cop"
-~~~
+```
 
 Expected: `state_revision` is still 9. Bounded operator reviews do not mutate operational state.
 
-## Verify retained-volume restart
+## Verify retained-volume restart (Postgres durability)
 
-Stop and restart without removing the named volume:
+Stop and restart **without** removing the named Postgres volume:
 
-~~~powershell
+```powershell
 docker compose down
 docker compose up --detach
 Invoke-RestMethod "$base/api/v1/advisories"
 Invoke-RestMethod "$base/api/v1/operations"
-~~~
+Invoke-RestMethod "$base/api/v1/cop"
+```
 
-The same fixture Insight, Recommendation, Model Run, and fixture Audit Record
-identities are reused; restart appends no duplicate fixture advisory history.
-The public review record above remains immutable history and does not change
-the recovered COP revision.
+Expected after restart:
+
+- COP `state_revision` is still **9** (recovered from Postgres — materialization
+  when present, otherwise checkpoint + canonical replay).
+- The same fixture Insight, Recommendation, Model Run, and fixture Audit Record
+  identities are reused; restart appends no duplicate fixture advisory history
+  (P05 source idempotency + advisory stage intact checks).
+- Public review audit records from the previous process remain immutable history.
+- Operations counts remain non-zero (they read the durable Postgres store, not
+  an empty ephemeral path).
+
+Optional: confirm rows exist in Postgres directly:
+
+```powershell
+docker compose exec db psql -U mosaic -d mosaic -c "SELECT COUNT(*) AS canonical FROM canonical_events;"
+docker compose exec db psql -U mosaic -d mosaic -c "SELECT COUNT(*) AS insights FROM insights;"
+```
 
 ## Inspect the public bounded SSE stream
 
 curl.exe leaves the stream open by design. Stop it with Ctrl+C after the first
 event:
 
-~~~powershell
+```powershell
 curl.exe --no-buffer "$base/api/v1/stream"
-~~~
+```
 
 Expected first event:
 
-~~~text
+```text
 event: cop.snapshot
 data: {"cop":...,"state_revision":9,...}
-~~~
+```
 
-The broker is process-local and best-effort. It is not shared notification and
-does not make this container multi-instance capable. The automated test
-subscribes, waits for the snapshot, then publishes one local system.status
-notice with a three-second context deadline.
+The HTTP stream broker is process-local and best-effort. Cross-instance fan-out
+is the event-spine `EventBus` (Postgres `LISTEN/NOTIFY` today); see the
+Kafka/Redpanda introduction guide for the pluggable transport story. This
+Compose layout is still single-instance for the app container.
 
 ## Current capability boundary
 
 - Interactive simulation replay is controlled via start/reset/end routes, broadcasting ordered beats over the session-scoped stream.
-- Deterministic checkpoint/replay recovery is composed and reported as recovered for the current observation.
-- There is no durable reconciliation worker, autonomous recovery process, or shared projection ownership/lease.
+- Deterministic checkpoint/replay recovery is composed; on Postgres the API prefers the materialized COP read model when available.
+- There is no durable reconciliation worker, autonomous recovery process, or shared projection ownership/lease beyond the Postgres consumer-group design in the event spine.
 - Terra, Sol, and Luna default and fall back to deterministic local checked-in fixtures when no live provider key is configured.
 - Live models can be optionally configured at startup via environment variables using a server-side OpenAI API key, which is never exposed to the client.
 - Mosaic never dispatches, contacts, or mutates an external operational system.
-
-PostgreSQL, shared dispatch/outbox, and multi-instance coordination are future design work; they are not included by this Docker demo.
+- **Durable store in Compose is PostgreSQL.** Local non-Docker runs may still use SQLite via a file path for `MOSAIC_DB_PATH`.
 
 ## Stop and reset
 
-~~~powershell
+```powershell
 docker compose down
-~~~
+```
 
 The named Postgres volume remains. To remove it and start the synthetic demo from
 an empty durable store, run this destructive reset only when that is intended:
 
-~~~powershell
+```powershell
 docker compose down --volumes
-~~~
+```
 
-This removes only Compose's postgres-data volume. It does not affect localmodels
+This removes only Compose's `postgres-data` volume. It does not affect localmodels
 or repository files.
 
 For startup diagnostics:
 
-~~~powershell
+```powershell
 docker compose logs --follow mosaic
-~~~
+docker compose logs --follow db
+```
 
 ## Fresh Docker smoke
 
 For an isolated release-style smoke, remove only this demo's named volume,
 then build, start, and run the public no-header checks above:
 
-~~~powershell
+```powershell
 docker compose down --volumes
 docker compose up --build --detach
 Invoke-RestMethod "$base/api/v1/advisories"
 docker compose down
-~~~
+```

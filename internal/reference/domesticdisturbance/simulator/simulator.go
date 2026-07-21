@@ -24,7 +24,6 @@ import (
 	"mosaic.local/mosaic/internal/ontology/gen"
 	"mosaic.local/mosaic/internal/reference/domesticdisturbance/state"
 	"mosaic.local/mosaic/internal/replay"
-	"mosaic.local/mosaic/internal/store"
 )
 
 const (
@@ -369,22 +368,42 @@ func (l *FixtureLuna) Calls() int {
 	return l.calls
 }
 
-// Config supplies the already-open local P03 store and the checked-in P02/P04
+// DomainStore is the durable seam the simulator needs. Both *store.Store and
+// *pgstore.Store satisfy it so seed, recover, and fixture advisory replay share
+// one backend with API records/advisories (no split-brain dual store).
+type DomainStore interface {
+	contracts.RawEventRepository
+	contracts.CanonicalEventRepository
+	contracts.ImmutableRecordRepository
+	contracts.AdvisoryHistoryReader
+	contracts.CheckpointRepository
+	contracts.TransactionRunner
+	// ListLunaResults / ListModelRuns support deterministic Verify without
+	// backend-specific SQLDB access (ReadAdvisoryHistory omits Luna runs).
+	ListLunaResults(ctx context.Context) ([]gen.LunaResult, error)
+	ListModelRuns(ctx context.Context) ([]gen.ModelRun, error)
+}
+
+// Config supplies the already-open durable store and the checked-in P02/P04
 // inputs needed to compose the deterministic simulator.
 type Config struct {
-	Store      *store.Store
+	Store      DomainStore
 	SchemaDir  string
 	FixtureDir string
+	// WrapProjector optionally decorates the domain projector after construction
+	// (e.g. pgstore.MaterializingProjector so COP materialization stays warm).
+	WrapProjector func(contracts.Projector) contracts.Projector
 }
 
 // Service is the executable v0.1 spine: fixture source, P05 ingestion, P06
-// projection, and P06 replay recovery over a P03 SQLite store.
+// projection, and P06 replay recovery over a durable DomainStore backend.
 type Service struct {
-	store      *store.Store
-	fixture    *Fixture
-	validator  *luna.SchemaValidator
-	normalizer *FixtureLuna
-	ingestion  *ingestion.Service
+	store         DomainStore
+	fixture       *Fixture
+	validator     *luna.SchemaValidator
+	normalizer    *FixtureLuna
+	ingestion     *ingestion.Service
+	wrapProjector func(contracts.Projector) contracts.Projector
 }
 
 // New composes the P03/P05/P06 implementations. The caller retains ownership
@@ -412,7 +431,11 @@ func New(config Config) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	dispatcher := canonicalDispatcher{canonical: config.Store, projector: projector}
+	var asProjector contracts.Projector = projector
+	if config.WrapProjector != nil {
+		asProjector = config.WrapProjector(asProjector)
+	}
+	dispatcher := canonicalDispatcher{canonical: config.Store, projector: asProjector}
 	service, err := ingestion.New(ingestion.Config{
 		RawEvents:       config.Store,
 		CanonicalEvents: config.Store,
@@ -426,11 +449,12 @@ func New(config Config) (*Service, error) {
 		return nil, err
 	}
 	return &Service{
-		store:      config.Store,
-		fixture:    fixture,
-		validator:  validator,
-		normalizer: normalizer,
-		ingestion:  service,
+		store:         config.Store,
+		fixture:       fixture,
+		validator:     validator,
+		normalizer:    normalizer,
+		ingestion:     service,
+		wrapProjector: config.WrapProjector,
 	}, nil
 }
 
@@ -536,7 +560,11 @@ func (s *Service) Recover(ctx context.Context) (contracts.ProjectionResult, erro
 	if err != nil {
 		return contracts.ProjectionResult{}, err
 	}
-	return (replay.Runner{Canonical: s.store, Checkpoints: s.store, Projector: projector}).Recover(ctx)
+	var asProjector contracts.Projector = projector
+	if s.wrapProjector != nil {
+		asProjector = s.wrapProjector(asProjector)
+	}
+	return (replay.Runner{Canonical: s.store, Checkpoints: s.store, Projector: asProjector}).Recover(ctx)
 }
 
 // Verification records the expected-outcome proofs P07 can make without
@@ -601,6 +629,8 @@ func (s *Service) Verify(ctx context.Context) (Verification, error) {
 	if err != nil {
 		return verification, err
 	}
+	// Compare bare domain replay (no materialization wrap) so COP equality is
+	// independent of read-model side effects.
 	fresh, err := freshProjector.Replay(ctx, gen.Checkpoint{}, events)
 	if err != nil {
 		return verification, fmt.Errorf("fresh replay: %w", err)
@@ -622,25 +652,13 @@ func (s *Service) Verify(ctx context.Context) (Verification, error) {
 }
 
 func (s *Service) verifyStoredLuna(ctx context.Context) error {
-	rows, err := s.store.SQLDB().QueryContext(ctx, "SELECT record_json FROM luna_results")
+	listed, err := s.store.ListLunaResults(ctx)
 	if err != nil {
 		return fmt.Errorf("read persisted Luna results: %w", err)
 	}
-	defer rows.Close()
 	results := map[string]gen.LunaResult{}
-	for rows.Next() {
-		var record string
-		if err := rows.Scan(&record); err != nil {
-			return err
-		}
-		var result gen.LunaResult
-		if err := json.Unmarshal([]byte(record), &result); err != nil {
-			return fmt.Errorf("decode persisted Luna result: %w", err)
-		}
+	for _, result := range listed {
 		results[result.RawEventID] = result
-	}
-	if err := rows.Err(); err != nil {
-		return err
 	}
 	if len(results) != len(s.fixture.outputByRaw) {
 		return fmt.Errorf("persisted Luna result count = %d, want %d", len(results), len(s.fixture.outputByRaw))
@@ -655,21 +673,12 @@ func (s *Service) verifyStoredLuna(ctx context.Context) error {
 }
 
 func (s *Service) verifyModelRuns(ctx context.Context) error {
-	rows, err := s.store.SQLDB().QueryContext(ctx, "SELECT record_json FROM model_runs")
+	runs, err := s.store.ListModelRuns(ctx)
 	if err != nil {
 		return fmt.Errorf("read model runs: %w", err)
 	}
-	defer rows.Close()
 	lunaCount := 0
-	for rows.Next() {
-		var record string
-		if err := rows.Scan(&record); err != nil {
-			return err
-		}
-		var run gen.ModelRun
-		if err := json.Unmarshal([]byte(record), &run); err != nil {
-			return fmt.Errorf("decode model run: %w", err)
-		}
+	for _, run := range runs {
 		if err := s.validator.ValidateModelRun(run); err != nil {
 			return fmt.Errorf("validate persisted model run %q: %w", run.ModelRunID, err)
 		}
@@ -684,9 +693,6 @@ func (s *Service) verifyModelRuns(ctx context.Context) error {
 		default:
 			return fmt.Errorf("persisted model run %q has unexpected agent %q", run.ModelRunID, run.Agent)
 		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
 	}
 	if lunaCount != len(s.fixture.outputByRaw) {
 		return fmt.Errorf("persisted Luna model run count = %d, want %d", lunaCount, len(s.fixture.outputByRaw))

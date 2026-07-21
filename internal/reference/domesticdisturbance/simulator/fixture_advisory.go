@@ -11,7 +11,6 @@ import (
 	"mosaic.local/mosaic/internal/contracts"
 	"mosaic.local/mosaic/internal/ontology/gen"
 	"mosaic.local/mosaic/internal/sol"
-	"mosaic.local/mosaic/internal/store"
 	"mosaic.local/mosaic/internal/terra"
 )
 
@@ -42,7 +41,7 @@ var (
 // the local demo. Optional client overrides exist only for focused tests of
 // refusal and invalid-response paths.
 type AdvisoryReplayConfig struct {
-	Store       *store.Store
+	Store       DomainStore
 	SchemaDir   string
 	FixtureDir  string
 	TerraClient terra.StructuredClient
@@ -61,7 +60,7 @@ type AdvisoryReplayResult struct {
 // already-projected scenario timeline. It is not a projector and cannot issue
 // an operational action or open a network/model transport.
 type AdvisoryReplay struct {
-	store       *store.Store
+	store       DomainStore
 	records     *advisoryRecords
 	fixture     *Fixture
 	schemaDir   string
@@ -466,7 +465,7 @@ func pairTransactionDecision(run gen.ModelRun, serviceErr error) error {
 // Focused tests can inject Insight/Recommendation write failures to prove
 // transactional rollback of the paired Model Run.
 type advisoryRecords struct {
-	store              *store.Store
+	store              contracts.ImmutableRecordRepository
 	failInsight        error
 	failRecommendation error
 }
@@ -542,11 +541,11 @@ func (c fixtureSolClient) Brief(_ context.Context, _ sol.Request) (sol.Response,
 }
 
 // durableEvidenceResolver confirms only that cited artifacts already exist in
-// the append-only store. It uses store methods so evidence reads join an open
-// Store.WithinTransaction and never take a second SQLite connection.
+// the append-only store. It uses repository methods so evidence reads join an
+// open WithinTransaction and never take a second connection.
 // It never reads raw payloads into the model path.
 type durableEvidenceResolver struct {
-	store *store.Store
+	store DomainStore
 }
 
 func (r *durableEvidenceResolver) ResolveEvidence(ctx context.Context, _ int64, evidence []gen.Evidence) error {
@@ -574,7 +573,7 @@ func (r *durableEvidenceResolver) requireArtifact(ctx context.Context, kind, id 
 	switch kind {
 	case "raw_event":
 		if _, err := r.store.FindRawEvent(ctx, id); err != nil {
-			if errors.Is(err, store.ErrNotFound) {
+			if isRecordNotFound(err) {
 				return fmt.Errorf("evidence %s/%s is not durable", kind, id)
 			}
 			return fmt.Errorf("resolve evidence %s/%s: %w", kind, id, err)
@@ -613,6 +612,15 @@ func (r *durableEvidenceResolver) requireArtifact(ctx context.Context, kind, id 
 	default:
 		return fmt.Errorf("unsupported evidence kind %q", kind)
 	}
+}
+
+// isRecordNotFound matches either SQLite or Postgres not-found sentinels
+// without importing both backend packages into the simulator.
+func isRecordNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "not found")
 }
 
 func copAtRevision(timeline []TimelineEntry, revision int64) (map[string]any, error) {

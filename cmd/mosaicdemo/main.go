@@ -83,7 +83,7 @@ func parseConfig(args []string, getenv func(string) string) (config, error) {
 		}
 	}
 	listen := flags.String("listen-addr", listenPort, "HTTP listen address")
-	database := flags.String("db", valueOrDefault(getenv("MOSAIC_DB_PATH"), defaultDatabasePath()), "SQLite database path or DSN")
+	database := flags.String("db", valueOrDefault(getenv("MOSAIC_DB_PATH"), defaultDatabasePath()), "SQLite database path or postgres:// DSN")
 	ui := flags.String("ui-dir", valueOrDefault(getenv("MOSAIC_UI_DIR"), defaultUIDirectory), "prebuilt dashboard directory")
 	assets := flags.String("asset-root", valueOrDefault(getenv("MOSAIC_ASSET_ROOT"), defaultAssetRoot), "directory containing ontology and datasets")
 	if err := flags.Parse(args); err != nil {
@@ -218,7 +218,13 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 		advisoryHistory contracts.AdvisoryHistoryReader
 		closeDatabase   func() error
 		operations      api.OperationsReader
-		sqliteStore     *store.Store
+		// domainStore is the single durable backend used for seed, recovery,
+		// models, records, and advisories. SQLite file path and Postgres DSN
+		// never split across two stores.
+		domainStore composeStore
+		// recovery is domainRuntime by default; Postgres prefers the
+		// materialized COP read model when present.
+		preferMaterialized contracts.COPReadModelRepository
 	)
 
 	isPostgres := strings.HasPrefix(configuration.DatabasePath, "postgres://") || strings.HasPrefix(configuration.DatabasePath, "postgresql://")
@@ -230,25 +236,14 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 		}
 		records = pg
 		advisoryHistory = pg
+		domainStore = pg
+		preferMaterialized = pg
 		closeDatabase = func() error { return pg.Close() }
-		operations = nil // falls back to unavailableOperationsReader
 
-		// Open a transient in-memory SQLite store so the SQLite-only
-		// domestic-disturbance simulation can still be composed and run.
-		sqlite, err := store.Open(ctx, ":memory:")
+		operations, err = api.NewPostgresOperationsReader(pg.Pool())
 		if err != nil {
 			_ = closeDatabase()
-			return nil, fmt.Errorf("open transient SQLite database: %w", err)
-		}
-		sqliteStore = sqlite
-		originalClose := closeDatabase
-		closeDatabase = func() error {
-			err1 := sqlite.Close()
-			err2 := originalClose()
-			if err1 != nil {
-				return err1
-			}
-			return err2
+			return nil, fmt.Errorf("compose Postgres operations reader: %w", err)
 		}
 	} else {
 		db, err := store.Open(ctx, configuration.DatabasePath)
@@ -257,7 +252,7 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 		}
 		records = db
 		advisoryHistory = db
-		sqliteStore = db
+		domainStore = db
 		closeDatabase = func() error { return db.Close() }
 
 		operations, err = api.NewSQLiteOperationsReader(db)
@@ -268,10 +263,11 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 	}
 
 	// Compose builds the profile's deterministic scenario, fixture advisory
-	// replay, and evidence resolver over the SQLite store. Run then seeds them:
-	// P05's durable source idempotency means a later start verifies and recovers
-	// the original history without appending duplicate events or advisory records.
-	domainRuntime, err := selected.Compose(ctx, sqliteStore, configuration.AssetRoot)
+	// replay, and evidence resolver over the single durable store. Run then
+	// seeds them: P05's durable source idempotency means a later start verifies
+	// and recovers the original history without appending duplicate events or
+	// advisory records.
+	domainRuntime, err := selected.Compose(ctx, records, configuration.AssetRoot)
 	if err != nil {
 		_ = closeDatabase()
 		return nil, fmt.Errorf("compose domain profile %q: %w", selected.ID(), err)
@@ -295,7 +291,7 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 	schemaDir := filepath.Join(configuration.AssetRoot, "ontology")
 	fixtureDir := filepath.Join(configuration.AssetRoot, "datasets", selected.ID())
 	identities := selected.Identities()
-	models, err := composeModels(ctx, sqliteStore, configuration.AssetRoot, fixtureDir, schemaDir, identities.Supervisor, configuration.ModelEnv)
+	models, err := composeModels(ctx, domainStore, configuration.AssetRoot, fixtureDir, schemaDir, identities.Supervisor, configuration.ModelEnv)
 	if err != nil {
 		_ = closeDatabase()
 		return nil, fmt.Errorf("compose model adapters: %w", err)
@@ -313,8 +309,19 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 	}
 	detector := recurrence.NewDetector(area, window, time.Now)
 
+	// Recovery: Postgres prefers the materialized COP when the seed path
+	// warmed it via MaterializingProjector; SQLite always falls back to
+	// deterministic checkpoint replay.
+	recovery := api.RecoveryReader(domainRuntime)
+	if preferMaterialized != nil {
+		recovery = api.PreferMaterializedRecovery{
+			Materialized: preferMaterialized,
+			Fallback:     domainRuntime,
+		}
+	}
+
 	apiServer, err := api.New(api.Config{
-		Recovery:          domainRuntime,
+		Recovery:          recovery,
 		Records:           records,
 		Evidence:          domainRuntime,
 		Operations:        operations,
@@ -363,7 +370,7 @@ func normalizeConfig(configuration config) (config, error) {
 		return config{}, errors.New("listen address is required")
 	}
 	if configuration.DatabasePath == "" {
-		return config{}, errors.New("SQLite database path is required")
+		return config{}, errors.New("database path or DSN is required")
 	}
 	if configuration.UIDirectory == "" {
 		return config{}, errors.New("prebuilt UI directory is required")

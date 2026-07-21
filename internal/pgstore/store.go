@@ -615,6 +615,66 @@ func (s *Store) AppendLunaResult(ctx context.Context, result gen.LunaResult) err
 	return nil
 }
 
+// ListLunaResults returns every persisted Luna lifecycle record. Used by the
+// deterministic simulator Verify path; order is undefined.
+func (s *Store) ListLunaResults(ctx context.Context) ([]gen.LunaResult, error) {
+	exec, err := s.executor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := exec.Query(ctx, "SELECT record_json FROM luna_results")
+	if err != nil {
+		return nil, fmt.Errorf("list Luna results: %w", err)
+	}
+	defer rows.Close()
+	var results []gen.LunaResult
+	for rows.Next() {
+		var record []byte
+		if err := rows.Scan(&record); err != nil {
+			return nil, fmt.Errorf("scan Luna result: %w", err)
+		}
+		var result gen.LunaResult
+		if err := json.Unmarshal(record, &result); err != nil {
+			return nil, fmt.Errorf("decode Luna result: %w", err)
+		}
+		results = append(results, result)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate Luna results: %w", err)
+	}
+	return results, nil
+}
+
+// ListModelRuns returns every persisted model-run provenance record, including
+// Luna runs that ReadAdvisoryHistory deliberately omits. Order is undefined.
+func (s *Store) ListModelRuns(ctx context.Context) ([]gen.ModelRun, error) {
+	exec, err := s.executor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := exec.Query(ctx, "SELECT record_json FROM model_runs")
+	if err != nil {
+		return nil, fmt.Errorf("list model runs: %w", err)
+	}
+	defer rows.Close()
+	var runs []gen.ModelRun
+	for rows.Next() {
+		var record []byte
+		if err := rows.Scan(&record); err != nil {
+			return nil, fmt.Errorf("scan model run: %w", err)
+		}
+		var run gen.ModelRun
+		if err := json.Unmarshal(record, &run); err != nil {
+			return nil, fmt.Errorf("decode model run: %w", err)
+		}
+		runs = append(runs, run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate model runs: %w", err)
+	}
+	return runs, nil
+}
+
 // AppendInsight persists an immutable Terra assessment.
 func (s *Store) AppendInsight(ctx context.Context, insight gen.Insight) error {
 	if strings.TrimSpace(insight.InsightID) == "" || insight.StateRevision < 1 {

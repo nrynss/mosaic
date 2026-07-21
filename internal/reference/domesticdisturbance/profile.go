@@ -9,6 +9,7 @@ import (
 
 	"mosaic.local/mosaic/internal/api"
 	"mosaic.local/mosaic/internal/contracts"
+	"mosaic.local/mosaic/internal/pgstore"
 	"mosaic.local/mosaic/internal/profile"
 	"mosaic.local/mosaic/internal/reference/domesticdisturbance/dataset"
 	"mosaic.local/mosaic/internal/reference/domesticdisturbance/simulator"
@@ -47,38 +48,75 @@ func (domainProfile) Validate(assetRoot string) error {
 }
 
 func (domainProfile) Compose(ctx context.Context, repository contracts.ImmutableRecordRepository, assetRoot string) (profile.Runtime, error) {
-	database, ok := repository.(*store.Store)
-	if !ok {
-		return nil, errors.New("domesticdisturbance requires a SQLite store (*store.Store)")
-	}
-	if database == nil {
-		return nil, errors.New("store is required")
+	domain, wrapProjector, resolver, err := bindDomainStore(repository)
+	if err != nil {
+		return nil, err
 	}
 	scenario, err := simulator.New(simulator.Config{
-		Store:      database,
-		SchemaDir:  filepath.Join(assetRoot, "ontology"),
-		FixtureDir: filepath.Join(assetRoot, "datasets", ID),
+		Store:         domain,
+		SchemaDir:     filepath.Join(assetRoot, "ontology"),
+		FixtureDir:    filepath.Join(assetRoot, "datasets", ID),
+		WrapProjector: wrapProjector,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("compose frozen scenario: %w", err)
 	}
 	advisory, err := simulator.NewAdvisoryReplay(simulator.AdvisoryReplayConfig{
-		Store:      database,
+		Store:      domain,
 		SchemaDir:  filepath.Join(assetRoot, "ontology"),
 		FixtureDir: filepath.Join(assetRoot, "datasets", ID),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("compose fixture advisory replay: %w", err)
 	}
-	resolver, err := api.NewSQLiteEvidenceResolver(database, StateFacts{})
-	if err != nil {
-		return nil, fmt.Errorf("compose governed evidence resolver: %w", err)
+	return &runtime{
+		store:     domain,
+		scenario:  scenario,
+		advisory:  advisory,
+		resolver:  resolver,
+		assetRoot: assetRoot,
+	}, nil
+}
+
+// bindDomainStore accepts either durable backend and wires optional COP
+// materialization + evidence resolution for that backend only. No dual-store
+// path is offered: Compose fails closed when the repository is neither SQLite
+// nor Postgres.
+func bindDomainStore(repository contracts.ImmutableRecordRepository) (
+	simulator.DomainStore,
+	func(contracts.Projector) contracts.Projector,
+	api.EvidenceResolver,
+	error,
+) {
+	switch backend := repository.(type) {
+	case *store.Store:
+		if backend == nil {
+			return nil, nil, nil, errors.New("store is required")
+		}
+		resolver, err := api.NewSQLiteEvidenceResolver(backend, StateFacts{})
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("compose governed evidence resolver: %w", err)
+		}
+		return backend, nil, resolver, nil
+	case *pgstore.Store:
+		if backend == nil {
+			return nil, nil, nil, errors.New("store is required")
+		}
+		resolver, err := api.NewPostgresEvidenceResolver(backend.Pool(), StateFacts{})
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("compose governed evidence resolver: %w", err)
+		}
+		wrap := func(inner contracts.Projector) contracts.Projector {
+			return pgstore.NewMaterializingProjector(inner, backend)
+		}
+		return backend, wrap, resolver, nil
+	default:
+		return nil, nil, nil, errors.New("domesticdisturbance requires *store.Store or *pgstore.Store")
 	}
-	return &runtime{store: database, scenario: scenario, advisory: advisory, resolver: resolver, assetRoot: assetRoot}, nil
 }
 
 type runtime struct {
-	store     *store.Store
+	store     simulator.DomainStore
 	scenario  *simulator.Service
 	advisory  *simulator.AdvisoryReplay
 	resolver  api.EvidenceResolver
