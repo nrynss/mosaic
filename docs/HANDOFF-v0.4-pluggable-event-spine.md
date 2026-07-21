@@ -407,8 +407,8 @@ Dependencies noted. Workstreams A→B are the foundation; C rides on them.
 | ID | Task | Size | Deps | Claim | Status |
 |----|------|------|------|-------|--------|
 | D1 | Empty initial board + progressive-reveal verification | **L** | C2, C3 | d1-progressive-eventlog | Done (EventLog.Append + sync ProcessBeat; empty until Play) |
-| D1r | D1 residuals: e2e helper names, session-scoped advisories, docs, optional PG/timeline harden | **M** | D1 | d1-residuals | In progress |
-| D2 | "Replay last run" button + mode/status surfacing | **M** | C5 | d2-replay-ui | In progress |
+| D1r | D1 residuals: e2e helper names, session-scoped advisories, docs, optional PG/timeline harden | **M** | D1 | d1-residuals | Done (scoped advisories + seeded helper names) |
+| D2 | "Replay last run" button + mode/status surfacing | **M** | C5 | d2-replay-ui | Done (cassette_mode API + Replay UI) |
 
 ### Workstream E — Ops & pluggability proof
 | ID | Task | Size | Deps | Claim | Status |
