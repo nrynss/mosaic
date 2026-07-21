@@ -11,8 +11,7 @@ failure case.
 **Implementation commit:** `3eea527`  
 **Depends on:** demo cassette recorder (`1bb0974`) and the live path
 (`6c2ad38`, `660a347`). See
-[demo-cassette-recorder.md](../runbook/demo-cassette-recorder.md) and
-[demo-recorder-script.md](demo-recorder-script.md).
+[demo-cassette-recorder.md](../runbook/demo-cassette-recorder.md).
 
 ---
 

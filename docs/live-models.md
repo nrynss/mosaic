@@ -29,7 +29,7 @@ Provider selection is configured at startup using process environment variables.
 | `MOSAIC_LUNA_PROVIDER` | Ingestion & normalisation mode for Luna | `fixture`, `live` | `fixture` | `live` |
 | `MOSAIC_TERRA_PROVIDER` | Interactive incident assessment mode for Terra | `fixture`, `live` | `fixture` | `live` |
 | `MOSAIC_SOL_PROVIDER` | Interactive recipient briefing mode for Sol | `fixture`, `live` | `fixture` | `live` |
-| `MOSAIC_SIM_MODE` | Simulation inference cassette mode (Terra/Sol) | `fixture` / `passthrough` / `off`, `live` / `record`, `replay` / `recorded` | `fixture` (passthrough) | `fixture` |
+| `MOSAIC_SIM_MODE` | Simulation inference cassette mode (Terra/Sol/Luna wrap) | `fixture` / `passthrough` / `off`, `live` / `record`, `replay` / `recorded` | `fixture` (passthrough) | **`live`** (record when key present; demotes without key) |
 | `MOSAIC_CASSETTE_MODE` | Alias of `MOSAIC_SIM_MODE` (ignored when SIM is set) | same as above | unset | unset |
 | `MOSAIC_CASSETTE_DIR` | Directory for cassette FileStore recordings | path | `$TMPDIR/mosaic-recordings` (writable under read-only containers) | `/tmp/mosaic-recordings` |
 
@@ -48,12 +48,13 @@ independent).
 
 Rules:
 
-1. **Default is fixture/passthrough** — safe for CI and Docker without keys.
+1. **Process default (unset env) is fixture/passthrough** — safe for CI and bare binaries without keys. **Docker Compose defaults `MOSAIC_SIM_MODE=live`** so end-to-end demos record when a key is present.
 2. **Record** wraps only agents that are effectively live (provider `live` **and** key present). If mode is `live`/`record` but the key is missing or providers stay fixture, composition demotes to passthrough (same as existing provider fallback; refusals are not banked).
-3. **Replay** does **not** require `OPENAI_API_KEY`. Terra/Sol always use the FileStore; a missing recording returns `cassette.ErrReplayMiss` (never a silent network call).
-4. Per-agent `MOSAIC_TERRA_PROVIDER` / `MOSAIC_SOL_PROVIDER` still gate which agents are live when mode is live/record.
-5. Cassette mode is **process-level env only** (no UI secrets, no mid-process hot-swap). The UI surfaces `cassette_mode` from `/api/v1/version` and `/api/v1/advisories` and shows a mode pill (Fixture / Live recording / Replay).
-6. **“Refresh banked advice”** (UI) is enabled only when the process was started with `MOSAIC_SIM_MODE=replay`. It re-fetches advisories from the server; it does **not** re-bank a live run or change mode. True free Terra/Sol cassette use requires the process already in replay mode when those clients are invoked.
+3. **Replay** does **not** require `OPENAI_API_KEY`. Terra/Sol use the FileStore; a missing recording returns `cassette.ErrReplayMiss` (never a silent network call).
+4. Per-agent `MOSAIC_*_PROVIDER` still gate which agents are live when mode is live/record.
+5. Cassette mode is **process-level env only** (no UI secrets, no mid-process hot-swap). Surface `cassette_mode` from `/api/v1/version` and related JSON.
+6. **Spend boundary:** **Play scenario does not call OpenAI.** Progressive beats use the synthetic dataset and fixture advisory continuum. Live OpenAI runs on **Model Actions** (`/operator/interpret`, `/operator/analyze`, `/operator/brief`) when providers are live.
+7. Banked cassette replay for free Terra/Sol requires `MOSAIC_SIM_MODE=replay` and a populated `MOSAIC_CASSETTE_DIR` (image ships `testdata/demo/cassettes` for CI-style banks).
 
 Example — bank one run, then replay:
 
@@ -97,13 +98,16 @@ All model invocations (successful, refused, or failed) are recorded in the datab
 
 ## Local Docker Setup with Live Models
 
-Root `.env` (gitignored):
+Root `.env` (gitignored) — see [`.env.example`](../.env.example):
 
 ~~~bash
 OPENAI_API_KEY=sk-proj-your-openai-api-key-here
+# Optional: MOSAIC_SIM_MODE=live (Compose default)
+# Optional shared Supabase: MOSAIC_DB_PATH=postgres://postgres.<ref>:…@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require
 ~~~
 
-Compose injects the key and defaults all three providers to `live`:
+Compose injects the key and defaults all three providers + `MOSAIC_SIM_MODE` to `live`.
+Cassette writes go to `/tmp/mosaic-recordings` (writable tmpfs on the read-only image).
 
 ~~~bash
 docker compose up --build --detach
@@ -119,15 +123,19 @@ docker compose up --build --detach
 
 ## Cloud Run
 
-Ensure the service has both the key and the provider flags (key alone is not enough):
+Ensure the service has the key, provider flags, sim mode, **and** durable DSN
+(key alone is not enough):
 
 ~~~bash
 gcloud run services update mosaic-demo \
   --region=us-central1 \
-  --update-env-vars="MOSAIC_LUNA_PROVIDER=live,MOSAIC_TERRA_PROVIDER=live,MOSAIC_SOL_PROVIDER=live"
+  --update-env-vars="MOSAIC_LUNA_PROVIDER=live,MOSAIC_TERRA_PROVIDER=live,MOSAIC_SOL_PROVIDER=live,MOSAIC_SIM_MODE=live" \
+  --update-secrets="MOSAIC_DB_PATH=mosaic-db-dsn:latest,OPENAI_API_KEY=openai-api-key:latest"
 ~~~
 
-Prefer `--set-secrets=OPENAI_API_KEY=openai-api-key:latest` for the key. After the revision rolls out, UI badges should show `live` for each agent.
+See [`runbook/cloud-run-deployment-analysis.md`](runbook/cloud-run-deployment-analysis.md) §6.
+After the revision rolls out, `GET /api/v1/version` should show
+`openai_configured: true` and `cassette_mode: record` (for `live`/`record`).
 
 ## Estimated-Credits Meter
 
@@ -145,6 +153,6 @@ Optional configuration:
 
 Limitations (by design, not oversights):
 * **Hardcoded prices.** The price table lives in `internal/usage/usage.go` and is not fetched from a live pricing feed; if OpenAI's prices change, or Mosaic starts requesting a different model, the table needs a manual update.
-* **Per-process only.** The accumulator is in-memory and is never written to SQLite — Cloud Run's `/tmp` is ephemeral anyway, so a per-process estimate is the honest scope. It resets to zero whenever the process restarts.
+* **Per-process only.** The accumulator is in-memory and is never written to the durable store — a per-process estimate is the honest scope. It resets to zero whenever the process restarts.
 * **Only counts Mosaic's own calls.** It has no visibility into any other usage on the same OpenAI API key (other tools, other deployments, dashboard usage outside this process).
 * **Not a real balance.** It is never a substitute for checking the actual usage/billing dashboard at platform.openai.com.

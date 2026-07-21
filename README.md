@@ -16,8 +16,7 @@ This repository ships both:
 **Live demo:** [https://mosaic.nryn.dev](https://mosaic.nryn.dev)
 ([Cloud Run](https://mosaic-demo-358513274447.us-central1.run.app))
 
-In-app **Help** and **?** tips walk operators through the board. The full
-presenter pitch is in [`docs/demo-script.md`](docs/demo-script.md).
+In-app **Help** and **?** tips walk operators through the board.
 
 ---
 
@@ -42,20 +41,29 @@ deterministic **projector** alone **disposes** the common operating picture
 
 | | |
 |--|--|
-| **Framework** | Layered architecture, versioned schemas, public HTTP + SSE API, pluggable agents, immutable audit trail, domain-profile seam |
-| **This implementation** | Domestic-disturbance synthetic profile, SQLite store, OpenAI-backed Luna/Terra/Sol (or fixture fallback), Svelte reference UI |
+| **Framework** | Layered architecture, versioned schemas, public HTTP + SSE API, pluggable agents, immutable audit trail, domain-profile seam, event-log interfaces |
+| **This implementation** | Domestic-disturbance synthetic profile, **Postgres** spine (`pgstore`; SQLite for zero-infra tests), OpenAI-backed Luna/Terra/Sol (or fixture/replay), Svelte reference UI |
 
 The UI is a **CAD-style reference client**, not the product boundary. Another
 client (mobile field app, SOC console, EOC wallboard) can consume the same
 streams and APIs. Judge the **contracts**; the board proves they work under a
 dense event flow.
 
+### Current architecture (v0.4)
+
+| Piece | Behaviour |
+|-------|-----------|
+| **Progressive simulation** | Board starts **empty**. **Play scenario** appends each beat to the event log and runs the real ingest → project path (COP advances 1→9). |
+| **Event spine** | `EventLog` / `EventConsumer` / `EventBus` interfaces; Postgres implements append, ordered consume, and `LISTEN/NOTIFY` fan-out. Kafka/Redpanda is a later transport swap. |
+| **Agents** | Luna / Terra / Sol: fixture, live OpenAI, or cassette **replay** (banked live output, $0). |
+| **Spend boundary** | **Play does not call OpenAI.** Live spend is **Model Actions** (Interpret / Analyze / Brief) when providers are `live` and a server-only key is set. |
+
 ### Four layers
 
 | Layer | Role |
 |-------|------|
 | **1. Deterministic core** | Ingestion → canonical events → **projector** → **COP** + immutable store. Only the projector mutates operational state. |
-| **2. Agent layer** | **Luna / Terra / Sol** — generative advice, fixture or live, swappable without rewriting the core. |
+| **2. Agent layer** | **Luna / Terra / Sol** — generative advice, fixture / live / replay, swappable without rewriting the core. |
 | **3. Transport** | Bounded REST + **SSE** (`/api/v1/stream`, `/api/v1/simulation/stream`). |
 | **4. Presentation** | Reference UI (or any consumer of the API). |
 
@@ -82,9 +90,11 @@ jobs, schemas, and audit trails.
 | **Sol** | Recipient-facing briefings / recommendations (explicit request) | Best-of-class drafting when a human triggers a deep briefing — never automatic firehose. |
 
 **Live path today:** server-only `OPENAI_API_KEY` + per-agent
-`MOSAIC_*_PROVIDER=live|fixture`. Live means real OpenAI clients; failures and
+`MOSAIC_*_PROVIDER=live|fixture` + `MOSAIC_SIM_MODE=live|record|replay|fixture`.
+Live means real OpenAI clients on **operator model routes**; failures and
 refusals are recorded as model runs and **do not** mutate the COP. Fixture means
-deterministic demo-pack behaviour with no network call.
+deterministic demo-pack behaviour with no network call. Replay replays banked
+cassette responses with no API cost.
 
 **Why “boost OpenAI” here:**
 
@@ -92,17 +102,14 @@ deterministic demo-pack behaviour with no network call.
   of one expensive call for every tick.  
 - **Structured, schema-validated outputs** — agents return typed artifacts that
   the core can store and supersede, not free-form UI soup.  
-- **Operator-triggered spend** — Analyze/brief are explicit actions; no
-  autonomous spend loop.  
+- **Operator-triggered spend** — Analyze/brief/interpret are explicit actions;
+  Play itself is not an OpenAI firehose.  
 - **Auditability** — every invocation is a first-class model run (provider,
   inputs, validation status, outputs).  
 - **Swap without rewiring** — change provider mode or, later, model class per
   agent without touching the projector or UI contracts.
 
-The architecture is ready for **different LLM classes per role** (e.g. small
-fast models on Luna, flagship models on Terra/Sol). The live demo wires OpenAI
-through that multi-agent split so you can show optimization *and* safety, not
-just a chat box glued to a dashboard.
+Details: [`docs/live-models.md`](docs/live-models.md).
 
 ---
 
@@ -137,26 +144,39 @@ integrity paths, sample audits). No extra data generation required.
 ### Quick walkthrough (5–8 minutes)
 
 1. Open [https://mosaic.nryn.dev](https://mosaic.nryn.dev) — confirm **Connected**.  
-2. Note Luna / Terra / Sol modes (**AI on** vs demo pack).  
-3. **Play scenario** — watch facts stream onto the board.  
-4. **Show source** on a claim; **Refresh advice**; discuss supersession after the road opens.  
+   The board is **empty** until you play (progressive mode).  
+2. Note agent / cassette mode from the UI (fixture pack vs live / recording /
+   replay — process env, not a UI toggle).  
+3. **Play scenario** — watch facts stream onto the board as the real pipeline
+   advances (COP revisions climb toward 9). This path does **not** spend OpenAI
+   credits by itself.  
+4. **Show source** on a claim; open **Model Actions** after COP is ready for
+   live Luna/Terra/Sol (or rely on fixture continuum during Play). Discuss
+   supersession after the road opens.  
 5. Save a Dispatch or maintenance note — **not carried out / not delivered**.  
-6. Open **Decision history** for the paper trail.
+6. Open **Decision history** for the paper trail (including invalid/refused
+   model runs).
 
-Presenter script and end-VO: [`docs/demo-script.md`](docs/demo-script.md).
+Automated capture: [`ui/e2e`](ui/e2e) + [`docs/runbook/playwright-demo-e2e.md`](docs/runbook/playwright-demo-e2e.md).
 
 ---
 
 ## Local development
 
-Create a root `.env` (gitignored):
+Copy [`.env.example`](.env.example) to root `.env` (gitignored) and fill in:
 
 ```bash
 OPENAI_API_KEY=sk-proj-your-openai-api-key-here
-# Optional (Compose defaults to live when key is present):
-# MOSAIC_LUNA_PROVIDER=live
-# MOSAIC_TERRA_PROVIDER=live
-# MOSAIC_SOL_PROVIDER=live
+
+# Compose defaults: providers=live, MOSAIC_SIM_MODE=live, local Postgres.
+# For shared durable store with Cloud Run (session pooler, IPv4):
+# MOSAIC_DB_PATH=postgres://postgres.<ref>:PASSWORD@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require
+
+# Safe $0 demo even with a key present:
+# MOSAIC_SIM_MODE=fixture
+# MOSAIC_LUNA_PROVIDER=fixture
+# MOSAIC_TERRA_PROVIDER=fixture
+# MOSAIC_SOL_PROVIDER=fixture
 ```
 
 ```bash
@@ -165,8 +185,10 @@ docker compose up --build
 
 Open [http://localhost:8080](http://localhost:8080).
 
-Compose defaults to a local Postgres container. Point `MOSAIC_DB_PATH` at
-Supabase (see `.env.example`) to share durable storage with Cloud Run.
+- **Default store:** local Postgres container (`db` service).  
+- **Shared with Cloud Run:** set `MOSAIC_DB_PATH` to the Supabase **session**
+  pooler DSN (port **5432**, user `postgres.<ref>`). Do **not** use transaction
+  pooler port `6543`. Free-tier direct hosts are often IPv6-only.
 
 ### Port binding
 
@@ -182,7 +204,7 @@ The production image does not bake in `MOSAIC_LISTEN_ADDR`. Compose sets
 ## Cloud Run + Supabase (durable demo)
 
 **What it is:** live, single-instance, durable Postgres via **Supabase**
-(session pooler). Local Compose and Cloud Run share one DSN so local Plays
+(session pooler). Local Compose and Cloud Run can share one DSN so local Plays
 show up on the hosted demo and vice versa.
 
 **What it is not:** multi-region HA or Kafka. Cassette files under `/tmp` on
@@ -233,14 +255,12 @@ Local parity: put the **same** session-pooler DSN in gitignored `.env` as
 `MOSAIC_DB_PATH=…` so `docker compose up` talks to Supabase (see
 [`.env.example`](.env.example)).
 
-Image must include versioned prompts under `prompts/{luna,terra,sol}/` (see
-`Dockerfile`). Full notes:
+Image includes versioned prompts under `prompts/{luna,terra,sol}/` and
+`testdata/demo/` (recording manifest + cassettes). Full notes:
 [`docs/runbook/cloud-run-deployment-analysis.md`](docs/runbook/cloud-run-deployment-analysis.md) §6.
 
 * **Public URL:** [https://mosaic.nryn.dev](https://mosaic.nryn.dev)  
 * **Cloud Run:** [https://mosaic-demo-358513274447.us-central1.run.app](https://mosaic-demo-358513274447.us-central1.run.app)
-
-Also fix the earlier README note that durable storage is missing:
 
 ---
 
@@ -249,7 +269,8 @@ Also fix the earlier README note that durable storage is missing:
 - Multi-tenant hosted platform or “AI ran the operation”  
 - Real dispatch, real PII, or real external delivery  
 - Multi-region HA or Kafka event transport today (Postgres spine is the demo path)  
-- A shipped multi-domain product — only pluggable **architecture**
+- A shipped multi-domain product — only pluggable **architecture**  
+- That **Play** alone is a paid OpenAI run (Model Actions are)
 
 ---
 
@@ -257,8 +278,5 @@ Also fix the earlier README note that durable storage is missing:
 
 | Doc | Purpose |
 |-----|---------|
-| [`docs/demo-script.md`](docs/demo-script.md) | DevWeek pitch + walkthrough + end VO |
-| [`docs/demo-video.md`](docs/demo-video.md) | YouTube &lt;3 min video plan (working product + Codex / GPT-5.6 VO) |
 | [`docs/live-models.md`](docs/live-models.md) | Fixture vs live agent configuration |
 | [`docs/runbook/local-docker-demo.md`](docs/runbook/local-docker-demo.md) | Local Docker verification |
-| [`HANDOFF.md`](HANDOFF.md) | Integration board, live deploy, planned Playwright capture |
