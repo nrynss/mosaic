@@ -20,9 +20,11 @@ import (
 	"mosaic.local/mosaic/internal/terra"
 )
 
-// defaultCassetteDir is the relative FileStore root when MOSAIC_CASSETTE_DIR
-// is unset. The repo gitignores /recordings/ at the worktree root.
-const defaultCassetteDir = "recordings"
+// defaultCassetteDirName is the directory leaf used under the process temp
+// dir when MOSAIC_CASSETTE_DIR is unset. Using os.TempDir keeps Record mode
+// working in the read-only Compose image (only /tmp is writable) and still
+// lands outside the repo; /recordings remains gitignored for local overrides.
+const defaultCassetteDirName = "mosaic-recordings"
 
 // modelEnv holds server-only runtime inputs for agent provider selection and
 // simulation cassette mode. The OpenAI key never comes from flags or the UI —
@@ -90,7 +92,7 @@ func resolveCassetteDir(env modelEnv) string {
 	if dir := strings.TrimSpace(env.CassetteDir); dir != "" {
 		return dir
 	}
-	return defaultCassetteDir
+	return filepath.Join(os.TempDir(), defaultCassetteDirName)
 }
 
 func parseProvider(value string) contracts.ModelProvider {

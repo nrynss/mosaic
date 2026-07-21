@@ -29,9 +29,9 @@ Provider selection is configured at startup using process environment variables.
 | `MOSAIC_LUNA_PROVIDER` | Ingestion & normalisation mode for Luna | `fixture`, `live` | `fixture` | `live` |
 | `MOSAIC_TERRA_PROVIDER` | Interactive incident assessment mode for Terra | `fixture`, `live` | `fixture` | `live` |
 | `MOSAIC_SOL_PROVIDER` | Interactive recipient briefing mode for Sol | `fixture`, `live` | `fixture` | `live` |
-| `MOSAIC_SIM_MODE` | Simulation inference cassette mode (Terra/Sol) | `fixture` / `passthrough` / `off`, `live` / `record`, `replay` / `recorded` | `fixture` (passthrough) | unset (passthrough) |
+| `MOSAIC_SIM_MODE` | Simulation inference cassette mode (Terra/Sol) | `fixture` / `passthrough` / `off`, `live` / `record`, `replay` / `recorded` | `fixture` (passthrough) | `fixture` |
 | `MOSAIC_CASSETTE_MODE` | Alias of `MOSAIC_SIM_MODE` (ignored when SIM is set) | same as above | unset | unset |
-| `MOSAIC_CASSETTE_DIR` | Directory for cassette FileStore recordings | path | `recordings` (cwd-relative; gitignored at repo root) | same |
+| `MOSAIC_CASSETTE_DIR` | Directory for cassette FileStore recordings | path | `$TMPDIR/mosaic-recordings` (writable under read-only containers) | `/tmp/mosaic-recordings` |
 
 ### Simulation cassette modes (Live / Replay / Fixture)
 
@@ -62,13 +62,13 @@ $env:OPENAI_API_KEY = "sk-..."
 $env:MOSAIC_TERRA_PROVIDER = "live"
 $env:MOSAIC_SOL_PROVIDER = "live"
 $env:MOSAIC_SIM_MODE = "live"
-$env:MOSAIC_CASSETTE_DIR = "recordings"
+$env:MOSAIC_CASSETTE_DIR = Join-Path $env:TEMP "mosaic-recordings"
 # run mosaicdemo once through the advisory beats...
 
-# Replay (free): no key required
+# Replay (free): no key required — same CASSETTE_DIR as the banked run
 Remove-Item Env:OPENAI_API_KEY -ErrorAction SilentlyContinue
 $env:MOSAIC_SIM_MODE = "replay"
-$env:MOSAIC_CASSETTE_DIR = "recordings"
+$env:MOSAIC_CASSETTE_DIR = Join-Path $env:TEMP "mosaic-recordings"
 ```
 
 ### Effective selection rules

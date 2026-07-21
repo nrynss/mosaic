@@ -124,8 +124,9 @@ func TestParseModelEnvDefaultsToFixture(t *testing.T) {
 	if mode != cassette.ModePassthrough {
 		t.Fatalf("default cassette mode = %s, want passthrough", mode)
 	}
-	if resolveCassetteDir(env) != defaultCassetteDir {
-		t.Fatalf("default cassette dir = %q, want %q", resolveCassetteDir(env), defaultCassetteDir)
+	wantDir := filepath.Join(os.TempDir(), defaultCassetteDirName)
+	if resolveCassetteDir(env) != wantDir {
+		t.Fatalf("default cassette dir = %q, want %q", resolveCassetteDir(env), wantDir)
 	}
 }
 
