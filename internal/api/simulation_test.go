@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"mosaic.local/mosaic/internal/contracts"
-	"mosaic.local/mosaic/internal/simsession"
+	"mosaic.local/mosaic/internal/simulation/session"
 )
 
 type testSchedule struct {
@@ -39,7 +39,7 @@ type simControllerOpts struct {
 	holdBeats  bool
 }
 
-func newSimulationController(t *testing.T, beats []contracts.ScheduledBeat, opts simControllerOpts) *simsession.Controller {
+func newSimulationController(t *testing.T, beats []contracts.ScheduledBeat, opts simControllerOpts) *session.Controller {
 	t.Helper()
 	var (
 		mu  sync.Mutex
@@ -62,7 +62,7 @@ func newSimulationController(t *testing.T, beats []contracts.ScheduledBeat, opts
 			return make(chan time.Time)
 		}
 	}
-	ctrl, err := simsession.New(simsession.Config{
+	ctrl, err := session.New(session.Config{
 		Schedule: testSchedule{beats: beats},
 		Clock:    func() time.Time { return time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC) },
 		After:    after,
@@ -79,12 +79,12 @@ func newSimulationController(t *testing.T, beats []contracts.ScheduledBeat, opts
 		},
 	})
 	if err != nil {
-		t.Fatalf("new simsession controller: %v", err)
+		t.Fatalf("new session controller: %v", err)
 	}
 	return ctrl
 }
 
-func newSimulationFixture(t *testing.T, ctrl *simsession.Controller) apiFixture {
+func newSimulationFixture(t *testing.T, ctrl *session.Controller) apiFixture {
 	t.Helper()
 	base := newFixture(t)
 	server, err := New(Config{

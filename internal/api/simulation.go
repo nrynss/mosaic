@@ -7,19 +7,20 @@ import (
 	"time"
 
 	"mosaic.local/mosaic/internal/contracts"
-	"mosaic.local/mosaic/internal/simsession"
 	"mosaic.local/mosaic/internal/stream"
 )
 
 // SimulationController is the optional interactive session lifecycle surface
-// consumed by the HTTP adapter. Composition wires *simsession.Controller
-// (which satisfies this interface); tests may inject a real controller or stub.
+// consumed by the HTTP adapter. Composition wires the simulation session
+// controller (which satisfies this interface); tests may inject a real
+// controller or stub. Production code in this package must not import
+// internal/simulation — only the contracts seams below.
 type SimulationController interface {
 	Start(ctx context.Context) (contracts.SimulationSession, error)
 	Status() contracts.SimulationSession
 	End(ctx context.Context) (contracts.SimulationSession, error)
 	Reset(ctx context.Context) (contracts.SimulationSession, error)
-	Subscribe() *simsession.Subscription
+	Subscribe() contracts.SimulationStreamSubscription
 }
 
 // handleSimulationStart creates a new synthetic session and begins beat emission.
@@ -34,7 +35,7 @@ func (s *Server) handleSimulationStart(w http.ResponseWriter, r *http.Request) {
 	}
 	session, err := ctrl.Start(r.Context())
 	if err != nil {
-		if errors.Is(err, simsession.ErrAlreadyRunning) {
+		if errors.Is(err, contracts.ErrSimulationAlreadyRunning) {
 			writeJSON(w, http.StatusConflict, sessionPayload(session), apiError{
 				Code:    "simulation_already_running",
 				Message: "simulation session already running; use POST /api/v1/simulation/reset to start a new session",
@@ -160,7 +161,7 @@ func (s *Server) handleSimulationStream(w http.ResponseWriter, r *http.Request) 
 		select {
 		case <-r.Context().Done():
 			return
-		case event, open := <-sub.Events:
+		case event, open := <-sub.Events():
 			if !open {
 				return
 			}

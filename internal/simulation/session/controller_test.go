@@ -1,4 +1,4 @@
-package simsession
+package session
 
 import (
 	"context"
@@ -50,13 +50,13 @@ func newTestController(t *testing.T, beats []contracts.ScheduledBeat, opts ...fu
 	return ctrl
 }
 
-func collectUntil(t *testing.T, sub *Subscription, n int, timeout time.Duration) []contracts.SimulationStreamEvent {
+func collectUntil(t *testing.T, sub contracts.SimulationStreamSubscription, n int, timeout time.Duration) []contracts.SimulationStreamEvent {
 	t.Helper()
 	out := make([]contracts.SimulationStreamEvent, 0, n)
 	deadline := time.After(timeout)
 	for len(out) < n {
 		select {
-		case ev, ok := <-sub.Events:
+		case ev, ok := <-sub.Events():
 			if !ok {
 				t.Fatalf("subscription closed after %d events, want %d", len(out), n)
 			}
@@ -222,7 +222,7 @@ func TestEndTransitionsToEndedAndStopsFurtherBeats(t *testing.T) {
 	deadline := time.After(200 * time.Millisecond)
 	for {
 		select {
-		case ev := <-sub.Events:
+		case ev := <-sub.Events():
 			if ev.Type == contracts.StreamEventBeat {
 				t.Fatalf("received beat after End: %#v", ev)
 			}
@@ -235,7 +235,7 @@ done:
 	// Advancing the clock must not deliver the late beat.
 	clock.Advance(10 * time.Second)
 	select {
-	case ev := <-sub.Events:
+	case ev := <-sub.Events():
 		if ev.Type == contracts.StreamEventBeat {
 			t.Fatalf("late beat emitted after End: %#v", ev)
 		}
@@ -353,7 +353,7 @@ func TestDeterministicTimingWithVirtualClock(t *testing.T) {
 	}
 
 	select {
-	case ev := <-sub.Events:
+	case ev := <-sub.Events():
 		t.Fatalf("unexpected event before Advance: %#v", ev)
 	case <-time.After(30 * time.Millisecond):
 	}
@@ -431,7 +431,7 @@ func TestConcurrentSubscribeReceivesActiveSessionOnly(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
-	collect := func(sub *Subscription) []contracts.SimulationStreamEvent {
+	collect := func(sub contracts.SimulationStreamSubscription) []contracts.SimulationStreamEvent {
 		defer wg.Done()
 		return collectUntil(t, sub, 6, time.Second)
 	}
@@ -499,7 +499,7 @@ func TestSlowSubscriberDoesNotBlockController(t *testing.T) {
 drain:
 	for {
 		select {
-		case <-sub.Events:
+		case <-sub.Events():
 			drained++
 		default:
 			break drain

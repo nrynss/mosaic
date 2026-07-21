@@ -1,9 +1,11 @@
 // Package contracts contains stable seams between Mosaic parcels. Implementations
-// belong to later packages; types here deliberately carry no runtime behaviour.
+// belong to later packages; types here deliberately carry no runtime behaviour
+// beyond shared sentinel errors that form part of a cross-package seam.
 package contracts
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"mosaic.local/mosaic/internal/ontology/gen"
@@ -188,4 +190,20 @@ type SimulationStreamEvent struct {
 	Timestamp time.Time       `json:"timestamp"`
 	Type      StreamEventType `json:"type"`
 	Payload   any             `json:"payload,omitempty"`
+}
+
+// ErrSimulationAlreadyRunning means Start was called while a session is already
+// running. Framework adapters (e.g. the HTTP API) map this sentinel without
+// importing the simulation package. Use Reset to begin a new session.
+var ErrSimulationAlreadyRunning = errors.New("simulation session already running")
+
+// SimulationStreamSubscription is a cancelable registration on a session-scoped
+// stream. Implementations live under internal/simulation; consumers (including
+// the HTTP adapter) depend only on this interface so framework packages never
+// import simulation.
+type SimulationStreamSubscription interface {
+	// Events returns the receive-only channel of session stream events.
+	Events() <-chan SimulationStreamEvent
+	// Cancel unregisters the subscriber. Safe to call more than once.
+	Cancel()
 }

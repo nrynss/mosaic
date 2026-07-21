@@ -112,4 +112,10 @@ func TestSimulationContracts(t *testing.T) {
 	if StreamEventBeat != "beat" || StreamEventStatusChange != "status_change" || StreamEventWorkspaceClear != "workspace_clear" {
 		t.Errorf("StreamEventType value mismatch")
 	}
+
+	if ErrSimulationAlreadyRunning == nil || ErrSimulationAlreadyRunning.Error() == "" {
+		t.Errorf("ErrSimulationAlreadyRunning must be a non-empty sentinel")
+	}
+	// SimulationStreamSubscription is a seam; concrete types live under simulation.
+	var _ SimulationStreamSubscription
 }

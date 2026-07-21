@@ -1,6 +1,13 @@
-// Package simsession implements a domain-agnostic interactive simulation
+// Package session implements a domain-agnostic interactive simulation
 // controller. It owns session lifecycle (start/status/end/reset) and emits
 // schedule-driven beats on a session-scoped stream.
+//
+// This package lives under internal/simulation. Framework packages
+// (ingestion, store, terra, sol, luna, ontology, contracts, stream, api
+// production code, projectors, …) must never import it — simulation imports
+// framework packages and orchestrates over time. All pacing/timing lives here
+// (and sibling simulation packages); the framework has no notion of beat delay
+// beyond the schedule types already defined in contracts.
 //
 // Delay model: each ScheduledBeat.Delay is relative to session start time
 // (not cumulative between beats). A beat with Delay=2s fires two seconds after
@@ -14,7 +21,7 @@
 // The controller holds no durable immutable event store. Reset creates a new
 // SessionID and a fresh stream sequence; it never rewrites or truncates prior
 // session history because none is retained here.
-package simsession
+package session
 
 import (
 	"context"
@@ -31,12 +38,18 @@ import (
 
 const defaultSubscriberBuffer = 64
 
+// Compile-time seam checks: *Controller satisfies the HTTP adapter surface via
+// contracts.SimulationStreamSubscription without the adapter importing session.
+var _ contracts.SimulationStreamSubscription = (*Subscription)(nil)
+
 var (
 	// ErrNilSchedule means Config.Schedule was not provided.
 	ErrNilSchedule = errors.New("simulation schedule is required")
 	// ErrAlreadyRunning means Start was called while a session is running.
-	// Use Reset to end the current session and begin a new one.
-	ErrAlreadyRunning = errors.New("simulation session already running")
+	// Use Reset to end the current session and begin a new one. Alias of the
+	// shared contracts sentinel so HTTP adapters can map it without importing
+	// this package.
+	ErrAlreadyRunning = contracts.ErrSimulationAlreadyRunning
 )
 
 // Config wires a controller. Schedule is required; clock and timers are
@@ -83,11 +96,20 @@ type Controller struct {
 
 // Subscription is a caller-owned registration on the session-scoped stream.
 // Call Cancel when finished; it is safe to call more than once.
+// It implements contracts.SimulationStreamSubscription.
 type Subscription struct {
-	Events <-chan contracts.SimulationStreamEvent
+	events <-chan contracts.SimulationStreamEvent
 
 	once   sync.Once
 	cancel func()
+}
+
+// Events returns the receive-only channel of session-scoped stream events.
+func (s *Subscription) Events() <-chan contracts.SimulationStreamEvent {
+	if s == nil || s.events == nil {
+		return closedEvents()
+	}
+	return s.events
 }
 
 // New constructs a controller in pending status with a copy of the schedule
@@ -221,9 +243,11 @@ func (c *Controller) Reset(ctx context.Context) (contracts.SimulationSession, er
 
 // Subscribe registers a bounded local subscriber. Events carry the active
 // session's SessionID. The caller must Cancel the subscription.
-func (c *Controller) Subscribe() *Subscription {
+// The return type is the contracts seam so composition can wire *Controller into
+// framework adapters without those adapters importing this package.
+func (c *Controller) Subscribe() contracts.SimulationStreamSubscription {
 	if c == nil {
-		return &Subscription{Events: closedEvents()}
+		return &Subscription{events: closedEvents()}
 	}
 
 	c.mu.Lock()
@@ -234,7 +258,7 @@ func (c *Controller) Subscribe() *Subscription {
 	c.mu.Unlock()
 
 	return &Subscription{
-		Events: ch,
+		events: ch,
 		cancel: func() {
 			c.mu.Lock()
 			if existing, ok := c.subs[id]; ok {

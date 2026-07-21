@@ -27,7 +27,7 @@ import (
 	"mosaic.local/mosaic/internal/contracts"
 	"mosaic.local/mosaic/internal/recurrence"
 	"mosaic.local/mosaic/internal/reference/registry"
-	"mosaic.local/mosaic/internal/simsession"
+	"mosaic.local/mosaic/internal/simulation/session"
 	"mosaic.local/mosaic/internal/store"
 	"mosaic.local/mosaic/internal/stream"
 )
@@ -63,7 +63,7 @@ type application struct {
 
 	// Composed surfaces exposed for package tests (not HTTP).
 	modelProviders contracts.AgentProviderSelection
-	simulation     *simsession.Controller
+	simulation     *session.Controller
 	recurrence     *recurrence.Detector
 }
 
@@ -237,7 +237,7 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 		_ = closeDatabase()
 		return nil, fmt.Errorf("domain profile %q does not expose a simulation beat schedule", selected.ID())
 	}
-	simController, err := simsession.New(simsession.Config{Schedule: schedule})
+	simController, err := session.New(session.Config{Schedule: schedule})
 	if err != nil {
 		_ = closeDatabase()
 		return nil, fmt.Errorf("compose simulation controller: %w", err)

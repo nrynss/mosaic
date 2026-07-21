@@ -13,7 +13,7 @@ A trace of the v0.3 interactive path surfaced a correctness/honesty gap:
 - At startup, `domainRuntime.Run()` ([cmd/mosaicdemo/main.go](../cmd/mosaicdemo/main.go))
   **ingests all 10 beats at once** and seeds the full scenario (COP revision 9)
   plus all advisories into the store **before the server serves a request**.
-- "Play scenario" ([internal/simsession/controller.go](../internal/simsession/controller.go))
+- "Play scenario" ([internal/simulation/session/controller.go](../internal/simulation/session/controller.go))
   is a **cosmetic SSE overlay** — it emits beat metadata on a timer; the UI
   re-reads a COP that is already final.
 - `GET /cop` always runs deterministic recovery over the fully-seeded log
@@ -378,7 +378,7 @@ Dependencies noted. Workstreams A→B are the foundation; C rides on them.
 ### Workstream C — Simulation isolation & modes
 | ID | Task | Size | Deps | Claim | Status |
 |----|------|------|------|-------|--------|
-| C1 | Extract simulation into its own package/module; enforce dependency direction | **M** | — | — | Todo |
+| C1 | Extract simulation into its own package/module; enforce dependency direction | **M** | — | c1-sim-extract | Done |
 | C2 | `BeatExecutor` — per-beat real `Append`; cumulative pacing + `MOSAIC_SIM_BEAT_SPACING`; optional burst mode | **M** | B2, C1 | — | Todo |
 | C3 | Session isolation — `session_id` epoch; scoped recovery/COP/advisories; active-session indirection in API | **L** | B1, B5 | — | Todo |
 | C4 | Cassette — record/replay decorator around Terra/Sol `StructuredClient`; recording persistence keyed by beat/revision | **L** | C1 | — | Todo |
@@ -411,7 +411,7 @@ Dependencies noted. Workstreams A→B are the foundation; C rides on them.
 ### Workstream H — Agent prompts & structured output (Live-mode quality)
 | ID | Task | Size | Deps | Claim | Status |
 |----|------|------|------|-------|--------|
-| H1 | Single prompt source of truth: load versioned prompt files from `assetRoot` at composition; remove inline-constant divergence; record honest `PromptVersion` = file version + content hash in `ModelRun` | **M** | — | — | Todo |
+| H1 | Single prompt source of truth: load versioned prompt files from `assetRoot` at composition; remove inline-constant divergence; record honest `PromptVersion` = file version + content hash in `ModelRun` | **M** | — | h1 | In progress |
 | H2 | Author a proper **Luna** prompt (new artifact) grounded in the ontology: entity kinds, canonical event types, ID conventions, repair-vs-quarantine policy, evidence citation, injection resistance | **L** | H1 | — | Todo |
 | H3 | Reconcile + strengthen **Terra** and **Sol** prompts: make the curated `.md` the loaded source; enrich with domain vocabulary + schema-field expectations; keep existing claim/lifecycle/safety discipline | **M** | H1 | — | Todo |
 | H4 | Send the **real JSON schema** as the OpenAI structured-output format (`strict: true`) for insight/recommendation/luna_result — API-side shape enforcement so the prompt carries semantics, not structure | **M** | — | — | Todo |
