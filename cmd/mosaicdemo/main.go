@@ -473,6 +473,7 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 		SessionAdvisories: sessionAdvisories,
 		CassetteMode:      models.CassetteMode,
 		CassetteDir:       models.CassetteDir,
+		DemoAssetRoot:     configuration.AssetRoot,
 	})
 	if err != nil {
 		_ = closeDatabase()

@@ -66,6 +66,8 @@ const (
 	ActionRecordAudit       Action = "record_audit_action"
 	ActionControlSimulation Action = "control_simulation"
 	ActionReadSimulation    Action = "read_simulation"
+	// Demo scripted interactions for the operator UI (recording manifest).
+	ActionReadDemoInteractions Action = "read_demo_interactions"
 	// Operator-driven model and decision routes (P41).
 	ActionOperatorAnalyze   Action = "operator_analyze"
 	ActionOperatorBrief     Action = "operator_brief"
@@ -132,7 +134,7 @@ func (AllowDemoPolicy) Authorize(_ context.Context, _ Actor, action Action) (Pol
 	switch action {
 	case ActionReadCOP, ActionReadEvidence, ActionReadArtifact, ActionReadStream,
 		ActionReadOperations, ActionRequestBriefing, ActionRecordAudit, ActionReadAdvisories,
-		ActionControlSimulation, ActionReadSimulation,
+		ActionControlSimulation, ActionReadSimulation, ActionReadDemoInteractions,
 		ActionOperatorAnalyze, ActionOperatorBrief, ActionOperatorInterpret, ActionOperatorDecide:
 		return PolicyDecision{Allowed: true}, nil
 	default:
@@ -199,6 +201,10 @@ type Config struct {
 	// CassetteDir is optional FileStore path used when mode is record/replay.
 	// Surfaced only for developer status; may be empty under passthrough.
 	CassetteDir string
+	// DemoAssetRoot is the optional repository/asset root used to serve
+	// GET /api/v1/demo/interactions from the committed recording manifest.
+	// Empty disables the endpoint (503).
+	DemoAssetRoot string
 }
 
 // Server composes the v0.1 HTTP handlers. It reads a COP only through the P06
@@ -230,6 +236,7 @@ type Server struct {
 	sessionAdvisories *SessionAdvisoryView
 	cassetteMode      string
 	cassetteDir       string
+	demoAssetRoot     string
 }
 
 // New rejects partial deterministic/evidence wiring while providing public
@@ -305,6 +312,7 @@ func New(config Config) (*Server, error) {
 		sessionAdvisories: config.SessionAdvisories,
 		cassetteMode:      cassetteMode,
 		cassetteDir:       strings.TrimSpace(config.CassetteDir),
+		demoAssetRoot:     strings.TrimSpace(config.DemoAssetRoot),
 	}, nil
 }
 
@@ -328,6 +336,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/simulation/status", s.handleSimulationStatus)
 	mux.HandleFunc("/api/v1/simulation/end", s.handleSimulationEnd)
 	mux.HandleFunc("/api/v1/simulation/stream", s.handleSimulationStream)
+	mux.HandleFunc("/api/v1/demo/interactions", s.handleDemoInteractions)
 	mux.HandleFunc("/api/v1/operator/analyze", s.handleOperatorAnalyze)
 	mux.HandleFunc("/api/v1/operator/brief", s.handleOperatorBrief)
 	mux.HandleFunc("/api/v1/operator/interpret", s.handleOperatorInterpret)

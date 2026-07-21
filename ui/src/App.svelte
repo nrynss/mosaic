@@ -795,6 +795,7 @@
         {loadAdvisories}
         {selectEvidence}
         {modelUsage}
+        {readEnvelope}
         bind:auditTargetID
         bind:auditTargetKind
         onPrefillMaintenance={prefillMaintenance}

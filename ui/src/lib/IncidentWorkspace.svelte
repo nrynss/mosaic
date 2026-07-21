@@ -1,6 +1,7 @@
 <script>
   import RecurrenceSurface from './RecurrenceSurface.svelte';
   import ModelModeIndicator from './ModelModeIndicator.svelte';
+  import ModelActions from './ModelActions.svelte';
   import HelpTip from './HelpTip.svelte';
 
   let {
@@ -14,6 +15,7 @@
     loadAdvisories,
     selectEvidence,
     modelUsage = null,
+    readEnvelope = null,
     auditTargetID = $bindable(),
     auditTargetKind = $bindable(),
     onPrefillMaintenance
@@ -157,6 +159,14 @@
   </div>
 
   <RecurrenceSurface {cop} {advisories} {onPrefillMaintenance} />
+
+  {#if readEnvelope}
+    <ModelActions
+      {readEnvelope}
+      {loadAdvisories}
+      cassetteModeHint={advisories?.cassette_mode || ''}
+    />
+  {/if}
 
   <!-- Main Ledger content split layout (Facts vs Advisories) -->
   <div class="workspace-grid">
