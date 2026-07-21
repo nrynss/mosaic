@@ -364,13 +364,13 @@ Dependencies noted. Workstreams A→B are the foundation; C rides on them.
 | ID | Task | Size | Deps | Claim | Status |
 |----|------|------|------|-------|--------|
 | A1 | Define `EventLog` / `EventConsumer` / `EventBus`, envelope, position; document the delivery contract | **M** | — | Opus agent | Done (`internal/eventlog`, 8a4ca53) |
-| A2 | Partition-key model: `partition_key` column, monotonic sequence, consumer checkpoint/cursor table | **M** | A1 | — | Todo |
+| A2 | Partition-key model: `partition_key` column, monotonic sequence, consumer checkpoint/cursor table | **M** | A1 | a2-partition-model | In progress |
 
 ### Workstream B — Postgres backbone
 | ID | Task | Size | Deps | Claim | Status |
 |----|------|------|------|-------|--------|
 | B1 | `pgstore` implementing existing repository contracts; port schema + migrations; Postgres tx semantics (drop single-conn assumptions) | **L** | — | Opus agent | Done (`internal/pgstore`, 1f4937f) |
-| B2 | `EventLog.Append` on Postgres (INSERT + idempotency unique constraint) | **M** | A1, B1 | — | Todo |
+| B2 | `EventLog.Append` on Postgres (INSERT + idempotency unique constraint) | **M** | A1, B1 | b2-pg-eventlog-append | In progress |
 | B3 | `EventConsumer` via `SKIP LOCKED`, per-partition ordered, checkpointed; atomic project+position; multi-worker | **L** | A2, B2 | — | Todo |
 | B4 | `EventBus` via `LISTEN/NOTIFY`; replace in-process broker behind the interface | **M** | A1, B1 | — | Todo |
 | B5 | Materialized COP read-model table maintained by projector; `GET /cop` reads it | **M** | B3 | — | Todo |
