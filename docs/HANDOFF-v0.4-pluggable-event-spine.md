@@ -342,63 +342,76 @@ Proof: every existing deterministic-core test stays green unchanged.
 Sizes: **S** (≤ half day) · **M** (~1–2 days) · **L** (~3–5 days) · **XL** (> week).
 Dependencies noted. Workstreams A→B are the foundation; C rides on them.
 
+### Working agreement (multi-agent)
+
+- All v0.4 work happens on branch **`feat/v0.4-pluggable-event-spine`**.
+- **Claim** a parcel by putting your agent name/id in the **Claim** column and
+  setting **Status** to `In progress`; move to `In review`/`Done` when finished.
+  `Todo` means unclaimed and available.
+- **Commit only the changes you made** — scope every commit to your parcel's own
+  files, do not sweep unrelated edits, and prefix the commit subject with the
+  parcel id (e.g. `A1: define event-log interfaces`). One agent's commit must not
+  contain another parcel's work.
+- Do **not** start a parcel whose **Deps** are not yet `Done`.
+- **Status legend:** `Todo` · `In progress` · `In review` · `Done` · `Blocked`.
+
 ### Workstream A — Event spine (foundation)
-| ID | Task | Size | Deps |
-|----|------|------|------|
-| A1 | Define `EventLog` / `EventConsumer` / `EventBus`, envelope, position; document the delivery contract | **M** | — |
-| A2 | Partition-key model: `partition_key` column, monotonic sequence, consumer checkpoint/cursor table | **M** | A1 |
+| ID | Task | Size | Deps | Claim | Status |
+|----|------|------|------|-------|--------|
+| A1 | Define `EventLog` / `EventConsumer` / `EventBus`, envelope, position; document the delivery contract | **M** | — | — | Todo |
+| A2 | Partition-key model: `partition_key` column, monotonic sequence, consumer checkpoint/cursor table | **M** | A1 | — | Todo |
 
 ### Workstream B — Postgres backbone
-| ID | Task | Size | Deps |
-|----|------|------|------|
-| B1 | `pgstore` implementing existing repository contracts; port schema + migrations; Postgres tx semantics (drop single-conn assumptions) | **L** | — |
-| B2 | `EventLog.Append` on Postgres (INSERT + idempotency unique constraint) | **M** | A1, B1 |
-| B3 | `EventConsumer` via `SKIP LOCKED`, per-partition ordered, checkpointed; atomic project+position; multi-worker | **L** | A2, B2 |
-| B4 | `EventBus` via `LISTEN/NOTIFY`; replace in-process broker behind the interface | **M** | A1, B1 |
-| B5 | Materialized COP read-model table maintained by projector; `GET /cop` reads it | **M** | B3 |
+| ID | Task | Size | Deps | Claim | Status |
+|----|------|------|------|-------|--------|
+| B1 | `pgstore` implementing existing repository contracts; port schema + migrations; Postgres tx semantics (drop single-conn assumptions) | **L** | — | — | Todo |
+| B2 | `EventLog.Append` on Postgres (INSERT + idempotency unique constraint) | **M** | A1, B1 | — | Todo |
+| B3 | `EventConsumer` via `SKIP LOCKED`, per-partition ordered, checkpointed; atomic project+position; multi-worker | **L** | A2, B2 | — | Todo |
+| B4 | `EventBus` via `LISTEN/NOTIFY`; replace in-process broker behind the interface | **M** | A1, B1 | — | Todo |
+| B5 | Materialized COP read-model table maintained by projector; `GET /cop` reads it | **M** | B3 | — | Todo |
 
 ### Workstream C — Simulation isolation & modes
-| ID | Task | Size | Deps |
-|----|------|------|------|
-| C1 | Extract simulation into its own package/module; enforce dependency direction | **M** | — |
-| C2 | `BeatExecutor` — per-beat real `Append`; cumulative pacing + `MOSAIC_SIM_BEAT_SPACING`; optional burst mode | **M** | B2, C1 |
-| C3 | Session isolation — `session_id` epoch; scoped recovery/COP/advisories; active-session indirection in API | **L** | B1, B5 |
-| C4 | Cassette — record/replay decorator around Terra/Sol `StructuredClient`; recording persistence keyed by beat/revision | **L** | C1 |
-| C5 | Three-mode wiring (Live / Replay / Fixture) + config + provider selection | **M** | C4 |
+| ID | Task | Size | Deps | Claim | Status |
+|----|------|------|------|-------|--------|
+| C1 | Extract simulation into its own package/module; enforce dependency direction | **M** | — | — | Todo |
+| C2 | `BeatExecutor` — per-beat real `Append`; cumulative pacing + `MOSAIC_SIM_BEAT_SPACING`; optional burst mode | **M** | B2, C1 | — | Todo |
+| C3 | Session isolation — `session_id` epoch; scoped recovery/COP/advisories; active-session indirection in API | **L** | B1, B5 | — | Todo |
+| C4 | Cassette — record/replay decorator around Terra/Sol `StructuredClient`; recording persistence keyed by beat/revision | **L** | C1 | — | Todo |
+| C5 | Three-mode wiring (Live / Replay / Fixture) + config + provider selection | **M** | C4 | — | Todo |
 
 ### Workstream D — UI
-| ID | Task | Size | Deps |
-|----|------|------|------|
-| D1 | Empty initial board + progressive-reveal verification | **S** | C2, C3 |
-| D2 | "Replay last run" button + mode/status surfacing | **M** | C5 |
+| ID | Task | Size | Deps | Claim | Status |
+|----|------|------|------|-------|--------|
+| D1 | Empty initial board + progressive-reveal verification | **S** | C2, C3 | — | Todo |
+| D2 | "Replay last run" button + mode/status surfacing | **M** | C5 | — | Todo |
 
 ### Workstream E — Ops & pluggability proof
-| ID | Task | Size | Deps |
-|----|------|------|------|
-| E1 | `docker-compose` with Postgres service; appliance vs prod packaging | **M** | B1 |
-| E2 | Interface **conformance test suite** (validates Postgres now; same suite validates a future Kafka/Redpanda impl) | **M** | A1 |
-| E3 | Kafka/Redpanda introduction guide (implement the seams; wiring swap; Postgres stays read model) | **S** | A1 |
+| ID | Task | Size | Deps | Claim | Status |
+|----|------|------|------|-------|--------|
+| E1 | `docker-compose` with Postgres service; appliance vs prod packaging | **M** | B1 | — | Todo |
+| E2 | Interface **conformance test suite** (validates Postgres now; same suite validates a future Kafka/Redpanda impl) | **M** | A1 | — | Todo |
+| E3 | Kafka/Redpanda introduction guide (implement the seams; wiring swap; Postgres stays read model) | **S** | A1 | — | Todo |
 
 ### Workstream F — Tests & docs
-| ID | Task | Size | Deps |
-|----|------|------|------|
-| F1 | Simulation-driven progressive projection; session replay isolation; live/recorded/fixture parity; framework-untouched proof | **L** | C3, C5 |
-| F2 | Update `demo-script.md` / `demo-video.md` for the now-real reveal | **S** | D1 |
+| ID | Task | Size | Deps | Claim | Status |
+|----|------|------|------|-------|--------|
+| F1 | Simulation-driven progressive projection; session replay isolation; live/recorded/fixture parity; framework-untouched proof | **L** | C3, C5 | — | Todo |
+| F2 | Update `demo-script.md` / `demo-video.md` for the now-real reveal | **S** | D1 | — | Todo |
 
 ### Workstream G — Capture (original goal)
-| ID | Task | Size | Deps |
-|----|------|------|------|
-| G1 | Playwright capture keyed off real intermediate rail states + synthetic cursor + paced holds | **M** | C2, C3, D2 |
+| ID | Task | Size | Deps | Claim | Status |
+|----|------|------|------|-------|--------|
+| G1 | Playwright capture keyed off real intermediate rail states + synthetic cursor + paced holds | **M** | C2, C3, D2 | — | Todo |
 
 ### Workstream H — Agent prompts & structured output (Live-mode quality)
-| ID | Task | Size | Deps |
-|----|------|------|------|
-| H1 | Single prompt source of truth: load versioned prompt files from `assetRoot` at composition; remove inline-constant divergence; record honest `PromptVersion` = file version + content hash in `ModelRun` | **M** | — |
-| H2 | Author a proper **Luna** prompt (new artifact) grounded in the ontology: entity kinds, canonical event types, ID conventions, repair-vs-quarantine policy, evidence citation, injection resistance | **L** | H1 |
-| H3 | Reconcile + strengthen **Terra** and **Sol** prompts: make the curated `.md` the loaded source; enrich with domain vocabulary + schema-field expectations; keep existing claim/lifecycle/safety discipline | **M** | H1 |
-| H4 | Send the **real JSON schema** as the OpenAI structured-output format (`strict: true`) for insight/recommendation/luna_result — API-side shape enforcement so the prompt carries semantics, not structure | **M** | — |
-| H5 | Prompt **eval harness**: run each prompt against fixture inputs; assert schema-valid + expected semantics; regression guard against prompt drift | **M** | H2, H3, H4 |
-| H6 | Cassette records prompt version + content hash so replayed runs keep honest provenance | **S** | C4, H1 |
+| ID | Task | Size | Deps | Claim | Status |
+|----|------|------|------|-------|--------|
+| H1 | Single prompt source of truth: load versioned prompt files from `assetRoot` at composition; remove inline-constant divergence; record honest `PromptVersion` = file version + content hash in `ModelRun` | **M** | — | — | Todo |
+| H2 | Author a proper **Luna** prompt (new artifact) grounded in the ontology: entity kinds, canonical event types, ID conventions, repair-vs-quarantine policy, evidence citation, injection resistance | **L** | H1 | — | Todo |
+| H3 | Reconcile + strengthen **Terra** and **Sol** prompts: make the curated `.md` the loaded source; enrich with domain vocabulary + schema-field expectations; keep existing claim/lifecycle/safety discipline | **M** | H1 | — | Todo |
+| H4 | Send the **real JSON schema** as the OpenAI structured-output format (`strict: true`) for insight/recommendation/luna_result — API-side shape enforcement so the prompt carries semantics, not structure | **M** | — | — | Todo |
+| H5 | Prompt **eval harness**: run each prompt against fixture inputs; assert schema-valid + expected semantics; regression guard against prompt drift | **M** | H2, H3, H4 | — | Todo |
+| H6 | Cassette records prompt version + content hash so replayed runs keep honest provenance | **S** | C4, H1 | — | Todo |
 
 **Critical path:** A1 → A2 → B2 → B3 → B5 → C3 → D1 → G1. Cassette (C4/C5) runs in
 parallel at the client layer. E2 gates the "pluggable" claim and should land with
@@ -414,11 +427,11 @@ safe path if H slips.
 completed to satisfaction, retreat to **cosmetic UI/simulation-only** changes on
 top of the current seeded model — no framework or persistence risk:
 
-| ID | Task | Size |
-|----|------|------|
-| FB1 | Beat pacing only: cumulative delays / `MOSAIC_SIM_BEAT_SPACING` on the existing seeded model (kills the flood, paces the beat list/clock) | **S** |
-| FB2 | "Replay last run" as a re-poll of the existing seeded advisories (cosmetic) | **S–M** |
-| FB3 | Playwright capture against the existing seeded board | **M** |
+| ID | Task | Size | Claim | Status |
+|----|------|------|-------|--------|
+| FB1 | Beat pacing only: cumulative delays / `MOSAIC_SIM_BEAT_SPACING` on the existing seeded model (kills the flood, paces the beat list/clock) | **S** | — | Todo |
+| FB2 | "Replay last run" as a re-poll of the existing seeded advisories (cosmetic) | **S–M** | — | Todo |
+| FB3 | Playwright capture against the existing seeded board | **M** | — | Todo |
 
 The board still jumps blank→final in fallback; the beat story is carried by VO and
 B-roll (see [demo-video.md](demo-video.md)). This is the safety net, not the goal.
