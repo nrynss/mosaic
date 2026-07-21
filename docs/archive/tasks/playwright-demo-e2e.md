@@ -32,8 +32,8 @@ so the suite includes a **replay banked model** project.
 - The built UI (`ui/dist`) is served by `mosaicdemo` via `MOSAIC_UI_DIR`
   ([Dockerfile](../../Dockerfile)); test the **served production artifact**, not the
   vite dev server, so it matches what ships.
-- The demo narrative is [docs/demo-script.md](../../docs/demo-script.md): connection +
-  modes → Play scenario → COP walk → Refresh advice → handoffs → decision history.
+- Demo narrative (product): connection + modes → Play scenario → COP walk →
+  advisories / Model Actions → handoffs → decision history.
 - **Important:** the UI's "Refresh advice" calls `GET /api/v1/advisories` (re-poll), NOT
   the live model endpoints ([ui/src/lib/IncidentWorkspace.svelte](../../ui/src/lib/IncidentWorkspace.svelte)).
   The board is fixture/replay-driven. Surfacing real banked model output in the UI is a
@@ -72,7 +72,7 @@ Playwright (Chromium, headless) → navigates the served app, asserts on data-te
 ## 3. Prerequisite: stable selectors (`data-testid`)
 
 Add `data-testid` to the elements the flows assert on (none exist today). Minimum set,
-mapped to demo-script steps:
+mapped to demo walkthrough steps:
 
 - **Connection / modes:** connection pill, Luna/Terra/Sol mode badges
   ([ui/src/lib/ModelModeIndicator.svelte](../../ui/src/lib/ModelModeIndicator.svelte)).
@@ -93,7 +93,7 @@ Keep `data-testid` values stable and semantic (`cop-incident-row`, `advice-insig
 
 ---
 
-## 4. Flows to cover (from demo-script.md)
+## 4. Flows to cover
 
 1. **Load + modes** — app loads, connection pill connected, mode badges reflect
    configured providers (fixture in the baseline run).
@@ -197,8 +197,7 @@ decision.)
 | Area | Path |
 |---|---|
 | UI root / build | [ui/package.json](../../ui/package.json), `ui/dist` (built) |
-| Demo narrative | [docs/demo-script.md](../../docs/demo-script.md) |
-| Board / advisories / refresh | [ui/src/lib/IncidentWorkspace.svelte](../../ui/src/lib/IncidentWorkspace.svelte) |
+| Board / advisories / Model Actions | [ui/src/lib/IncidentWorkspace.svelte](../../ui/src/lib/IncidentWorkspace.svelte), [ui/src/lib/ModelActions.svelte](../../ui/src/lib/ModelActions.svelte) |
 | Mode badges | [ui/src/lib/ModelModeIndicator.svelte](../../ui/src/lib/ModelModeIndicator.svelte) |
 | Handoff actions | [ui/src/lib/ActionCards.svelte](../../ui/src/lib/ActionCards.svelte) |
 | App shell / SSE | [ui/src/App.svelte](../../ui/src/App.svelte) |

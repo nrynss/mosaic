@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.0.0",
+  "key": "sol/rev9/cb2f1eb2bb2536dc",
+  "agent": "sol",
+  "state_revision": 9,
+  "request_fingerprint": "cb2f1eb2bb2536dc2b0c53ec791836100bcf33950ac28fda3bff82a70ec23ab9",
+  "prompt_version": "v1.0.0",
+  "prompt_hash": "293cfa720c5885099060d3000f98eb4eb56c3a5d716432855b64769bb82fb378",
+  "response_id": "resp_0b45c20395ab4885016a5f44763cfc819d8e027417b5d84d18",
+  "recommendation_json": {
+    "schema_version": "1.0.0",
+    "recommendation_id": "recommendation-4d3896f5-5677-44d5-a2f7-9e0da774d04a",
+    "state_revision": 9,
+    "text": "Review the reported open domestic-disturbance incident for supervisory awareness, if appropriate.",
+    "evidence": [
+      {
+        "target_kind": "raw_event",
+        "target_id": "raw-domestic-001-call",
+        "explanation": "live bank evidence"
+      }
+    ],
+    "created_at": "2026-07-21T10:05:41.7498192Z"
+  },
+  "recorded_at": "2026-07-21T10:05:55.990344Z"
+}

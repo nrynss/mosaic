@@ -1,0 +1,64 @@
+{
+  "schema_version": "1.0.0",
+  "key": "luna/raw-domestic-004-main-road/e3278488f561bad2",
+  "agent": "luna",
+  "state_revision": 0,
+  "request_fingerprint": "e3278488f561bad2068f42777b4e9bf3b501f9772a781a4122a01d95f0dd15e9",
+  "prompt_version": "v1.0.0",
+  "prompt_hash": "3f943e46d22b34c339ec0dc59293500b8f29eef097ec8816e05781a2f90fe3c4",
+  "response_id": "resp_01ac4da5814cbd65016a5f5b41eea0819eb524e914026690eb",
+  "result_json": {
+    "canonical_event_id": "canonical-live-raw-domestic-004-main-road",
+    "created_at": "2026-07-18T10:02:10Z",
+    "evidence": [
+      {
+        "explanation": "Structured attributes directly provide event_type road_status_changed, road_id road-main-street-bridge, status blocked, and reason Flooding at bridge.",
+        "json_pointer": "/attributes",
+        "target_id": "raw-domestic-004-main-road",
+        "target_kind": "raw_event"
+      },
+      {
+        "explanation": "Base64-decoded text payload corroborates that Main Street is closed at the bridge due to flooding.",
+        "json_pointer": "/payload_bytes_b64",
+        "target_id": "raw-domestic-004-main-road",
+        "target_kind": "raw_event"
+      }
+    ],
+    "luna_result_id": "luna-live-raw-domestic-004-main-road",
+    "raw_event_id": "raw-domestic-004-main-road",
+    "schema_version": "1.0.0",
+    "status": "accepted"
+  },
+  "canonical_event_json": {
+    "canonical_event_id": "canonical-live-raw-domestic-004-main-road",
+    "canonical_seq": 2,
+    "confidence": {
+      "basis": "Authoritative structured attributes directly supply the event type, road identifier, blocked status, and reason; decoded payload text corroborates the closure and flooding.",
+      "reasoning_support": "high",
+      "source_quality": "high",
+      "transformation_certainty": "high"
+    },
+    "entity_refs": [
+      {
+        "id": "road-main-street-bridge",
+        "kind": "road"
+      }
+    ],
+    "event_type": "road_status_changed",
+    "occurred_at": "2026-07-18T10:02:00Z",
+    "payload": {
+      "reason": "Flooding at bridge.",
+      "road_id": "road-main-street-bridge",
+      "status": "blocked"
+    },
+    "provenance": {
+      "model_run_id": "modelrun-live-luna-raw-domestic-004-main-road",
+      "normalizer": "openai-luna",
+      "raw_event_id": "raw-domestic-004-main-road"
+    },
+    "raw_event_id": "raw-domestic-004-main-road",
+    "received_at": "2026-07-18T10:02:10Z",
+    "schema_version": "1.0.0"
+  },
+  "recorded_at": "2026-07-21T11:43:05.5466259Z"
+}

@@ -1,0 +1,72 @@
+{
+  "schema_version": "1.0.0",
+  "key": "luna/raw-domestic-002-welfare/946c8be3c3350ba9",
+  "agent": "luna",
+  "state_revision": 0,
+  "request_fingerprint": "946c8be3c3350ba93a62d5c1b2aab800ebbcb9d541d16cb00b76a6334820aa48",
+  "prompt_version": "v1.0.0",
+  "prompt_hash": "3f943e46d22b34c339ec0dc59293500b8f29eef097ec8816e05781a2f90fe3c4",
+  "response_id": "resp_0d41679508db7249016a5f5b2efe6881a0bc2250b4b50d57b4",
+  "result_json": {
+    "canonical_event_id": "canonical-live-raw-domestic-002-welfare",
+    "created_at": "2026-07-18T10:00:45Z",
+    "evidence": [
+      {
+        "explanation": "Structured attributes directly provide event_type, incident_id, category, location_id, and summary.",
+        "json_pointer": "/attributes",
+        "target_id": "raw-domestic-002-welfare",
+        "target_kind": "raw_event"
+      },
+      {
+        "explanation": "The envelope directly provides the source occurrence timestamp used for occurred_at.",
+        "json_pointer": "/source_occurred_at",
+        "target_id": "raw-domestic-002-welfare",
+        "target_kind": "raw_event"
+      }
+    ],
+    "luna_result_id": "luna-live-raw-domestic-002-welfare",
+    "raw_event_id": "raw-domestic-002-welfare",
+    "schema_version": "1.0.0",
+    "status": "accepted"
+  },
+  "canonical_event_json": {
+    "canonical_event_id": "canonical-live-raw-domestic-002-welfare",
+    "canonical_seq": 4,
+    "confidence": {
+      "basis": "Authoritative structured attributes directly supply the event type, incident identifier, category, location identifier, and summary; the envelope directly supplies both timestamps.",
+      "reasoning_support": "high",
+      "source_quality": "high",
+      "transformation_certainty": "high"
+    },
+    "entity_refs": [
+      {
+        "id": "incident-domestic-001",
+        "kind": "incident"
+      },
+      {
+        "id": "location-cedar-lane-014",
+        "kind": "location"
+      }
+    ],
+    "event_type": "incident_reported",
+    "incident_refs": [
+      "incident-domestic-001"
+    ],
+    "occurred_at": "2026-07-18T10:00:30Z",
+    "payload": {
+      "category": "domestic-disturbance",
+      "incident_id": "incident-domestic-001",
+      "location_id": "location-cedar-lane-014",
+      "summary": "Historical welfare check associated with the location."
+    },
+    "provenance": {
+      "model_run_id": "modelrun-live-luna-raw-domestic-002-welfare",
+      "normalizer": "openai-luna",
+      "raw_event_id": "raw-domestic-002-welfare"
+    },
+    "raw_event_id": "raw-domestic-002-welfare",
+    "received_at": "2026-07-18T10:00:45Z",
+    "schema_version": "1.0.0"
+  },
+  "recorded_at": "2026-07-21T11:42:47.4795827Z"
+}

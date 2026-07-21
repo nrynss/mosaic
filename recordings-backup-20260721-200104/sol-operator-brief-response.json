@@ -1,0 +1,56 @@
+{
+  "data": {
+    "audit_record": {
+      "action": "briefing_requested",
+      "actor_id": "public-demo",
+      "actor_role": "supervisor",
+      "audit_record_id": "audit-867959f130d48dcb0f65c55088047421",
+      "created_at": "2026-07-21T09:59:54.6978994Z",
+      "note": "live record bank for sol",
+      "schema_version": "1.0.0",
+      "target_id": "recommendation-7e647f4a-74bd-4d40-a838-91932658a071",
+      "target_kind": "briefing"
+    },
+    "briefing_id": "recommendation-7e647f4a-74bd-4d40-a838-91932658a071",
+    "executed": false,
+    "model_run": {
+      "agent": "sol",
+      "completed_at": "2026-07-21T09:59:54.6926475Z",
+      "input_event_ids": [
+        "insight-domestic-access-001",
+        "raw-domestic-001-call"
+      ],
+      "model": "gpt-5.6",
+      "model_run_id": "sol-run-b200b044e734b5499fe3f1cb",
+      "output_ids": [
+        "recommendation-7e647f4a-74bd-4d40-a838-91932658a071"
+      ],
+      "prompt_version": "v1.0.0+sha256:293cfa720c5885099060d3000f98eb4eb56c3a5d716432855b64769bb82fb378",
+      "provider": "openai",
+      "response_id": "resp_09a1e3a35bad58b1016a5f4310a2fc81a28ae361d36bb64580",
+      "started_at": "2026-07-21T09:59:44.1798782Z",
+      "state_revision": 9,
+      "validation_status": "valid"
+    },
+    "providers": {
+      "luna": "live",
+      "sol": "live",
+      "terra": "fixture"
+    },
+    "recommendation": {
+      "created_at": "2026-07-18T10:10:10Z",
+      "evidence": [
+        {
+          "explanation": "live bank evidence",
+          "target_id": "raw-domestic-001-call",
+          "target_kind": "raw_event"
+        }
+      ],
+      "recommendation_id": "recommendation-7e647f4a-74bd-4d40-a838-91932658a071",
+      "schema_version": "1.0.0",
+      "state_revision": 9,
+      "text": "Consider reviewing the reported open incident context, including the assigned unit, unavailable EMS resource, active heavy-rain alert, and current road statuses, before deciding whether any supervisory action may be warranted."
+    },
+    "status": "ok"
+  }
+}
