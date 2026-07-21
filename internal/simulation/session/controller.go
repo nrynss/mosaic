@@ -5,14 +5,28 @@
 // This package lives under internal/simulation. Framework packages
 // (ingestion, store, terra, sol, luna, ontology, contracts, stream, api
 // production code, projectors, …) must never import it — simulation imports
-// framework packages and orchestrates over time. All pacing/timing lives here
-// (and sibling simulation packages); the framework has no notion of beat delay
-// beyond the schedule types already defined in contracts.
+// framework packages and orchestrates over time. All pacing/timing lives under
+// the simulation tree; the framework has no notion of beat delay beyond the
+// schedule types already defined in contracts.
 //
-// Delay model: each ScheduledBeat.Delay is relative to session start time
-// (not cumulative between beats). A beat with Delay=2s fires two seconds after
-// the session starts, regardless of earlier beats. Emission order follows the
-// Order field (ascending), not the schedule slice order.
+// # Pacing ownership
+//
+// BeatExecutor (package simulation) is the owner of Append-path pacing for the
+// real EventLog path (equal spacing / burst). This session controller owns only
+// SSE beat emission timing for the interactive lifecycle stream.
+//
+// Delay model (SSE presentation):
+//
+//   - Default (BeatSpacing == 0): each ScheduledBeat.Delay is relative to
+//     session start (historical C1 behaviour). A beat with Delay=2s fires two
+//     seconds after start regardless of earlier beats. Tests rely on this.
+//   - Equal spacing (BeatSpacing > 0): beat at sorted index i fires after
+//     i*BeatSpacing from session start; ScheduledBeat.Delay is ignored.
+//     Composition should set BeatSpacing from MOSAIC_SIM_BEAT_SPACING
+//     (default 2.5s) so the demo is not flooded by fixture delay_ms≈100.
+//
+// Emission order always follows the Order field (ascending), not the schedule
+// slice order.
 //
 // Stream backpressure: each subscriber has a bounded buffer (default 64). When
 // the buffer is full the oldest pending event is dropped so a slow consumer
@@ -88,6 +102,13 @@ type Config struct {
 	// SubscriberBuffer is the per-subscriber channel capacity. Zero selects
 	// the package default. Values less than 1 are treated as 1.
 	SubscriberBuffer int
+
+	// BeatSpacing enables equal-spacing SSE pacing when > 0: the beat at
+	// sorted index i fires after i*BeatSpacing from session start, ignoring
+	// each ScheduledBeat.Delay. Zero (default) keeps relative-to-start Delay
+	// so existing tests and callers remain unchanged. Composition should set
+	// this from simulation.BeatSpacingFromEnv() for the interactive demo.
+	BeatSpacing time.Duration
 }
 
 // Controller is a session-scoped simulation lifecycle engine. Start/End/Reset
@@ -98,6 +119,7 @@ type Controller struct {
 	after            func(d time.Duration) <-chan time.Time
 	newSessionID     func() string
 	subscriberBuffer int
+	beatSpacing      time.Duration
 
 	mu        sync.RWMutex
 	session   contracts.SimulationSession
@@ -160,6 +182,7 @@ func New(config Config) (*Controller, error) {
 		after:            after,
 		newSessionID:     newID,
 		subscriberBuffer: buf,
+		beatSpacing:      config.BeatSpacing,
 		session: contracts.SimulationSession{
 			Status: contracts.SessionPending,
 			Beats:  beats,
@@ -355,8 +378,9 @@ func (c *Controller) runBeats(
 	})
 
 	completed := true
-	for _, beat := range ordered {
-		if err := c.waitUntil(ctx, startTime, beat.Delay); err != nil {
+	for i, beat := range ordered {
+		delay := c.delayFor(i, beat)
+		if err := c.waitUntil(ctx, startTime, delay); err != nil {
 			completed = false
 			break
 		}
@@ -382,8 +406,24 @@ func (c *Controller) runBeats(
 	})
 }
 
+// delayFor returns the wait from session start for the beat at sorted index i.
+// When BeatSpacing > 0, equal spacing is used (i * BeatSpacing). Otherwise the
+// beat's own Delay (relative to start) is used.
+func (c *Controller) delayFor(index int, beat contracts.ScheduledBeat) time.Duration {
+	if c.beatSpacing > 0 {
+		if index <= 0 {
+			return 0
+		}
+		return time.Duration(index) * c.beatSpacing
+	}
+	if beat.Delay < 0 {
+		return 0
+	}
+	return beat.Delay
+}
+
 // waitUntil blocks until clock reaches startTime+delay or ctx is cancelled.
-// Delay is relative to session start.
+// Delay is relative to session start (either equal-spacing or schedule Delay).
 //
 // Waiting is driven by the injectable After. When After fires without the
 // clock advancing (valid for some test fakes), the wait completes so a frozen

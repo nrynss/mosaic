@@ -372,6 +372,62 @@ func TestDeterministicTimingWithVirtualClock(t *testing.T) {
 	waitStatus(t, ctrl, contracts.SessionEnded, time.Second)
 }
 
+func TestEqualSpacingIgnoresFixtureDelay(t *testing.T) {
+	// BeatSpacing > 0: fire at i*spacing; fixture Delays (all 100ms) ignored.
+	clock := NewVirtualClock(time.Date(2026, 7, 20, 16, 0, 0, 0, time.UTC))
+	spacing := 2 * time.Second
+	beats := []contracts.ScheduledBeat{
+		{BeatID: "a", Order: 1, RawEventID: "r1", Delay: 100 * time.Millisecond},
+		{BeatID: "b", Order: 2, RawEventID: "r2", Delay: 100 * time.Millisecond},
+		{BeatID: "c", Order: 3, RawEventID: "r3", Delay: 100 * time.Millisecond},
+	}
+	ctrl := newTestController(t, beats, func(cfg *Config) {
+		cfg.Clock = clock.Now
+		cfg.After = clock.After
+		cfg.BeatSpacing = spacing
+		cfg.NewSessionID = func() string { return "spaced-session" }
+	})
+	sub := ctrl.Subscribe()
+	defer sub.Cancel()
+
+	if _, err := ctrl.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// clear, status, first beat (index 0 → delay 0)
+	events := collectUntil(t, sub, 3, time.Second)
+	if events[2].Payload.(map[string]any)["beat_id"] != "a" {
+		t.Fatalf("first beat = %#v", events[2].Payload)
+	}
+
+	// Relative-to-start fixture delays would fire b and c at ~100ms; equal
+	// spacing must still be waiting for 2s.
+	select {
+	case ev := <-sub.Events():
+		t.Fatalf("unexpected event before Advance (flood?): %#v", ev)
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	clock.Advance(spacing)
+	second := collectUntil(t, sub, 1, time.Second)
+	if second[0].Payload.(map[string]any)["beat_id"] != "b" {
+		t.Fatalf("second beat = %#v", second[0].Payload)
+	}
+
+	select {
+	case ev := <-sub.Events():
+		t.Fatalf("unexpected third beat before second Advance: %#v", ev)
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	clock.Advance(spacing)
+	rest := collectUntil(t, sub, 2, time.Second) // beat c + ended
+	if rest[0].Payload.(map[string]any)["beat_id"] != "c" {
+		t.Fatalf("third beat = %#v", rest[0].Payload)
+	}
+	waitStatus(t, ctrl, contracts.SessionEnded, time.Second)
+}
+
 func TestStatusReflectsLifecycle(t *testing.T) {
 	ctrl := newTestController(t, []contracts.ScheduledBeat{
 		{BeatID: "only", Order: 1, RawEventID: "r1", Delay: 0},

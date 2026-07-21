@@ -26,10 +26,33 @@
 // internal/reference/.../simulator (scenario composition, not the interactive
 // session controller).
 //
+// # BeatExecutor and pacing (C2)
+//
+// BeatExecutor owns Append-path pacing: for each schedule beat it loads a
+// frozen raw payload via an injectable BeatSource, Appends an eventlog
+// envelope, and waits according to equal spacing (MOSAIC_SIM_BEAT_SPACING,
+// default 2.5s). Fixture scenario delay_ms is presentation metadata and is
+// ignored under the default interactive rule; UseScheduleDelays keeps the
+// historical relative-to-start model for tests. Burst mode (MOSAIC_SIM_BURST)
+// appends with zero inter-beat delay for EventLog stress.
+//
+// Envelope formation:
+//
+//   - PartitionKey: ExecutorConfig.PartitionKey, or DefaultPartitionKey
+//     ("simulation") when empty. Composition should set the incident id.
+//   - IdempotencyKey: raw_event_id (stable source identity; at-least-once safe).
+//   - Type: EventTypeRawEvent ("raw.event").
+//   - Payload: opaque bytes from BeatSource (serialized raw event).
+//
+// BeatExecutor does not run Luna/ingestion or advance the COP; a consumer/
+// projector on the B3/B5 path does. Terra/Sol advisory at rev 7/9 is C4/C5.
+//
 // Subpackages:
 //
 //   - session: domain-agnostic interactive session controller (start/status/
-//     end/reset) and schedule-driven beat emission on a session-scoped stream.
+//     end/reset) and schedule-driven SSE beat emission. Optional BeatSpacing
+//     enables equal-spacing presentation; default remains schedule Delay for
+//     backward-compatible tests.
 //
 // Dependency direction is enforced by TestInternalPackagesDoNotImportSimulation
 // in this package (deny-by-default over internal/, excluding this tree).
