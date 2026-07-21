@@ -35,9 +35,10 @@ services:
       MOSAIC_LUNA_PROVIDER: "${MOSAIC_LUNA_PROVIDER:-live}"
       MOSAIC_TERRA_PROVIDER: "${MOSAIC_TERRA_PROVIDER:-live}"
       MOSAIC_SOL_PROVIDER: "${MOSAIC_SOL_PROVIDER:-live}"
-      # Cassette modes (C5): fixture|live|replay. Record/replay files go under
-      # /tmp because the app container is read-only.
-      MOSAIC_SIM_MODE: "${MOSAIC_SIM_MODE:-fixture}"
+      # Cassette modes (C5): live|fixture|replay — process-level only, not UI.
+      # Default live for end-to-end demos; without OPENAI_API_KEY agents demote
+      # to fixture clients. Recordings land under /tmp (read-only rootfs).
+      MOSAIC_SIM_MODE: "${MOSAIC_SIM_MODE:-live}"
       MOSAIC_CASSETTE_DIR: "${MOSAIC_CASSETTE_DIR:-/tmp/mosaic-recordings}"
     read_only: true
     tmpfs:

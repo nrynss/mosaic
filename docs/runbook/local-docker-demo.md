@@ -23,7 +23,7 @@ without flashing the previous revision for that step.
 |-----|---------|--------|
 | `MOSAIC_SEED_ON_START` | off (`0`) | Progressive path: empty board until Play. Set `1` / `true` / `yes` / `on` for legacy bulk seed at boot (board at rev 9 immediately; ActiveSession isolation not wired). |
 | `MOSAIC_SIM_BEAT_SPACING` | `2.5s` | Equal inter-beat pacing on the progressive path. Use `1ms` in automated e2e. Go duration or integer milliseconds. |
-| `MOSAIC_SIM_MODE` | `fixture` | Process-level cassette mode: `fixture` / `live` (record) / `replay`. Not hot-swapped from the UI. |
+| `MOSAIC_SIM_MODE` | `live` (Compose) | Process-level cassette mode: `live` (record) / `fixture` / `replay`. Not exposed in the UI; set only via env at process start. Without a key, agents demote to fixture clients. |
 | `MOSAIC_CASSETTE_DIR` | temp / Compose `/tmp/mosaic-recordings` | Where live runs bank Terra/Sol responses for later `replay`. |
 
 **Session board vs durable history:** GET `/cop` and `/advisories` on the

@@ -439,26 +439,6 @@ textarea { resize: vertical; }
 }
 .timer-display strong { color: var(--ok); }
 
-.cassette-mode-pill {
-  margin-left: 0.65rem;
-  padding: 0.12rem 0.4rem;
-  border: 1px solid var(--line-strong);
-  font-family: var(--mono);
-  font-size: 0.62rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--ink-dim);
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-.cassette-mode-pill strong { color: var(--ink); font-weight: 700; }
-.cassette-mode-pill[data-mode="replay"] { border-color: var(--info); color: var(--info); }
-.cassette-mode-pill[data-mode="replay"] strong { color: var(--info); }
-.cassette-mode-pill[data-mode="record"] { border-color: var(--ok); color: var(--ok); }
-.cassette-mode-pill[data-mode="record"] strong { color: var(--ok); }
-.cassette-mode-pill[data-mode="passthrough"] { border-color: var(--line-strong); }
-
 .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; min-width: 0; }
 
 .simulation-controls-bar button {
@@ -476,17 +456,6 @@ textarea { resize: vertical; }
 
 .simulation-controls-bar .secondary-button { background: transparent; color: var(--ink-dim); border-color: var(--line-strong); }
 .simulation-controls-bar .secondary-button:hover:not(:disabled) { color: var(--ink); border-color: var(--ink-dim); }
-
-/* Honest sublabel under “Refresh banked advice” (D1h R3) — not a re-run claim. */
-.simulation-controls-bar .button-sublabel {
-  display: block;
-  margin-top: 0.15rem;
-  font-weight: 500;
-  font-size: 0.55rem;
-  letter-spacing: 0.04em;
-  text-transform: none;
-  color: var(--ink-faint);
-}
 
 .error-display {
   flex-basis: 100%;

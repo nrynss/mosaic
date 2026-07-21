@@ -10,21 +10,10 @@
     operationsPresentation,
     modelUsage = null,
     modelUsageState = 'idle',
-    cassetteMode = 'passthrough',
-    cassetteDir = '',
     apiBaseInput = $bindable(),
     applyAPIBase,
     loadOperations
   } = $props();
-
-  let cassetteModeLabel = $derived(
-    (() => {
-      const value = String(cassetteMode || '').trim().toLowerCase();
-      if (value === 'replay' || value === 'recorded') return 'Replay';
-      if (value === 'record' || value === 'live') return 'Live (recording)';
-      return 'Fixture';
-    })()
-  );
 
   let collapsed = $state(true);
 
@@ -127,10 +116,6 @@
             <div><dt>Health</dt><dd data-state={health?.state}>{health?.detail || '—'}</dd></div>
             <div><dt>Version</dt><dd data-state={version?.state}>{version?.detail || '—'}</dd></div>
             <div><dt>Stream</dt><dd data-state={streamState}>{streamDetail || '—'}</dd></div>
-            <div><dt>Cassette mode</dt><dd>{cassetteModeLabel} <code class="drawer-code">{cassetteMode || 'passthrough'}</code></dd></div>
-            {#if cassetteDir}
-              <div><dt>Cassette dir</dt><dd><code class="drawer-code">{cassetteDir}</code></dd></div>
-            {/if}
           </dl>
         </section>
 
