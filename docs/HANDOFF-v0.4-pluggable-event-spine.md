@@ -326,14 +326,19 @@ Proof: every existing deterministic-core test stays green unchanged.
 
 ## 6. Deployment / packaging
 
-- **Minimal footprint:** one app image + one Postgres = exactly one external
-  dependency. (Redis removed from the plan.)
-- **Appliance mode:** app + Postgres in a single container (supervisor +
-  entrypoint) for turnkey single-node installs — a legitimate *packaging* choice
-  (cf. GitLab Omnibus). Do **not** make it the scalable topology.
-- **Production mode:** stateless app (N replicas) + Postgres as its own stateful
+**Decision: two containers.** The **stateless app** and **Postgres** run as
+separate services so app instances scale horizontally against shared state. This
+is the target topology, and the only one v0.4 builds. Postgres-only means exactly
+**one external dependency** (Redis removed from the plan), but that is one
+*dependency*, not one *container* — the app and the database stay distinct.
+
+- **Two-container (decided):** app (N replicas) + Postgres as its own stateful
   service → K8s-native. K8s manifests are the last mile; the stateless +
   externalized-state + pub-sub-interface work is what earns them.
+- **Single-container appliance (optional, later — not chosen):** app + Postgres in
+  one image (supervisor + entrypoint) is a legitimate *packaging* choice for
+  turnkey single-node installs (cf. GitLab Omnibus). It is **not** the scalable
+  topology and is **out of scope for v0.4** unless we explicitly add it.
 
 ---
 
@@ -388,7 +393,7 @@ Dependencies noted. Workstreams A→B are the foundation; C rides on them.
 ### Workstream E — Ops & pluggability proof
 | ID | Task | Size | Deps | Claim | Status |
 |----|------|------|------|-------|--------|
-| E1 | `docker-compose` with Postgres service; appliance vs prod packaging | **M** | B1 | — | Todo |
+| E1 | `docker-compose` = **two services** (stateless app + Postgres), the decided topology; app stays stateless. Single-container appliance is out of scope for v0.4 | **M** | B1 | — | Todo |
 | E2 | Interface **conformance test suite** (validates Postgres now; same suite validates a future Kafka/Redpanda impl) | **M** | A1 | — | Todo |
 | E3 | Kafka/Redpanda introduction guide (implement the seams; wiring swap; Postgres stays read model) | **S** | A1 | — | Todo |
 
