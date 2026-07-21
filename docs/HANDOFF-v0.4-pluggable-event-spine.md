@@ -382,7 +382,7 @@ Dependencies noted. Workstreams A→B are the foundation; C rides on them.
 | C2 | `BeatExecutor` — per-beat real `Append`; cumulative pacing + `MOSAIC_SIM_BEAT_SPACING`; optional burst mode | **M** | B2, C1 | c2-beat-executor | Done (`simulation.BeatExecutor` + equal spacing) |
 | C3 | Session isolation — `session_id` epoch; scoped recovery/COP/advisories; active-session indirection in API | **L** | B1, B5 | c3-session-epoch | Done (`ActiveSession` + session-scoped COP keys) |
 | C4 | Cassette — record/replay decorator around Terra/Sol `StructuredClient`; recording persistence keyed by beat/revision | **L** | C1 | c4-cassette | Done (`internal/simulation/cassette`) |
-| C5 | Three-mode wiring (Live / Replay / Fixture) + config + provider selection | **M** | C4 | — | Todo |
+| C5 | Three-mode wiring (Live / Replay / Fixture) + config + provider selection | **M** | C4 | c5-three-mode-wiring | In progress |
 
 ### Workstream D — UI
 | ID | Task | Size | Deps | Claim | Status |
