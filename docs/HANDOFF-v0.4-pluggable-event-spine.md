@@ -1,0 +1,397 @@
+# Mosaic Handoff v0.4 — Pluggable Event Spine, Durable Persistence, and Simulation Isolation
+
+**Status:** Planned (design locked). Implementation on a dedicated branch; `main`
+keeps this plan and a working demo. Not deadline-bound — the objective is a
+genuinely good engineering system, not a demo skin.
+
+---
+
+## 1. Why this increment exists
+
+A trace of the v0.3 interactive path surfaced a correctness/honesty gap:
+
+- At startup, `domainRuntime.Run()` ([cmd/mosaicdemo/main.go](../cmd/mosaicdemo/main.go))
+  **ingests all 10 beats at once** and seeds the full scenario (COP revision 9)
+  plus all advisories into the store **before the server serves a request**.
+- "Play scenario" ([internal/simsession/controller.go](../internal/simsession/controller.go))
+  is a **cosmetic SSE overlay** — it emits beat metadata on a timer; the UI
+  re-reads a COP that is already final.
+- `GET /cop` always runs deterministic recovery over the fully-seeded log
+  ([internal/api/server.go](../internal/api/server.go)) → returns revision 9 every
+  time. The board goes **blank → final**; the EMS-available→unavailable flip and
+  the Brook Lane closed→open correction **never render as live transitions**.
+- The live inference routes (`/operator/analyze` → Terra, `/operator/brief` → Sol
+  in [internal/api/operator.go](../internal/api/operator.go)) exist but **nothing in
+  the UI calls them**. "Refresh advice" only re-reads seeded fixture history.
+- Beat delays are **relative to session start**, and the fixture uses
+  `[0,100,100,…]`, so beats 2–10 fire at ~100ms — **nine near-simultaneous
+  beats**, each triggering `GET /cop` + `GET /advisories` from the UI (~20 reads
+  in under a second). That is the API "flood."
+
+The product must work **as envisioned**: the simulation is a *real* event source
+driving a *real* pipeline in real time, with genuine inference — not a pre-seeded
+board with a timer over it. The dummy *data* stays dummy; the *simulation* does
+not.
+
+This increment makes the system event-driven and honestly scalable, with a
+persistence and streaming design that is pluggable up to a real log
+(Kafka/Redpanda) when — and only when — throughput demands it.
+
+---
+
+## 2. Architectural spine (locked)
+
+### 2.1 Three separable layers
+
+Treat these as distinct from day one, even while all three are physically
+Postgres:
+
+| Layer | Responsibility | Now | Later (scale) |
+|-------|----------------|-----|---------------|
+| **Log (transport)** | Append + ordered consume of events | Postgres (`SKIP LOCKED` + sequence) | Kafka / Redpanda / NATS JetStream |
+| **System of record / read model** | Immutable provenance + materialized COP | **Postgres — stays forever** | Postgres (unchanged) |
+| **Fan-out** | Notify SSE gateways of COP change | Postgres `LISTEN/NOTIFY` | Redis / NATS / compacted topic |
+
+Introducing a real log later replaces **only the transport layer**. Postgres
+remains the queryable system of record. This is the mature CQRS topology; a clean
+seam means we *slide into it*, not rewrite.
+
+### 2.2 Persistence decision: PostgreSQL, single operational dependency
+
+- Insights and all records live today in **one SQLite database**
+  ([internal/store/store.go](../internal/store/store.go)), single connection,
+  ephemeral on Cloud Run `/tmp`. That is the toy smell.
+- Persistence is **already behind contract interfaces**
+  (`ImmutableRecordRepository`, `AdvisoryHistoryReader`, `TransactionRunner`,
+  `CheckpointRepository`). App code depends on the contracts, not SQLite — so a
+  Postgres backend is a real second implementation, not a rewrite.
+- **Postgres does the whole operational layer** — no Redis, no Kafka, no Mongo at
+  current scale:
+  - immutable append-only event log with **foreign keys enforcing provenance**;
+  - ordered projection queue via `SELECT … FOR UPDATE SKIP LOCKED`;
+  - fan-out via `LISTEN/NOTIFY` (replaces the in-process broker, gains
+    cross-instance fan-out);
+  - materialized COP read-model table for cheap `GET /cop`.
+
+**Mongo was considered and rejected** for this system: the projector is
+deterministic and order-sensitive (relational sequence + ACID gives provably
+correct ordering; a sharded document store does not), and provenance integrity
+wants real foreign keys and transactions (first-class in Postgres, app-enforced
+in Mongo). The partition key we care about is a *logical per-incident sequence*,
+not physical sharding — Postgres serves it with stronger guarantees.
+
+### 2.3 Pluggability: the seams that make Kafka/Redpanda a drop-in
+
+Three interfaces, shaped around **log semantics**, never SQL:
+
+```go
+// Append side. Backends: Postgres INSERT, or Kafka/Redpanda produce.
+type EventLog interface {
+    Append(ctx context.Context, e EventEnvelope) error
+}
+
+type EventEnvelope struct {
+    PartitionKey   string // e.g. incident id — routing + per-key ordering
+    IdempotencyKey string // source dedup; makes at-least-once safe
+    Type           string
+    Payload        []byte
+}
+
+// Read side. Ordered *per partition key*, at-least-once. The implementation
+// owns position/offset tracking — callers never see it.
+type EventConsumer interface {
+    Run(ctx context.Context, handle func(context.Context, Event) error) error
+    // handle returns nil => ack/advance; error => redeliver.
+}
+
+// Fan-out for the UI. Small payloads (a revision/id, not the whole COP).
+type EventBus interface {
+    Publish(ctx context.Context, topic string, note []byte) error
+    Subscribe(ctx context.Context, topic string) (<-chan []byte, error)
+}
+```
+
+**Postgres implementation now:** `Append` = INSERT with a unique constraint on
+`IdempotencyKey`; `Run` = `SKIP LOCKED` claim grouped by `PartitionKey`,
+processing each key in sequence order, checkpointing a cursor; `EventBus` =
+`LISTEN/NOTIFY`.
+
+**Kafka/Redpanda later:** `Append` = produce to a topic keyed by `PartitionKey`;
+`Run` = consumer group with committed offsets; `EventBus` = compacted topic or
+keep Redis/NATS. **Same interfaces, different wiring at composition. Producers and
+consumers — including the simulation — do not change a line.**
+
+### 2.4 The delivery contract (the rule that prevents coupling)
+
+The interface promises the **weakest** semantics both backends honor, and no
+consumer may rely on more:
+
+- **At-least-once**, never exactly-once.
+- **Ordered per partition key**, never globally ordered.
+
+Our existing **P05 source idempotency** turns at-least-once into
+effectively-once. The scale decision (per-incident partition key) and the
+portability decision are the **same decision**.
+
+### 2.5 The one real cost of portability (pay it now)
+
+Postgres-only tempts you to append an event *and* project it in one ACID
+transaction — Kafka cannot. So:
+
+> The projector **consumes from the log interface** and commits
+> `(projection update + position advance)` atomically — **never**
+> `(append + project)`.
+
+Both backends honor project-plus-position; only Postgres honors
+append-plus-project. Choosing the atomic boundary both systems can honor is the
+entire price of the Kafka door staying open. Everything else is free once the
+interfaces are log-shaped.
+
+### 2.6 Partition key = scale and determinism, one decision
+
+- `partition_key` on events (default: incident id; domain-scoped for
+  multi-dimension).
+- A monotonic sequence gives total order; a *subsequence per key* is still
+  ordered, so per-incident order is free.
+- Projector workers claim `WHERE partition_key = …` via `SKIP LOCKED` and process
+  each key in sequence order → **different incidents project in parallel, each
+  strictly ordered**. This is the "1000 events at once" answer without breaking
+  determinism.
+- Physical parallelism later: declarative `PARTITION BY HASH (partition_key)` —
+  same engine, no model change.
+
+### 2.7 "New dimension" story
+
+A new dimension (another feed / domain) becomes **a new producer + a consumer
+group** on the same backbone — not a re-plumb. SQLite would starve on concurrent
+writers and the in-process broker would be reimplemented; the log topology
+removes both problems.
+
+---
+
+## 3. Simulation isolation and the three modes
+
+### 3.1 Isolation
+
+- Simulation becomes **its own package/module**. Dependency direction is the
+  invariant: framework packages (ingestion, projector, store, terra, sol) are
+  synchronous and timing-blind and **never import simulation**; simulation
+  imports *them* and orchestrates over time.
+- **All pacing/timing lives only in simulation.** The framework has no notion of
+  "beat" or "delay."
+
+### 3.2 Simulation drives the real pipeline (the honest reveal)
+
+- Startup no longer bulk-seeds the interactive view. The board starts **empty**
+  ("press Play scenario").
+- A **`BeatExecutor`** (in the simulation package) runs each beat: `Append` the
+  beat's frozen raw event to the `EventLog` → the projector advances a real
+  revision → publish a COP snapshot → the UI reveals **progressively, for real**.
+- At the beats that reach the advisory revisions, invoke the **real Terra/Sol
+  services** (live client or recorded/fixture — see modes). The existing staged
+  advisory logic in
+  [internal/reference/domesticdisturbance/simulator/fixture_advisory.go](../internal/reference/domesticdisturbance/simulator/fixture_advisory.go)
+  (`runTerraActive` rev7, `runSolRecommendation` rev7, `runTerraObsolete` rev9)
+  is reused; it already persists via the Terra/Sol services and accepts injectable
+  clients.
+
+### 3.3 Three modes (cassette pattern)
+
+A thin **decorator around the Terra/Sol `StructuredClient`**, entirely inside the
+simulation package — the services can't tell the difference:
+
+| Mode | Inference | API cost | Use |
+|------|-----------|----------|-----|
+| **Live** | Real GPT-5.6 via OpenAI transport; **records the run** | Yes | Bank one good run |
+| **Replay (recorded)** | Replays the last live run's real outputs from the recording | **None** | The new **Replay** button; every video take |
+| **Fixture** | Frozen checked-in advisories | **None** | CI, deterministic safe default |
+
+Workflow win: do **one** paid live run to capture a recording, then hit **Replay
+last run** for every take — real GPT-5.6 output, free and reliable on retries.
+Enterprise angle: deterministic replay of real agent decisions is a genuine
+audit/compliance capability, not demo theater.
+
+### 3.4 Session isolation (durable epochs)
+
+- The store is append-only + idempotent, so replay needs isolation.
+- **A simulation session is a durable, first-class epoch:** every canonical
+  event, insight, and model run carries a `session_id`; recovery/COP/advisories
+  scope to the active session.
+- Gives both properties at once: replay a run cleanly on camera **and** keep every
+  past run durably auditable. With Postgres this is a `WHERE session_id = :active`
+  scope, not object-swapping.
+- **Active-session indirection:** the API read ports resolve "which session to
+  show now" from the active session the simulation sets on Start/Reset. No active
+  session → empty board.
+
+### 3.5 Pacing and the flood
+
+- Fix the **relative-to-start delay bug**: use **cumulative** delays.
+- `MOSAIC_SIM_BEAT_SPACING` (default ~2.5s) controls spacing, in the simulation
+  path only.
+- The flood disappears by construction: each beat now does bounded real work (and
+  at advisory beats awaits the model), so calls are naturally serialized and
+  spaced.
+- **Burst capability:** the simulation can be scaled to emit N events at once
+  (e.g. 1000) to stress the per-key `SKIP LOCKED` projector. Reality doesn't need
+  it; the system should survive it if someone asks.
+
+### 3.6 Simulation beats (captured for reference)
+
+Fixture: `datasets/domestic-disturbance/scenario.json`. Ten beats; end state COP
+revision 9 (beat 8 quarantines and does not project).
+
+| Order | Beat id | Current `delay_ms` | Board effect | Advisory |
+|------:|---------|-------------------:|--------------|----------|
+| 1 | `baseline-01-911-call` | 0 | Incident at 14 Cedar Lane | — |
+| 2 | `baseline-02-welfare-check` | 100 | Location history / prior note | — |
+| 3 | `baseline-03-weather-alert` | 100 | Heavy rain · Cedar district | — |
+| 4 | `baseline-04-road-closure` | 100 | Main Street bridge blocked | — |
+| 5 | `baseline-05-ems-availability` | 100 | EMS-4 available | — |
+| 6 | `baseline-06-officer-update` | 100 | Unit 17 assigned / near address | — |
+| 7 | `fixture-07-repaired-incomplete-road` | 100 | Brook Lane blocked; Luna repaired missing id (~rev 7) | **Terra access insight + Sol recommendation** |
+| 8 | `fixture-08-quarantined-input` | 100 | Malformed payload quarantined — COP not mutated | — |
+| 9 | `fixture-09-late-delivery` | 100 | EMS-4 unavailable (late update) | — |
+| 10 | `fixture-10-road-correction` | 100 | Brook Lane open (debris cleared, ~rev 9) | **Terra obsoletes access insight** |
+
+**Change:** delays become cumulative and spaced (~2.5s), driven by
+`MOSAIC_SIM_BEAT_SPACING`; each beat is a real `EventLog.Append`, not an SSE
+metadata blip. The frozen dataset is **not** edited — timing is presentation and
+lives in the simulation path.
+
+---
+
+## 4. UI changes (minimal)
+
+- Empty initial board state ("press Play scenario") — already supported; verify.
+- **Progressive reveal is free** once per-beat ingestion is real (the UI already
+  reloads COP/advisories on beat events and consumes `cop.snapshot`).
+- **New "Replay last run" button** (mode 2) plus mode/status surfacing (Live /
+  Replay / Fixture).
+- "Refresh advice" decision: keep as a manual re-poll, or promote to a manual
+  Terra trigger (TBD during D2).
+
+---
+
+## 5. Honesty guarantee — what stays untouched
+
+The following framework code is **not** altered; the reveal is real, not faked:
+
+- ingestion pipeline logic and Luna normalization;
+- deterministic projector and recovery algorithm;
+- Terra/Sol service logic;
+- ontology / JSON schemas;
+- the frozen `domestic-disturbance` dataset (integrity, sha256, id_map).
+
+Proof: every existing deterministic-core test stays green unchanged.
+
+---
+
+## 6. Deployment / packaging
+
+- **Minimal footprint:** one app image + one Postgres = exactly one external
+  dependency. (Redis removed from the plan.)
+- **Appliance mode:** app + Postgres in a single container (supervisor +
+  entrypoint) for turnkey single-node installs — a legitimate *packaging* choice
+  (cf. GitLab Omnibus). Do **not** make it the scalable topology.
+- **Production mode:** stateless app (N replicas) + Postgres as its own stateful
+  service → K8s-native. K8s manifests are the last mile; the stateless +
+  externalized-state + pub-sub-interface work is what earns them.
+
+---
+
+## 7. Task breakdown (T-shirt sizing)
+
+Sizes: **S** (≤ half day) · **M** (~1–2 days) · **L** (~3–5 days) · **XL** (> week).
+Dependencies noted. Workstreams A→B are the foundation; C rides on them.
+
+### Workstream A — Event spine (foundation)
+| ID | Task | Size | Deps |
+|----|------|------|------|
+| A1 | Define `EventLog` / `EventConsumer` / `EventBus`, envelope, position; document the delivery contract | **M** | — |
+| A2 | Partition-key model: `partition_key` column, monotonic sequence, consumer checkpoint/cursor table | **M** | A1 |
+
+### Workstream B — Postgres backbone
+| ID | Task | Size | Deps |
+|----|------|------|------|
+| B1 | `pgstore` implementing existing repository contracts; port schema + migrations; Postgres tx semantics (drop single-conn assumptions) | **L** | — |
+| B2 | `EventLog.Append` on Postgres (INSERT + idempotency unique constraint) | **M** | A1, B1 |
+| B3 | `EventConsumer` via `SKIP LOCKED`, per-partition ordered, checkpointed; atomic project+position; multi-worker | **L** | A2, B2 |
+| B4 | `EventBus` via `LISTEN/NOTIFY`; replace in-process broker behind the interface | **M** | A1, B1 |
+| B5 | Materialized COP read-model table maintained by projector; `GET /cop` reads it | **M** | B3 |
+
+### Workstream C — Simulation isolation & modes
+| ID | Task | Size | Deps |
+|----|------|------|------|
+| C1 | Extract simulation into its own package/module; enforce dependency direction | **M** | — |
+| C2 | `BeatExecutor` — per-beat real `Append`; cumulative pacing + `MOSAIC_SIM_BEAT_SPACING`; optional burst mode | **M** | B2, C1 |
+| C3 | Session isolation — `session_id` epoch; scoped recovery/COP/advisories; active-session indirection in API | **L** | B1, B5 |
+| C4 | Cassette — record/replay decorator around Terra/Sol `StructuredClient`; recording persistence keyed by beat/revision | **L** | C1 |
+| C5 | Three-mode wiring (Live / Replay / Fixture) + config + provider selection | **M** | C4 |
+
+### Workstream D — UI
+| ID | Task | Size | Deps |
+|----|------|------|------|
+| D1 | Empty initial board + progressive-reveal verification | **S** | C2, C3 |
+| D2 | "Replay last run" button + mode/status surfacing | **M** | C5 |
+
+### Workstream E — Ops & pluggability proof
+| ID | Task | Size | Deps |
+|----|------|------|------|
+| E1 | `docker-compose` with Postgres service; appliance vs prod packaging | **M** | B1 |
+| E2 | Interface **conformance test suite** (validates Postgres now; same suite validates a future Kafka/Redpanda impl) | **M** | A1 |
+| E3 | Kafka/Redpanda introduction guide (implement the seams; wiring swap; Postgres stays read model) | **S** | A1 |
+
+### Workstream F — Tests & docs
+| ID | Task | Size | Deps |
+|----|------|------|------|
+| F1 | Simulation-driven progressive projection; session replay isolation; live/recorded/fixture parity; framework-untouched proof | **L** | C3, C5 |
+| F2 | Update `demo-script.md` / `demo-video.md` for the now-real reveal | **S** | D1 |
+
+### Workstream G — Capture (original goal)
+| ID | Task | Size | Deps |
+|----|------|------|------|
+| G1 | Playwright capture keyed off real intermediate rail states + synthetic cursor + paced holds | **M** | C2, C3, D2 |
+
+**Critical path:** A1 → A2 → B2 → B3 → B5 → C3 → D1 → G1. Cassette (C4/C5) runs in
+parallel at the client layer. E2 gates the "pluggable" claim and should land with A1.
+
+---
+
+## 8. Fallback (if the spine does not land)
+
+`main` must always retain a working demo. If the re-architecture cannot be
+completed to satisfaction, retreat to **cosmetic UI/simulation-only** changes on
+top of the current seeded model — no framework or persistence risk:
+
+| ID | Task | Size |
+|----|------|------|
+| FB1 | Beat pacing only: cumulative delays / `MOSAIC_SIM_BEAT_SPACING` on the existing seeded model (kills the flood, paces the beat list/clock) | **S** |
+| FB2 | "Replay last run" as a re-poll of the existing seeded advisories (cosmetic) | **S–M** |
+| FB3 | Playwright capture against the existing seeded board | **M** |
+
+The board still jumps blank→final in fallback; the beat story is carried by VO and
+B-roll (see [demo-video.md](demo-video.md)). This is the safety net, not the goal.
+
+---
+
+## 9. Verification gates
+
+- Existing gates stay green: `go test ./tests/e2e -count=1`,
+  `go run ./cmd/mosaic quality`, `npm run check`, `npm run build`, Docker Compose
+  smoke.
+- New: interface conformance suite (E2); progressive-projection + session-replay +
+  mode-parity tests (F1); Postgres migration/round-trip tests (B1).
+- Honesty proof: the untouched-framework test set (Section 5) passes with no edits.
+
+---
+
+## 10. Relationship to other docs
+
+| Doc | Role |
+|-----|------|
+| [HANDOFF.md](../HANDOFF.md) | Live coordinator board (v0.3 verified) |
+| **This file** | v0.4 design + task parcels for the pluggable event spine |
+| [demo-script.md](demo-script.md) | Presenter pitch and UI actions |
+| [demo-video.md](demo-video.md) | YouTube cut; beat→visual map (becomes real under v0.4) |
+| [runbook/cloud-run-deployment-analysis.md](runbook/cloud-run-deployment-analysis.md) | Durable deployment analysis |

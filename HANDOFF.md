@@ -84,6 +84,23 @@ demo video of the interactive walkthrough.
 
 ---
 
+## Planned: v0.4 — Pluggable Event Spine, Durable Persistence, Simulation Isolation
+
+The next increment makes the interactive path **honestly event-driven**: the
+simulation drives the real pipeline beat-by-beat (real progressive reveal and
+real-time inference), persistence moves to **PostgreSQL** as the single
+operational dependency (log + `SKIP LOCKED` queue + `LISTEN/NOTIFY` fan-out +
+materialized COP), and the log is designed behind interfaces so **Kafka/Redpanda
+plugs in later** with no producer/consumer changes. Simulation is isolated into
+its own package with three modes — **Live / Replay (recorded, no API) / Fixture**.
+
+* **Design + task parcels (T-shirt sized):** [docs/HANDOFF-v0.4-pluggable-event-spine.md](docs/HANDOFF-v0.4-pluggable-event-spine.md)
+* **Fallback:** if the spine does not land, retreat to cosmetic UI/simulation-only
+  changes (beat pacing + Replay button on the seeded model). `main` always keeps a
+  working demo.
+
+---
+
 ## Next Steps
 
 > [!NOTE]
