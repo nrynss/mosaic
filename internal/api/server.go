@@ -654,7 +654,23 @@ func (s *Server) appendAudit(ctx context.Context, caller Actor, action, targetKi
 	if err := s.records.AppendAuditRecord(ctx, record); err != nil {
 		return gen.AuditRecord{}, err
 	}
+	// Session-scoped advisory index (C3): associate this audit with the active
+	// epoch so GET /advisories can filter without schema session_id fields.
+	s.recordSessionAdvisory("audit_record", record.AuditRecordID)
 	return record, nil
+}
+
+// recordSessionAdvisory indexes a durable advisory artifact against the active
+// session when SessionAdvisories + ActiveSession are both composed.
+func (s *Server) recordSessionAdvisory(kind, recordID string) {
+	if s == nil || s.sessionAdvisories == nil || s.activeSession == nil {
+		return
+	}
+	sessionID, active := s.activeSession.ActiveSessionID()
+	if !active {
+		return
+	}
+	s.sessionAdvisories.Record(sessionID, kind, recordID)
 }
 
 func validAuditRole(role string) bool {

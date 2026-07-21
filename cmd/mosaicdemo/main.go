@@ -296,11 +296,22 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 	// Active session epoch (C3): empty board until Play; natural end leaves
 	// Active set so the final progressive COP remains visible.
 	activeSession := session.NewActiveSession()
+	// Session-scoped advisory id index (C3): progressive path records fixture
+	// and operator artifact ids so GET /advisories filters to the active epoch.
+	// Seed-on-start leaves this nil (unscoped legacy board at boot).
+	var sessionAdvisories *api.SessionAdvisoryView
+	if !configuration.SeedOnStart {
+		sessionAdvisories = api.NewSessionAdvisoryView()
+	}
 
 	// Compose builds the profile's deterministic scenario, fixture advisory
 	// continuum, and evidence resolver over the single durable store. Active is
 	// passed so Postgres materialization writes session-scoped COP keys.
+	// SessionAdvisories lets progressive ProcessBeat Record fixture stage ids.
 	composeCtx := domesticdisturbance.WithActiveSession(ctx, activeSession)
+	if sessionAdvisories != nil {
+		composeCtx = domesticdisturbance.WithSessionAdvisories(composeCtx, sessionAdvisories)
+	}
 	domainRuntime, err := selected.Compose(composeCtx, records, configuration.AssetRoot)
 	if err != nil {
 		_ = closeDatabase()
@@ -450,6 +461,7 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 		APIKeyConfigured:  strings.TrimSpace(configuration.ModelEnv.APIKey) != "",
 		DemoBudgetUSD:     configuration.DemoBudgetUSD,
 		ActiveSession:     apiActive,
+		SessionAdvisories: sessionAdvisories,
 	})
 	if err != nil {
 		_ = closeDatabase()

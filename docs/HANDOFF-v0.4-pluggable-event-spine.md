@@ -187,7 +187,7 @@ removes both problems.
 - A **`BeatExecutor`** (in the simulation package) runs each beat: `Append` the
   beat's frozen raw event to the `EventLog` → the projector advances a real
   revision → publish a COP snapshot → the UI reveals **progressively, for real**.
-- **Interactive progressive path (D1, implemented):** Play →
+- **Interactive progressive path (D1 + D1r residuals):** Play →
   `session.Controller` (SSE + `BeatSpacing` + `Active`) → `OnBeat`:
   1. `EventLog.Append` (`raw.event`, `IdempotencyKey=raw_event_id`) — Postgres
      `pgstore` or SQLite `eventlog/memory`;
@@ -196,6 +196,13 @@ removes both problems.
   3. Advisory continuum via `ContinueProgressive` when rev 7 / 9 first appear
      (Terra@7, Sol@7, Terra obsolete@9). Multi-worker `EventConsumer.Run` remains
      the scale path on Postgres; the sync handler is the interactive consumer.
+  4. **Session-scoped advisories (C3 seam):** progressive composition wires
+     `api.SessionAdvisoryView`; fixture stages and operator audits `Record` ids
+     against the active session so GET `/advisories` filters (empty when End
+     clears Active). Ontology schemas do not carry `session_id`.
+  5. **Timeline restart:** `ContinueProgressive` is intact without an in-memory
+     timeline when durable stages are complete; incomplete stages can recover
+     the current COP from the store via `RecoverCOP`.
 - At the beats that reach the advisory revisions, invoke the **real Terra/Sol
   services** (live client or recorded/fixture — see modes). The existing staged
   advisory logic in
@@ -204,6 +211,8 @@ removes both problems.
   is reused; it already persists via the Terra/Sol services and accepts injectable
   clients. Optional `MOSAIC_SEED_ON_START=1` restores bulk `runtime.Run()` for
   non-progressive proofs (board visible at boot; ActiveSession not wired).
+  Equal beat pacing: `MOSAIC_SIM_BEAT_SPACING` (default 2.5s). Reset/End do not
+  wipe the append-only store.
 
 ### 3.3 Three modes (cassette pattern)
 

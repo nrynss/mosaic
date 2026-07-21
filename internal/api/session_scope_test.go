@@ -270,6 +270,62 @@ func TestHandleAdvisoriesFiltersWithSessionView(t *testing.T) {
 	}
 }
 
+func TestHandleAdvisoriesEmptyAfterActiveSessionCleared(t *testing.T) {
+	// Progressive Play indexes advisories for the session; explicit End clears
+	// Active → GET /advisories returns the empty-board policy.
+	fixture := newFixture(t)
+	active := &stubActiveSession{id: "sim-live", active: true}
+	view := NewSessionAdvisoryView()
+	view.Record("sim-live", "insight", "ins-keep")
+
+	server, err := New(Config{
+		Recovery: PreferMaterializedRecovery{
+			Materialized: &stubMaterialization{
+				found: true,
+				result: contracts.ProjectionResult{
+					StateRevision: 9,
+					COP:           map[string]any{"seeded": true},
+				},
+			},
+			Active: active,
+		},
+		Records:           fixture.store,
+		Evidence:          fixture.server.evidence,
+		Stream:            fixture.broker,
+		AdvisoryHistory:   fixedAdvisoryHistory{},
+		ActiveSession:     active,
+		SessionAdvisories: view,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Active → session-filtered advisories visible.
+	whileActive := request(t, server.Handler(), http.MethodGet, "/api/v1/advisories", "", "")
+	if whileActive.Code != http.StatusOK {
+		t.Fatalf("active status = %d", whileActive.Code)
+	}
+	activeData := responseData(t, whileActive)
+	if insights, _ := activeData["insights"].([]any); len(insights) != 1 {
+		t.Fatalf("active insights = %#v, want 1", activeData["insights"])
+	}
+
+	// End clears Active (empty board policy).
+	active.active = false
+	active.id = ""
+	afterEnd := request(t, server.Handler(), http.MethodGet, "/api/v1/advisories", "", "")
+	if afterEnd.Code != http.StatusOK {
+		t.Fatalf("after end status = %d", afterEnd.Code)
+	}
+	endData := responseData(t, afterEnd)
+	if insights, _ := endData["insights"].([]any); len(insights) != 0 {
+		t.Fatalf("after end insights = %#v, want empty", insights)
+	}
+	if recs, _ := endData["recommendations"].([]any); len(recs) != 0 {
+		t.Fatalf("after end recommendations = %#v, want empty", recs)
+	}
+}
+
 // fixedAdvisoryHistory returns two insights so filter tests can distinguish sessions.
 type fixedAdvisoryHistory struct{}
 

@@ -27,14 +27,16 @@ func TestFixtureComposedAdvisoryPublicBoundaryAndRetainedRestart(t *testing.T) {
 	uiDirectory := testDashboard(t)
 	databasePath := filepath.Join(t.TempDir(), "mosaic.db")
 
-	first := startMosaicDemo(t, binary, root, databasePath, uiDirectory)
+	// Seeded path: MOSAIC_SEED_ON_START bulk-runs fixture so COP/advisories
+	// are visible at boot (legacy non-progressive proof).
+	first := startMosaicDemoSeeded(t, binary, root, databasePath, uiDirectory)
 	assertPublicFixtureAdvisoryBoundary(t, first.baseURL)
 	assertFixtureAdvisoryCounts(t, databasePath, 2, 1, 3, 2)
 	assertImmutablePublicReview(t, first.baseURL)
 	assertFixtureAdvisoryCounts(t, databasePath, 2, 1, 3, 3)
 	first.stop(t)
 
-	second := startMosaicDemo(t, binary, root, databasePath, uiDirectory)
+	second := startMosaicDemoSeeded(t, binary, root, databasePath, uiDirectory)
 	defer second.stop(t)
 	assertPublicFixtureAdvisoryBoundary(t, second.baseURL)
 	assertFixtureAdvisoryCounts(t, databasePath, 2, 1, 3, 3)
@@ -168,7 +170,10 @@ type mosaicDemoProcess struct {
 	output  *bytes.Buffer
 }
 
-func startMosaicDemo(t *testing.T, binary, root, databasePath, uiDirectory string) mosaicDemoProcess {
+// startMosaicDemoSeeded starts mosaicdemo with bulk fixture seed at boot
+// (MOSAIC_SEED_ON_START=1). Use for legacy board-at-boot / retained-restart
+// proofs. Prefer startMosaicDemoProgressive for interactive Play paths.
+func startMosaicDemoSeeded(t *testing.T, binary, root, databasePath, uiDirectory string) mosaicDemoProcess {
 	t.Helper()
 	address := freeAddress(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -179,7 +184,7 @@ func startMosaicDemo(t *testing.T, binary, root, databasePath, uiDirectory strin
 		"-asset-root", root,
 	)
 	command.Dir = root
-	// Fast equal-spacing for interactive Play; SEED_ON_START for legacy board-at-boot proofs.
+	// Fast equal-spacing if Play is used; SEED_ON_START for legacy board-at-boot proofs.
 	command.Env = append(os.Environ(),
 		"MOSAIC_SIM_BEAT_SPACING=1ms",
 		"MOSAIC_SEED_ON_START=1",
@@ -189,7 +194,7 @@ func startMosaicDemo(t *testing.T, binary, root, databasePath, uiDirectory strin
 	command.Stderr = output
 	if err := command.Start(); err != nil {
 		cancel()
-		t.Fatalf("start mosaicdemo: %v", err)
+		t.Fatalf("start mosaicdemo seeded: %v", err)
 	}
 	done := make(chan error, 1)
 	go func() { done <- command.Wait() }()

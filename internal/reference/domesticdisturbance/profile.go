@@ -21,6 +21,10 @@ import (
 // so Postgres materialization can write session-scoped COP keys (C3/D1).
 type activeSessionContextKey struct{}
 
+// sessionAdvisoriesContextKey carries the optional in-memory session→advisory
+// id index so progressive fixture stages can Record against the active epoch.
+type sessionAdvisoriesContextKey struct{}
+
 // WithActiveSession attaches the active-session holder for Compose. Nil is a
 // no-op. Composition creates the holder before Compose so MaterializingProjector
 // and PreferMaterializedRecovery share the same epoch pointer.
@@ -31,12 +35,30 @@ func WithActiveSession(ctx context.Context, active contracts.ActiveSessionSource
 	return context.WithValue(ctx, activeSessionContextKey{}, active)
 }
 
+// WithSessionAdvisories attaches the session-scoped advisory id index for
+// progressive Compose. Nil is a no-op. Pair with WithActiveSession so
+// ProcessBeat can Record fixture advisory ids for GET /advisories filtering.
+func WithSessionAdvisories(ctx context.Context, recorder simulator.SessionAdvisoryRecorder) context.Context {
+	if recorder == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, sessionAdvisoriesContextKey{}, recorder)
+}
+
 func activeSessionFromContext(ctx context.Context) contracts.ActiveSessionSource {
 	if ctx == nil {
 		return nil
 	}
 	active, _ := ctx.Value(activeSessionContextKey{}).(contracts.ActiveSessionSource)
 	return active
+}
+
+func sessionAdvisoriesFromContext(ctx context.Context) simulator.SessionAdvisoryRecorder {
+	if ctx == nil {
+		return nil
+	}
+	recorder, _ := ctx.Value(sessionAdvisoriesContextKey{}).(simulator.SessionAdvisoryRecorder)
+	return recorder
 }
 
 const ID = dataset.DomesticDisturbance
@@ -71,7 +93,8 @@ func (domainProfile) Validate(assetRoot string) error {
 }
 
 func (domainProfile) Compose(ctx context.Context, repository contracts.ImmutableRecordRepository, assetRoot string) (profile.Runtime, error) {
-	domain, wrapProjector, resolver, err := bindDomainStore(repository, activeSessionFromContext(ctx))
+	active := activeSessionFromContext(ctx)
+	domain, wrapProjector, resolver, err := bindDomainStore(repository, active)
 	if err != nil {
 		return nil, err
 	}
@@ -88,16 +111,21 @@ func (domainProfile) Compose(ctx context.Context, repository contracts.Immutable
 		Store:      domain,
 		SchemaDir:  filepath.Join(assetRoot, "ontology"),
 		FixtureDir: filepath.Join(assetRoot, "datasets", ID),
+		// Progressive restart: rebuild current COP from durable store when the
+		// in-memory timeline was lost mid-run.
+		RecoverCOP: scenario.Recover,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("compose fixture advisory replay: %w", err)
 	}
 	return &runtime{
-		store:     domain,
-		scenario:  scenario,
-		advisory:  advisory,
-		resolver:  resolver,
-		assetRoot: assetRoot,
+		store:             domain,
+		scenario:          scenario,
+		advisory:          advisory,
+		resolver:          resolver,
+		assetRoot:         assetRoot,
+		active:            active,
+		sessionAdvisories: sessionAdvisoriesFromContext(ctx),
 	}, nil
 }
 
@@ -149,8 +177,15 @@ type runtime struct {
 	resolver  api.EvidenceResolver
 	assetRoot string
 
+	// C3 progressive: ActiveSession + SessionAdvisoryView so fixture stages
+	// Record against the live epoch for GET /advisories filtering.
+	active            contracts.ActiveSessionSource
+	sessionAdvisories simulator.SessionAdvisoryRecorder
+
 	// Progressive path: accumulate timeline snapshots so advisory stages can
 	// reuse historical rev-7/rev-9 COPs without re-running bulk seed.
+	// Best-effort only — ContinueProgressive recovers from the durable store
+	// when this slice is empty after a process restart.
 	mu       sync.Mutex
 	timeline []simulator.TimelineEntry
 }
@@ -194,10 +229,25 @@ func (r *runtime) ProcessBeat(ctx context.Context, beatID string) error {
 	r.timeline = append(r.timeline, entry)
 	timeline := append([]simulator.TimelineEntry(nil), r.timeline...)
 	r.mu.Unlock()
-	if _, err := r.advisory.ContinueProgressive(ctx, timeline); err != nil {
+	result, err := r.advisory.ContinueProgressive(ctx, timeline)
+	if err != nil {
 		return err
 	}
+	r.recordProgressiveSessionAdvisories(result)
 	return nil
+}
+
+// recordProgressiveSessionAdvisories indexes fixture artifacts written during
+// this beat against the active simulation session (C3 session-scoped board).
+func (r *runtime) recordProgressiveSessionAdvisories(result simulator.AdvisoryReplayResult) {
+	if r == nil || r.advisory == nil || r.sessionAdvisories == nil || r.active == nil {
+		return
+	}
+	sessionID, ok := r.active.ActiveSessionID()
+	if !ok || sessionID == "" {
+		return
+	}
+	r.advisory.RecordSessionStages(r.sessionAdvisories, sessionID, result.StagesRun)
 }
 
 // RawEventPayload returns fixture raw-event JSON for EventLog.Append.

@@ -80,7 +80,8 @@ func TestInteractiveSimulationE2EBoundary(t *testing.T) {
 		t.Fatalf("COP after Play revision = %#v, want 9\nprocess:\n%s", copAfter["state_revision"], first.output.String())
 	}
 
-	// Progressive advisories landed (Terra@7, Sol@7, Terra obsolete@9)
+	// Progressive advisories landed for the active session (Terra@7, Sol@7, Terra obsolete@9).
+	// SessionAdvisories filters GET /advisories to ids recorded during Play.
 	advisoriesBeforeOp := getResponse(t, http.MethodGet, first.baseURL+"/api/v1/advisories", "")
 	advisoriesBeforeBody, err := io.ReadAll(advisoriesBeforeOp.Body)
 	advisoriesBeforeOp.Body.Close()
@@ -184,6 +185,30 @@ func TestInteractiveSimulationE2EBoundary(t *testing.T) {
 	copData := advisoryResponseData(t, copResp)
 	if revision, _ := copData["state_revision"].(float64); revision != 9 {
 		t.Fatalf("public COP revision = %#v, want 9", copData["state_revision"])
+	}
+
+	// Explicit End clears ActiveSession → empty advisories board policy (C3).
+	endResp := getResponse(t, http.MethodPost, first.baseURL+"/api/v1/simulation/end", "")
+	if endResp.StatusCode != http.StatusOK {
+		t.Fatalf("simulation end status = %d\n%s", endResp.StatusCode, first.output.String())
+	}
+	endResp.Body.Close()
+	advisoriesAfterEnd := getResponse(t, http.MethodGet, first.baseURL+"/api/v1/advisories", "")
+	advisoriesAfterEndBody, err := io.ReadAll(advisoriesAfterEnd.Body)
+	advisoriesAfterEnd.Body.Close()
+	if err != nil {
+		t.Fatalf("read advisories after end: %v", err)
+	}
+	advisoriesAfterEndData := decodeData(t, advisoriesAfterEndBody)
+	if insights, _ := advisoriesAfterEndData["insights"].([]any); len(insights) != 0 {
+		t.Fatalf("insights after End = %d, want empty board: %s", len(insights), advisoriesAfterEndBody)
+	}
+	if recs, _ := advisoriesAfterEndData["recommendations"].([]any); len(recs) != 0 {
+		t.Fatalf("recommendations after End = %d, want empty board", len(recs))
+	}
+	copAfterEnd := advisoryResponseData(t, getResponse(t, http.MethodGet, first.baseURL+"/api/v1/cop", ""))
+	if revision, _ := copAfterEnd["state_revision"].(float64); revision != 0 {
+		t.Fatalf("COP after End revision = %#v, want 0 empty board", copAfterEnd["state_revision"])
 	}
 
 	first.stop(t)
