@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // LunaStructuredClient is the package-local structured normalization seam.
@@ -29,19 +30,14 @@ type LunaResponse struct {
 	RefusalDetail      string
 }
 
-const lunaInstructions = `You are Luna, Mosaic's structured event normalizer.
-Given a Raw Event envelope (no operational authority), return JSON with:
-- "result": a LunaResult object (schema_version 1.0.0) describing accept/refuse/fail status
-- "canonical_event": optional CanonicalEvent when status is accepted
-Never claim to mutate operational state. Cite evidence against the raw event only.
-Respond with a single JSON object only.`
-
 // LunaClient implements LunaStructuredClient over the OpenAI Responses API.
 type LunaClient struct {
-	transport *transport
+	transport    *transport
+	instructions string
 }
 
-// NewLunaClient constructs a live Luna client. APIKey is required.
+// NewLunaClient constructs a live Luna client. APIKey and versioned prompt
+// content are required; composition loads the prompt from the asset root.
 func NewLunaClient(cfg Config) (*LunaClient, error) {
 	if cfg.Model == "" {
 		cfg.Model = DefaultLunaModel
@@ -50,7 +46,11 @@ func NewLunaClient(cfg Config) (*LunaClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &LunaClient{transport: t}, nil
+	instructions := strings.TrimSpace(cfg.Instructions)
+	if instructions == "" {
+		return nil, fmt.Errorf("luna instructions are required")
+	}
+	return &LunaClient{transport: t, instructions: instructions}, nil
 }
 
 // Normalize performs one Responses API call and maps structured output or refusal.
@@ -66,7 +66,7 @@ func (c *LunaClient) Normalize(ctx context.Context, request LunaRequest) (LunaRe
 	}
 
 	result, err := c.transport.call(ctx, structuredCall{
-		Instructions: lunaInstructions,
+		Instructions: c.instructions,
 		SchemaName:   "luna_result",
 		UserInput:    string(request.RawEventJSON),
 	})

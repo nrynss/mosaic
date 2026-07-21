@@ -45,7 +45,7 @@ type Config struct {
 	Endpoint string
 	Model    string
 	// Instructions is the versioned prompt content supplied by composition.
-	// Terra and Sol require it; Luna retains its temporary inline prompt until H2.
+	// Every live agent requires its own versioned prompt artifact.
 	Instructions string
 	HTTPClient   *http.Client
 }

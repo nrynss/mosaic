@@ -146,7 +146,7 @@ func composeModels(
 	var liveLuna openaimodel.LunaStructuredClient
 	var liveTerra terra.StructuredClient
 	var liveSol sol.StructuredClient
-	var terraPrompt, solPrompt versionedPrompt
+	var lunaPrompt, terraPrompt, solPrompt versionedPrompt
 	if effective[openaimodel.AgentLuna] == contracts.ProviderLive ||
 		effective[openaimodel.AgentTerra] == contracts.ProviderLive ||
 		effective[openaimodel.AgentSol] == contracts.ProviderLive {
@@ -155,7 +155,14 @@ func composeModels(
 		// fixture mode remains prompt-independent.
 		base := openaimodel.Config{APIKey: env.APIKey}
 		if effective[openaimodel.AgentLuna] == contracts.ProviderLive {
-			client, err := openaimodel.NewLunaClient(base)
+			lunaPrompt, err = loadVersionedPrompt(assetRoot, openaimodel.AgentLuna, "v1.0.0")
+			if err != nil {
+				return modelBundle{}, fmt.Errorf("load live Luna prompt: %w", err)
+			}
+			client, err := openaimodel.NewLunaClient(openaimodel.Config{
+				APIKey:       base.APIKey,
+				Instructions: lunaPrompt.Instructions,
+			})
 			if err != nil {
 				return modelBundle{}, fmt.Errorf("compose live Luna client: %w", err)
 			}
@@ -209,7 +216,7 @@ func composeModels(
 
 	var luna contracts.LunaAdapter
 	if effective[openaimodel.AgentLuna] == contracts.ProviderLive {
-		luna = &liveLunaAdapter{client: selected.Luna, records: database, clock: time.Now}
+		luna = &liveLunaAdapter{client: selected.Luna, records: database, clock: time.Now, promptVersion: lunaPrompt.Provenance}
 	} else {
 		luna = fixtureLuna
 	}
@@ -342,9 +349,10 @@ func (s lunaStructuredShim) Normalize(ctx context.Context, request openaimodel.L
 // Transport failures and refusals produce a failed/refused ModelRun with no
 // CanonicalEvent and no state mutation beyond the returned artifacts.
 type liveLunaAdapter struct {
-	client  openaimodel.LunaStructuredClient
-	records contracts.ImmutableRecordRepository
-	clock   func() time.Time
+	client        openaimodel.LunaStructuredClient
+	records       contracts.ImmutableRecordRepository
+	clock         func() time.Time
+	promptVersion string
 }
 
 func (a *liveLunaAdapter) Normalize(ctx context.Context, raw gen.RawEvent) (contracts.LunaOutput, error) {
@@ -362,16 +370,16 @@ func (a *liveLunaAdapter) Normalize(ctx context.Context, raw gen.RawEvent) (cont
 	response, callErr := a.client.Normalize(ctx, openaimodel.LunaRequest{RawEventJSON: encoded})
 	completed := a.clock().UTC()
 	if callErr != nil {
-		run := lunaFailureRun(raw, started, completed, "failed", callErr.Error(), "")
+		run := lunaFailureRun(raw, started, completed, "failed", callErr.Error(), "", a.promptVersion)
 		return contracts.LunaOutput{ModelRun: run, Result: quarantinedLunaResult(raw, started)}, nil
 	}
 	if strings.TrimSpace(response.RefusalDetail) != "" {
-		run := lunaFailureRun(raw, started, completed, "refused", response.RefusalDetail, response.ResponseID)
+		run := lunaFailureRun(raw, started, completed, "refused", response.RefusalDetail, response.ResponseID, a.promptVersion)
 		return contracts.LunaOutput{ModelRun: run, Result: quarantinedLunaResult(raw, started)}, nil
 	}
 	var result gen.LunaResult
 	if err := json.Unmarshal(response.ResultJSON, &result); err != nil {
-		run := lunaFailureRun(raw, started, completed, "invalid", err.Error(), response.ResponseID)
+		run := lunaFailureRun(raw, started, completed, "invalid", err.Error(), response.ResponseID, a.promptVersion)
 		return contracts.LunaOutput{ModelRun: run, Result: quarantinedLunaResult(raw, started)}, nil
 	}
 	run := gen.ModelRun{
@@ -380,7 +388,7 @@ func (a *liveLunaAdapter) Normalize(ctx context.Context, raw gen.RawEvent) (cont
 		Agent:               "luna",
 		Provider:            "openai",
 		Model:               openaimodel.DefaultLunaModel,
-		PromptVersion:       "mosaicdemo-interactive-v1",
+		PromptVersion:       a.promptVersion,
 		OutputSchemaVersion: "1.0.0",
 		InputEventIds:       []any{raw.RawEventID},
 		OutputIds:           []any{result.LunaResultID},
@@ -401,14 +409,14 @@ func (a *liveLunaAdapter) Normalize(ctx context.Context, raw gen.RawEvent) (cont
 	return out, nil
 }
 
-func lunaFailureRun(raw gen.RawEvent, started, completed time.Time, status, detail, responseID string) gen.ModelRun {
+func lunaFailureRun(raw gen.RawEvent, started, completed time.Time, status, detail, responseID, promptVersion string) gen.ModelRun {
 	return gen.ModelRun{
 		SchemaVersion:       "1.0.0",
 		ModelRunID:          "modelrun-live-luna-" + raw.RawEventID + "-" + status,
 		Agent:               "luna",
 		Provider:            "openai",
 		Model:               openaimodel.DefaultLunaModel,
-		PromptVersion:       "mosaicdemo-interactive-v1",
+		PromptVersion:       promptVersion,
 		OutputSchemaVersion: "1.0.0",
 		InputEventIds:       []any{raw.RawEventID},
 		ValidationStatus:    status,

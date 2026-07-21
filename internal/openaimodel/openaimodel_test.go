@@ -224,11 +224,18 @@ func TestSolBriefMapsRecommendationAndShapesRequest(t *testing.T) {
 func TestLunaNormalizeMapsResultAndOptionalCanonical(t *testing.T) {
 	const payload = `{"result":{"schema_version":"1.0.0","luna_result_id":"luna-001","raw_event_id":"raw-001","status":"accepted","canonical_event_id":"canon-001","evidence":[{"target_kind":"raw_event","target_id":"raw-001","explanation":"envelope"}],"created_at":"2026-07-18T10:00:02Z"},"canonical_event":{"schema_version":"1.0.0","canonical_event_id":"canon-001","raw_event_id":"raw-001","event_type":"note","occurred_at":"2026-07-18T10:00:00Z","ingested_at":"2026-07-18T10:00:01Z","payload":{"summary":"synthetic"}}}`
 
+	var capturedBody []byte
 	client, err := NewLunaClient(Config{
-		APIKey: "test-key",
+		APIKey:       "test-key",
+		Instructions: "versioned Luna prompt",
 		HTTPClient: testHTTPClient(func(request *http.Request) (*http.Response, error) {
 			if request.Header.Get("Authorization") != "Bearer test-key" {
 				t.Fatalf("Authorization = %q", request.Header.Get("Authorization"))
+			}
+			var err error
+			capturedBody, err = io.ReadAll(request.Body)
+			if err != nil {
+				return nil, err
 			}
 			resp := jsonResponse(http.StatusOK, successEnvelope("resp_luna_1", payload))
 			resp.Request = request
@@ -253,6 +260,13 @@ func TestLunaNormalizeMapsResultAndOptionalCanonical(t *testing.T) {
 	}
 	if !strings.Contains(string(response.CanonicalEventJSON), `"canonical_event_id":"canon-001"`) {
 		t.Fatalf("CanonicalEventJSON = %s", response.CanonicalEventJSON)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(capturedBody, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["instructions"] != "versioned Luna prompt" {
+		t.Fatalf("instructions = %q", body["instructions"])
 	}
 }
 
@@ -299,7 +313,8 @@ func TestRefusalDetailPath(t *testing.T) {
 	})
 	t.Run("luna", func(t *testing.T) {
 		client, err := NewLunaClient(Config{
-			APIKey: "test-key",
+			APIKey:       "test-key",
+			Instructions: "test Luna prompt",
 			HTTPClient: testHTTPClient(func(request *http.Request) (*http.Response, error) {
 				resp := jsonResponse(http.StatusOK, refusalEnvelope("resp_refuse_luna", "cannot normalize"))
 				resp.Request = request
@@ -414,6 +429,9 @@ func TestMissingInstructions(t *testing.T) {
 	}
 	if _, err := NewSolClient(Config{APIKey: "test-key"}); err == nil || !strings.Contains(err.Error(), "instructions") {
 		t.Fatalf("NewSolClient error = %v", err)
+	}
+	if _, err := NewLunaClient(Config{APIKey: "test-key"}); err == nil || !strings.Contains(err.Error(), "instructions") {
+		t.Fatalf("NewLunaClient error = %v", err)
 	}
 }
 func TestSelectFixtureFallbackEmptyKey(t *testing.T) {
