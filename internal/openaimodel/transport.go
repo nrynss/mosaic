@@ -41,10 +41,13 @@ func APIKeyFromEnv() string {
 // Endpoint is overridable for tests; the default is DefaultEndpoint.
 // HTTPClient is optional; when nil a client that refuses redirects is used.
 type Config struct {
-	APIKey     string
-	Endpoint   string
-	Model      string
-	HTTPClient *http.Client
+	APIKey   string
+	Endpoint string
+	Model    string
+	// Instructions is the versioned prompt content supplied by composition.
+	// Terra and Sol require it; Luna retains its temporary inline prompt until H2.
+	Instructions string
+	HTTPClient   *http.Client
 }
 
 type transport struct {

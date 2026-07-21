@@ -84,7 +84,7 @@ func TestTerraAssessMapsInsightAndShapesRequest(t *testing.T) {
 
 	var captured *http.Request
 	var capturedBody []byte
-	client, err := NewTerraClient(Config{
+	client, err := NewTerraClient(Config{Instructions: "test Terra prompt",
 		APIKey:   "test-key",
 		Endpoint: "https://api.openai.com/v1/responses",
 		Model:    "gpt-5.6",
@@ -147,6 +147,9 @@ func TestTerraAssessMapsInsightAndShapesRequest(t *testing.T) {
 	if body["store"] != false {
 		t.Fatalf("store = %v, want false", body["store"])
 	}
+	if body["instructions"] != "test Terra prompt" {
+		t.Fatalf("instructions = %q", body["instructions"])
+	}
 	input, _ := body["input"].(string)
 	if !strings.Contains(input, `"state_revision":7`) {
 		t.Fatalf("input missing state_revision: %s", input)
@@ -168,7 +171,7 @@ func TestSolBriefMapsRecommendationAndShapesRequest(t *testing.T) {
 	const recJSON = `{"schema_version":"1.0.0","recommendation_id":"recommendation-001","state_revision":7,"text":"review access","evidence":[{"target_kind":"insight","target_id":"insight-001","explanation":"assessment"}],"created_at":"2026-07-18T10:00:04Z"}`
 
 	var capturedBody []byte
-	client, err := NewSolClient(Config{
+	client, err := NewSolClient(Config{Instructions: "test Sol prompt",
 		APIKey: "test-key",
 		HTTPClient: testHTTPClient(func(request *http.Request) (*http.Response, error) {
 			body, err := io.ReadAll(request.Body)
@@ -200,6 +203,9 @@ func TestSolBriefMapsRecommendationAndShapesRequest(t *testing.T) {
 	var body map[string]any
 	if err := json.Unmarshal(capturedBody, &body); err != nil {
 		t.Fatal(err)
+	}
+	if body["instructions"] != "test Sol prompt" {
+		t.Fatalf("instructions = %q", body["instructions"])
 	}
 	input, _ := body["input"].(string)
 	if !strings.Contains(input, `"state_revision":7`) || !strings.Contains(input, `"requested_by":"operator-public"`) {
@@ -252,7 +258,7 @@ func TestLunaNormalizeMapsResultAndOptionalCanonical(t *testing.T) {
 
 func TestRefusalDetailPath(t *testing.T) {
 	t.Run("terra", func(t *testing.T) {
-		client, err := NewTerraClient(Config{
+		client, err := NewTerraClient(Config{Instructions: "test Terra prompt",
 			APIKey: "test-key",
 			HTTPClient: testHTTPClient(func(request *http.Request) (*http.Response, error) {
 				resp := jsonResponse(http.StatusOK, refusalEnvelope("resp_refuse", "policy declined assessment"))
@@ -272,7 +278,7 @@ func TestRefusalDetailPath(t *testing.T) {
 		}
 	})
 	t.Run("sol", func(t *testing.T) {
-		client, err := NewSolClient(Config{
+		client, err := NewSolClient(Config{Instructions: "test Sol prompt",
 			APIKey: "test-key",
 			HTTPClient: testHTTPClient(func(request *http.Request) (*http.Response, error) {
 				resp := jsonResponse(http.StatusOK, refusalEnvelope("resp_refuse_sol", "briefing refused"))
@@ -314,7 +320,7 @@ func TestRefusalDetailPath(t *testing.T) {
 }
 
 func TestContextCancelAndTimeout(t *testing.T) {
-	client, err := NewTerraClient(Config{
+	client, err := NewTerraClient(Config{Instructions: "test Terra prompt",
 		APIKey: "test-key",
 		HTTPClient: testHTTPClient(func(request *http.Request) (*http.Response, error) {
 			select {
@@ -354,7 +360,7 @@ func TestHTTPErrorsNoRetry(t *testing.T) {
 		status := status
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			var calls atomic.Int32
-			client, err := NewTerraClient(Config{
+			client, err := NewTerraClient(Config{Instructions: "test Terra prompt",
 				APIKey: "test-key",
 				HTTPClient: testHTTPClient(func(request *http.Request) (*http.Response, error) {
 					calls.Add(1)
@@ -391,10 +397,10 @@ func TestHTTPErrorsNoRetry(t *testing.T) {
 }
 
 func TestMissingAPIKey(t *testing.T) {
-	if _, err := NewTerraClient(Config{}); err == nil || !strings.Contains(err.Error(), "missing API key") {
+	if _, err := NewTerraClient(Config{Instructions: "test Terra prompt"}); err == nil || !strings.Contains(err.Error(), "missing API key") {
 		t.Fatalf("NewTerraClient error = %v", err)
 	}
-	if _, err := NewSolClient(Config{APIKey: "  "}); err == nil || !strings.Contains(err.Error(), "missing API key") {
+	if _, err := NewSolClient(Config{Instructions: "test Sol prompt", APIKey: "  "}); err == nil || !strings.Contains(err.Error(), "missing API key") {
 		t.Fatalf("NewSolClient error = %v", err)
 	}
 	if _, err := NewLunaClient(Config{}); err == nil || !strings.Contains(err.Error(), "missing API key") {
@@ -402,6 +408,14 @@ func TestMissingAPIKey(t *testing.T) {
 	}
 }
 
+func TestMissingInstructions(t *testing.T) {
+	if _, err := NewTerraClient(Config{APIKey: "test-key"}); err == nil || !strings.Contains(err.Error(), "instructions") {
+		t.Fatalf("NewTerraClient error = %v", err)
+	}
+	if _, err := NewSolClient(Config{APIKey: "test-key"}); err == nil || !strings.Contains(err.Error(), "instructions") {
+		t.Fatalf("NewSolClient error = %v", err)
+	}
+}
 func TestSelectFixtureFallbackEmptyKey(t *testing.T) {
 	fixtureLuna := stubLuna{id: "fixture-luna"}
 	fixtureTerra := stubTerra{id: "fixture-terra"}
@@ -537,7 +551,7 @@ func TestPackageSourceHasNoSecretPatterns(t *testing.T) {
 }
 
 func TestEmptyAndInvalidBodies(t *testing.T) {
-	client, err := NewTerraClient(Config{
+	client, err := NewTerraClient(Config{Instructions: "test Terra prompt",
 		APIKey: "test-key",
 		HTTPClient: testHTTPClient(func(request *http.Request) (*http.Response, error) {
 			resp := jsonResponse(http.StatusOK, "   ")
@@ -552,7 +566,7 @@ func TestEmptyAndInvalidBodies(t *testing.T) {
 		t.Fatalf("empty body error = %v", err)
 	}
 
-	client, err = NewTerraClient(Config{
+	client, err = NewTerraClient(Config{Instructions: "test Terra prompt",
 		APIKey: "test-key",
 		HTTPClient: testHTTPClient(func(request *http.Request) (*http.Response, error) {
 			resp := jsonResponse(http.StatusOK, `{"id":"resp_x","output":[{"type":"message","content":[{"type":"output_text","text":"not-json"}]}]}`)

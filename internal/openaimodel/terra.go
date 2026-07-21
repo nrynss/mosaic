@@ -3,23 +3,20 @@ package openaimodel
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"mosaic.local/mosaic/internal/ontology/gen"
 	"mosaic.local/mosaic/internal/terra"
 )
 
-const terraInstructions = `You are Terra, Mosaic's structured assessment agent.
-Given a committed COP serialization, its state revision, and permitted evidence,
-return one Insight JSON object (schema_version 1.0.0) with assertions that cite
-only the supplied evidence. You inform operators; you never issue operational
-actions or mutate the projection. Respond with a single Insight JSON object only.`
-
 // TerraClient implements terra.StructuredClient over the OpenAI Responses API.
 type TerraClient struct {
-	transport *transport
+	transport    *transport
+	instructions string
 }
 
-// NewTerraClient constructs a live Terra client. APIKey is required.
+// NewTerraClient constructs a live Terra client. APIKey and versioned prompt
+// content are required; composition loads the prompt from the asset root.
 func NewTerraClient(cfg Config) (*TerraClient, error) {
 	if cfg.Model == "" {
 		cfg.Model = DefaultTerraModel
@@ -28,7 +25,11 @@ func NewTerraClient(cfg Config) (*TerraClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &TerraClient{transport: t}, nil
+	instructions := strings.TrimSpace(cfg.Instructions)
+	if instructions == "" {
+		return nil, fmt.Errorf("terra instructions are required")
+	}
+	return &TerraClient{transport: t, instructions: instructions}, nil
 }
 
 // Assess performs one Responses API call and maps structured Insight JSON or refusal.
@@ -47,7 +48,7 @@ func (c *TerraClient) Assess(ctx context.Context, request terra.Request) (terra.
 	}
 
 	result, err := c.transport.call(ctx, structuredCall{
-		Instructions: terraInstructions,
+		Instructions: c.instructions,
 		SchemaName:   "insight",
 		UserInput:    input,
 	})

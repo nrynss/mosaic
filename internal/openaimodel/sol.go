@@ -4,24 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"mosaic.local/mosaic/internal/ontology/gen"
 	"mosaic.local/mosaic/internal/sol"
 )
 
-const solInstructions = `You are Sol, Mosaic's structured briefing agent.
-Given a committed COP serialization, its state revision, active Insights,
-permitted evidence, and the fixed requester identity, return one Recommendation
-JSON object (schema_version 1.0.0). You inform operators only on explicit request;
-you never issue operational actions or mutate the projection. Respond with a
-single Recommendation JSON object only.`
-
 // SolClient implements sol.StructuredClient over the OpenAI Responses API.
 type SolClient struct {
-	transport *transport
+	transport    *transport
+	instructions string
 }
 
-// NewSolClient constructs a live Sol client. APIKey is required.
+// NewSolClient constructs a live Sol client. APIKey and versioned prompt
+// content are required; composition loads the prompt from the asset root.
 func NewSolClient(cfg Config) (*SolClient, error) {
 	if cfg.Model == "" {
 		cfg.Model = DefaultSolModel
@@ -30,7 +26,11 @@ func NewSolClient(cfg Config) (*SolClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &SolClient{transport: t}, nil
+	instructions := strings.TrimSpace(cfg.Instructions)
+	if instructions == "" {
+		return nil, fmt.Errorf("sol instructions are required")
+	}
+	return &SolClient{transport: t, instructions: instructions}, nil
 }
 
 // Brief performs one Responses API call and maps structured Recommendation JSON or refusal.
@@ -51,7 +51,7 @@ func (c *SolClient) Brief(ctx context.Context, request sol.Request) (sol.Respons
 	}
 
 	result, err := c.transport.call(ctx, structuredCall{
-		Instructions: solInstructions,
+		Instructions: c.instructions,
 		SchemaName:   "recommendation",
 		UserInput:    input,
 	})

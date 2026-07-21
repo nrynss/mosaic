@@ -2,7 +2,11 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"mosaic.local/mosaic/internal/contracts"
@@ -11,6 +15,42 @@ import (
 	"mosaic.local/mosaic/internal/store"
 )
 
+func TestLoadVersionedPromptUsesArtifactContentAndHash(t *testing.T) {
+	root := repositoryRoot(t)
+	prompt, err := loadVersionedPrompt(root, openaimodel.AgentTerra, "v1.0.0")
+	if err != nil {
+		t.Fatalf("load prompt: %v", err)
+	}
+	contents, err := os.ReadFile(filepath.Join(root, "prompts", "terra", "v1.0.0.md"))
+	if err != nil {
+		t.Fatalf("read prompt fixture: %v", err)
+	}
+	if prompt.Instructions != strings.TrimSpace(string(contents)) {
+		t.Fatal("loaded instructions do not match the versioned prompt artifact")
+	}
+	sum := sha256.Sum256(contents)
+	want := "v1.0.0+sha256:" + hex.EncodeToString(sum[:])
+	if prompt.Provenance != want {
+		t.Fatalf("prompt provenance = %q, want %q", prompt.Provenance, want)
+	}
+}
+
+func TestLoadVersionedPromptRejectsMissingAndEmptyArtifacts(t *testing.T) {
+	root := t.TempDir()
+	if _, err := loadVersionedPrompt(root, openaimodel.AgentTerra, "v1.0.0"); err == nil {
+		t.Fatal("missing prompt did not fail")
+	}
+	path := filepath.Join(root, "prompts", "terra")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("make prompt directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "v1.0.0.md"), []byte(" \n\t "), 0o600); err != nil {
+		t.Fatalf("write empty prompt: %v", err)
+	}
+	if _, err := loadVersionedPrompt(root, openaimodel.AgentTerra, "v1.0.0"); err == nil || !strings.Contains(err.Error(), "empty") {
+		t.Fatalf("empty prompt error = %v", err)
+	}
+}
 func TestEffectiveSelectionRequiresKeyForLive(t *testing.T) {
 	requested := contracts.AgentProviderSelection{
 		openaimodel.AgentLuna:  contracts.ProviderLive,
@@ -101,6 +141,25 @@ func TestComposeModelsFixturePath(t *testing.T) {
 	}
 }
 
+func TestComposeModelsLiveTerraRequiresVersionedPrompt(t *testing.T) {
+	ctx := context.Background()
+	root := repositoryRoot(t)
+	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "models-live-missing-prompt.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	_, err = composeModels(ctx, database, t.TempDir(),
+		filepath.Join(root, "datasets", simulator.DomesticDisturbance),
+		filepath.Join(root, "ontology"),
+		"supervisor-demo",
+		modelEnv{APIKey: "test-key", Terra: contracts.ProviderLive},
+	)
+	if err == nil || !strings.Contains(err.Error(), "load live Terra prompt") {
+		t.Fatalf("compose live Terra without prompt error = %v", err)
+	}
+}
 func TestComposeModelsLiveSelectionWithKey(t *testing.T) {
 	ctx := context.Background()
 	root := repositoryRoot(t)

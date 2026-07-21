@@ -2,8 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -83,6 +87,30 @@ type modelBundle struct {
 	BriefingRequester string
 }
 
+const fixtureInteractivePromptVersion = "mosaic-fixture-interactive-v1"
+
+type versionedPrompt struct {
+	Instructions string
+	Provenance   string
+}
+
+func loadVersionedPrompt(assetRoot, agent, version string) (versionedPrompt, error) {
+	path := filepath.Join(assetRoot, "prompts", agent, version+".md")
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return versionedPrompt{}, fmt.Errorf("read %s prompt: %w", agent, err)
+	}
+	instructions := strings.TrimSpace(string(contents))
+	if instructions == "" {
+		return versionedPrompt{}, fmt.Errorf("%s prompt %q is empty", agent, path)
+	}
+	sum := sha256.Sum256(contents)
+	return versionedPrompt{
+		Instructions: instructions,
+		Provenance:   version + "+sha256:" + hex.EncodeToString(sum[:]),
+	}, nil
+}
+
 // composeModels wires fixture/live structured clients behind Terra/Sol services
 // and a Luna adapter. Live OpenAI clients are constructed only when the
 // effective selection is live (explicit + key). The key is never logged.
@@ -118,10 +146,13 @@ func composeModels(
 	var liveLuna openaimodel.LunaStructuredClient
 	var liveTerra terra.StructuredClient
 	var liveSol sol.StructuredClient
+	var terraPrompt, solPrompt versionedPrompt
 	if effective[openaimodel.AgentLuna] == contracts.ProviderLive ||
 		effective[openaimodel.AgentTerra] == contracts.ProviderLive ||
 		effective[openaimodel.AgentSol] == contracts.ProviderLive {
-		// Construct only the live clients that are actually selected.
+		// Construct only the live clients that are actually selected. Terra and
+		// Sol prompts are immutable assets, loaded only for a live invocation;
+		// fixture mode remains prompt-independent.
 		base := openaimodel.Config{APIKey: env.APIKey}
 		if effective[openaimodel.AgentLuna] == contracts.ProviderLive {
 			client, err := openaimodel.NewLunaClient(base)
@@ -131,14 +162,28 @@ func composeModels(
 			liveLuna = client
 		}
 		if effective[openaimodel.AgentTerra] == contracts.ProviderLive {
-			client, err := openaimodel.NewTerraClient(base)
+			terraPrompt, err = loadVersionedPrompt(assetRoot, openaimodel.AgentTerra, "v1.0.0")
+			if err != nil {
+				return modelBundle{}, fmt.Errorf("load live Terra prompt: %w", err)
+			}
+			client, err := openaimodel.NewTerraClient(openaimodel.Config{
+				APIKey:       base.APIKey,
+				Instructions: terraPrompt.Instructions,
+			})
 			if err != nil {
 				return modelBundle{}, fmt.Errorf("compose live Terra client: %w", err)
 			}
 			liveTerra = client
 		}
 		if effective[openaimodel.AgentSol] == contracts.ProviderLive {
-			client, err := openaimodel.NewSolClient(base)
+			solPrompt, err = loadVersionedPrompt(assetRoot, openaimodel.AgentSol, "v1.0.0")
+			if err != nil {
+				return modelBundle{}, fmt.Errorf("load live Sol prompt: %w", err)
+			}
+			client, err := openaimodel.NewSolClient(openaimodel.Config{
+				APIKey:       base.APIKey,
+				Instructions: solPrompt.Instructions,
+			})
 			if err != nil {
 				return modelBundle{}, fmt.Errorf("compose live Sol client: %w", err)
 			}
@@ -185,13 +230,21 @@ func composeModels(
 
 	terraProvider, terraModel := providerLabels(effective[openaimodel.AgentTerra])
 	solProvider, solModel := providerLabels(effective[openaimodel.AgentSol])
+	terraPromptVersion := fixtureInteractivePromptVersion
+	if effective[openaimodel.AgentTerra] == contracts.ProviderLive {
+		terraPromptVersion = terraPrompt.Provenance
+	}
+	solPromptVersion := fixtureInteractivePromptVersion
+	if effective[openaimodel.AgentSol] == contracts.ProviderLive {
+		solPromptVersion = solPrompt.Provenance
+	}
 
 	terraService, err := terra.New(terra.Config{
 		Client:           selected.Terra,
 		EvidenceResolver: permissiveEvidence{},
 		Records:          database,
 		Validator:        terraValidator,
-		PromptVersion:    "mosaicdemo-interactive-v1",
+		PromptVersion:    terraPromptVersion,
 		Provider:         terraProvider,
 		Model:            terraModel,
 		ExistingInsights: history.Insights,
@@ -210,15 +263,13 @@ func composeModels(
 		Resolver:          permissiveEvidence{},
 		Records:           database,
 		Validator:         solValidator,
-		PromptVersion:     "mosaicdemo-interactive-v1",
+		PromptVersion:     solPromptVersion,
 		Provider:          solProvider,
 		Model:             solModel,
 	})
 	if err != nil {
 		return modelBundle{}, fmt.Errorf("compose Sol service: %w", err)
 	}
-
-	_ = assetRoot // reserved for future profile-relative prompt assets
 
 	return modelBundle{
 		Luna:              luna,
