@@ -19,6 +19,11 @@ COPY internal/ ./internal/
 COPY migrations/ ./migrations/
 COPY ontology/ ./ontology/
 COPY datasets/domestic-disturbance/ ./datasets/domestic-disturbance/
+# Versioned Luna/Terra/Sol prompt artifacts (H1) — required at compose when
+# providers are live; also used for honest PromptVersion provenance hashing.
+COPY prompts/luna/ ./prompts/luna/
+COPY prompts/terra/ ./prompts/terra/
+COPY prompts/sol/ ./prompts/sol/
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/mosaicdemo ./cmd/mosaicdemo
 
 FROM gcr.io/distroless/base-debian12:nonroot
@@ -27,6 +32,7 @@ WORKDIR /srv/mosaic
 COPY --from=runtime-build --chown=nonroot:nonroot /out/mosaicdemo /usr/local/bin/mosaicdemo
 COPY --from=runtime-build --chown=nonroot:nonroot /src/ontology ./ontology
 COPY --from=runtime-build --chown=nonroot:nonroot /src/datasets/domestic-disturbance ./datasets/domestic-disturbance
+COPY --from=runtime-build --chown=nonroot:nonroot /src/prompts ./prompts
 COPY --from=dashboard-build --chown=nonroot:nonroot /src/ui/dist ./ui
 
 # Do not set MOSAIC_LISTEN_ADDR here. Leaving it empty preserves the process
