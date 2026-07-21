@@ -369,7 +369,7 @@ Dependencies noted. Workstreams A→B are the foundation; C rides on them.
 ### Workstream B — Postgres backbone
 | ID | Task | Size | Deps | Claim | Status |
 |----|------|------|------|-------|--------|
-| B1 | `pgstore` implementing existing repository contracts; port schema + migrations; Postgres tx semantics (drop single-conn assumptions) | **L** | — | Opus agent (worktree) | In progress |
+| B1 | `pgstore` implementing existing repository contracts; port schema + migrations; Postgres tx semantics (drop single-conn assumptions) | **L** | — | Opus agent | Done (`internal/pgstore`, 1f4937f) |
 | B2 | `EventLog.Append` on Postgres (INSERT + idempotency unique constraint) | **M** | A1, B1 | — | Todo |
 | B3 | `EventConsumer` via `SKIP LOCKED`, per-partition ordered, checkpointed; atomic project+position; multi-worker | **L** | A2, B2 | — | Todo |
 | B4 | `EventBus` via `LISTEN/NOTIFY`; replace in-process broker behind the interface | **M** | A1, B1 | — | Todo |
