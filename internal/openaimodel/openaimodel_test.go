@@ -384,11 +384,11 @@ func TestStrictSchemaTransformsOptionalFieldsWithoutChangingAuthoredSchema(t *te
 }
 
 func TestWithoutNullObjectProperties(t *testing.T) {
-	got, err := withoutNullObjectProperties(json.RawMessage(`{"optional":null,"nested":{"remove":null,"keep":"value"},"rows":[{"remove":null,"keep":1}]}`))
+	got, err := withoutNullObjectProperties(json.RawMessage(`{"optional":null,"nested":{"remove":null,"keep":"value"},"rows":[{"remove":null,"original":null,"keep":1}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"nested":{"keep":"value"},"rows":[{"keep":1}]}`
+	want := `{"nested":{"keep":"value"},"rows":[{"keep":1,"original":null}]}`
 	if string(got) != want {
 		t.Fatalf("normalized output = %s, want %s", got, want)
 	}
