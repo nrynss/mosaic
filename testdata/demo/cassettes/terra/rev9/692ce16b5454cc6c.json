@@ -6,13 +6,13 @@
   "request_fingerprint": "692ce16b5454cc6c948fb7d14f72b9328231d4c3c4e938ea4c10bde2f707f96e",
   "prompt_version": "v1.0.0",
   "prompt_hash": "da9e7449a49dc6dc4b4bcde844989ee93ba1b67bd1196a3c8b30685b7635a7cc",
-  "response_id": "resp_015550a837866b7e016a5f5463c00c8192b142c30620cc4c00",
+  "response_id": "resp_03e9ab1e2f70de3b016a5f5b862e5881a1ba51115f49a3777f",
   "insight_json": {
     "assertions": [
-      "The reported road closure may constrain access associated with the open incident, but the supplied evidence does not establish that road-main-street-bridge is a route to the incident location."
+      "The reported road closure may constrain access associated with the reported incident, although the supplied evidence does not establish that the road is a required route."
     ],
     "confidence": {
-      "basis": "The initial call and road-closure evidence support a bounded potential access concern, while the supplied facts provide no explicit route linkage between the blocked road and the incident location.",
+      "basis": "The assessment is supported by the initial-call reference and the road-closure reference, whose explanation identifies an access constraint; the evidence does not establish route necessity or operational impact.",
       "reasoning_support": "medium",
       "source_quality": "medium",
       "transformation_certainty": "high"
@@ -35,5 +35,5 @@
     "schema_version": "1.0.0",
     "state_revision": 9
   },
-  "recorded_at": "2026-07-21T11:13:53.0808608Z"
+  "recorded_at": "2026-07-21T11:44:18.4409803Z"
 }

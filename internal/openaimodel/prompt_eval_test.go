@@ -24,7 +24,7 @@ import (
 // These are intentional prompt-eval baselines. A prompt edit must update its
 // semantic fixture expectations and this hash in the same reviewed change.
 var promptEvalHashes = map[string]string{
-	AgentLuna:  "c08e5460c76db1833a5be6f23a2ac6f60915bb00e11f24ef8add7b770d1864d4",
+	AgentLuna:  "3f943e46d22b34c339ec0dc59293500b8f29eef097ec8816e05781a2f90fe3c4",
 	AgentTerra: "da9e7449a49dc6dc4b4bcde844989ee93ba1b67bd1196a3c8b30685b7635a7cc",
 	AgentSol:   "293cfa720c5885099060d3000f98eb4eb56c3a5d716432855b64769bb82fb378",
 }

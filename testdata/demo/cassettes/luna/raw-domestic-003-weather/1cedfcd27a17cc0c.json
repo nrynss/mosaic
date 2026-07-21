@@ -1,25 +1,19 @@
 {
   "schema_version": "1.0.0",
-  "key": "luna/raw-domestic-003-weather/a1797329b6d2d001",
+  "key": "luna/raw-domestic-003-weather/1cedfcd27a17cc0c",
   "agent": "luna",
   "state_revision": 0,
-  "request_fingerprint": "a1797329b6d2d0012ce036c08632b6222ba1dcfa374c98fc0397efd741314326",
+  "request_fingerprint": "1cedfcd27a17cc0c016d613e2d76fbe5e9a0fbf5d9f0e65911e225c62e409d85",
   "prompt_version": "v1.0.0",
-  "prompt_hash": "c08e5460c76db1833a5be6f23a2ac6f60915bb00e11f24ef8add7b770d1864d4",
-  "response_id": "resp_05f06e5ff59678c7016a5f54001f68819caab560fd7bec0e61",
+  "prompt_hash": "3f943e46d22b34c339ec0dc59293500b8f29eef097ec8816e05781a2f90fe3c4",
+  "response_id": "resp_0e27105306f94e9b016a5f5b37aed881a196cf3b6f6b548ae1",
   "result_json": {
     "canonical_event_id": "canonical-live-raw-domestic-003-weather",
     "created_at": "2026-07-18T10:01:10Z",
     "evidence": [
       {
-        "explanation": "The base64-encoded text payload decodes to a weather-service report of a heavy rain advisory in the Cedar district.",
-        "json_pointer": "/payload_bytes_b64",
-        "target_id": "raw-domestic-003-weather",
-        "target_kind": "raw_event"
-      },
-      {
-        "explanation": "The source record identifier directly supports the canonical weather alert identifier.",
-        "json_pointer": "/source/source_record_id",
+        "explanation": "Structured attributes directly provide the weather alert event type, identifier, active status, high severity, and advisory summary.",
+        "json_pointer": "/attributes",
         "target_id": "raw-domestic-003-weather",
         "target_kind": "raw_event"
       }
@@ -31,25 +25,26 @@
   },
   "canonical_event_json": {
     "canonical_event_id": "canonical-live-raw-domestic-003-weather",
-    "canonical_seq": 555,
+    "canonical_seq": 124,
     "confidence": {
-      "basis": "The decoded source payload directly reports a heavy rain advisory; the source record ID directly supports the weather alert identifier.",
+      "basis": "Authoritative structured attributes directly supply the event type, weather alert identifier, active status, severity, and summary.",
       "reasoning_support": "high",
       "source_quality": "high",
       "transformation_certainty": "high"
     },
     "entity_refs": [
       {
-        "id": "weather-003",
+        "id": "weather-heavy-rain-001",
         "kind": "weather_alert"
       }
     ],
     "event_type": "weather_alert_issued",
     "occurred_at": "2026-07-18T10:01:00Z",
     "payload": {
+      "severity": "high",
       "status": "active",
-      "summary": "Weather service reports heavy rain advisory in the Cedar district.",
-      "weather_alert_id": "weather-003"
+      "summary": "Heavy rain advisory in the Cedar district.",
+      "weather_alert_id": "weather-heavy-rain-001"
     },
     "provenance": {
       "model_run_id": "modelrun-live-luna-raw-domestic-003-weather",
@@ -60,5 +55,5 @@
     "received_at": "2026-07-18T10:01:10Z",
     "schema_version": "1.0.0"
   },
-  "recorded_at": "2026-07-21T11:12:15.0346829Z"
+  "recorded_at": "2026-07-21T11:42:57.7332225Z"
 }

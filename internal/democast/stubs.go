@@ -109,14 +109,10 @@ func (c EchoSol) Brief(_ context.Context, req sol.Request) (sol.Response, error)
 type StubLuna struct{}
 
 // stubLunaQuarantineIDs matches the live OpenAI bank (see demo cassette runbook).
-// Keys only matter for offline content; request-derived cassette keys are
-// independent of status.
+// Only the intentionally bare invalid-input beat stays quarantined after
+// attribute enrichment; request-derived cassette keys are independent of status.
 var stubLunaQuarantineIDs = map[string]string{
-	"raw-domestic-001-call":            "Offline stub: live bank quarantined 911 envelope.",
-	"raw-domestic-002-welfare":         "Offline stub: live bank quarantined welfare-check envelope.",
-	"raw-domestic-006-officer-update":  "Offline stub: live bank quarantined officer-update envelope.",
-	"raw-domestic-007-incomplete-road": "Offline stub: live bank quarantined incomplete-road envelope.",
-	"raw-domestic-008-invalid-input":   "Offline stub: intentionally malformed input fixture.",
+	"raw-domestic-008-invalid-input": "Offline stub: intentionally malformed input fixture.",
 }
 
 // Normalize implements openaimodel.LunaStructuredClient.

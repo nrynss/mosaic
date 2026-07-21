@@ -1,25 +1,19 @@
 {
   "schema_version": "1.0.0",
-  "key": "luna/raw-domestic-009-late-ems/f7bfd15b094d6218",
+  "key": "luna/raw-domestic-009-late-ems/ed1389d5314fc711",
   "agent": "luna",
   "state_revision": 0,
-  "request_fingerprint": "f7bfd15b094d62182d495d0ba4915fb8b81646a93c09f82036ee3577f3df4813",
+  "request_fingerprint": "ed1389d5314fc71108348eb56ed8ee499ac48ffb940db5b27eaeb11f2a4d35ed",
   "prompt_version": "v1.0.0",
-  "prompt_hash": "c08e5460c76db1833a5be6f23a2ac6f60915bb00e11f24ef8add7b770d1864d4",
-  "response_id": "resp_028b6cefdc89d025016a5f54440ce88191b9265e2daab88a75",
+  "prompt_hash": "3f943e46d22b34c339ec0dc59293500b8f29eef097ec8816e05781a2f90fe3c4",
+  "response_id": "resp_0a07a6124ac57107016a5f5b6f48b4819eaa74cc5b1c94af0b",
   "result_json": {
     "canonical_event_id": "canonical-live-raw-domestic-009-late-ems",
     "created_at": "2026-07-18T10:09:00Z",
     "evidence": [
       {
-        "explanation": "The base64 payload decodes to: \"EMS-4 became unavailable at 10:02 due to another assignment.\"",
-        "json_pointer": "/payload_bytes_b64",
-        "target_id": "raw-domestic-009-late-ems",
-        "target_kind": "raw_event"
-      },
-      {
-        "explanation": "The envelope directly supplies the precise source occurrence timestamp used for the canonical event.",
-        "json_pointer": "/source_occurred_at",
+        "explanation": "Structured attributes identify a resource status change for resource-ems-004, set availability to unavailable, and directly associate incident-domestic-001.",
+        "json_pointer": "/attributes",
         "target_id": "raw-domestic-009-late-ems",
         "target_kind": "raw_event"
       }
@@ -31,24 +25,32 @@
   },
   "canonical_event_json": {
     "canonical_event_id": "canonical-live-raw-domestic-009-late-ems",
-    "canonical_seq": 36,
+    "canonical_seq": 1,
     "confidence": {
-      "basis": "The decoded source payload directly identifies EMS-4 and states that it became unavailable; the envelope supplies the occurrence and receipt timestamps.",
+      "basis": "Structured intake attributes directly supply the event type, resource identifier, availability, and incident identifier; the source payload confirms the unavailable status.",
       "reasoning_support": "high",
       "source_quality": "high",
       "transformation_certainty": "high"
     },
     "entity_refs": [
       {
-        "id": "EMS-4",
-        "kind": "unit"
+        "id": "resource-ems-004",
+        "kind": "resource"
+      },
+      {
+        "id": "incident-domestic-001",
+        "kind": "incident"
       }
     ],
-    "event_type": "unit_status_changed",
+    "event_type": "resource_status_changed",
+    "incident_refs": [
+      "incident-domestic-001"
+    ],
     "occurred_at": "2026-07-18T10:02:30Z",
     "payload": {
       "availability": "unavailable",
-      "unit_id": "EMS-4"
+      "incident_id": "incident-domestic-001",
+      "resource_id": "resource-ems-004"
     },
     "provenance": {
       "model_run_id": "modelrun-live-luna-raw-domestic-009-late-ems",
@@ -59,5 +61,5 @@
     "received_at": "2026-07-18T10:09:00Z",
     "schema_version": "1.0.0"
   },
-  "recorded_at": "2026-07-21T11:13:20.2264014Z"
+  "recorded_at": "2026-07-21T11:43:55.4794787Z"
 }

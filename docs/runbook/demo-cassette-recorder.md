@@ -112,49 +112,56 @@ go test ./tests/e2e -count=1 -timeout 300s -run 'TestDemoCastReplayNoLiveE2E'
 
 Commit the updated bank (and any `expected_status` edits) only when that is green.
 
-### 2a. Live bank record (2026-07-21) — how it performed
+### 2a. Live bank record (2026-07-21, post attribute enrichment) — current
 
-First gated live pass that populated the committed bank under
-`testdata/demo/cassettes/`.
+Current committed bank under `testdata/demo/cassettes/`. Fixture raw events
+carry structured intake identifiers in `attributes` (option A enrichment from
+`expected-outcomes.json`); free-text `payload_bytes_b64` / `raw_sha256` are
+unchanged. Luna prompt clarifies that attributes are authoritative intake
+metadata to echo — not a license to fabricate missing IDs.
 
 | Metric | Result |
 |--------|--------|
 | Command | `go test ./tests/e2e -run TestDemoCastRecordLiveE2E` with `MOSAIC_RECORD_LIVE=1` |
-| Wall time | ~147s (PASS) |
+| Wall time | ~117s (PASS) |
 | Cassettes written | **12** (exactly 10 Luna + 1 Terra + 1 Sol) |
-| Request keys | Same as offline identity proof (request-derived; no key drift) |
-| Bank size | ~18 KB total FileStore JSON |
+| Request keys | Luna keys rehashed after attribute enrichment (request-derived; offline identity still matches) |
+| Bank size | ~25 KB total FileStore JSON |
 | No-live verify | `TestDemoCastReplayNoLiveE2E` PASS ×2, no `OPENAI_API_KEY`, `provider: mosaic-fixture` |
+| In-process bank replay | `TestDemoCastReplayCommittedBankNoLive` PASS |
 
-**Luna terminal status (operator envelope):**
+**Luna terminal status (banked `result_json.status` → operator `ok` when accepted):**
 
-| Beat | raw_event_id | Live status | Manifest `expected_status` |
-|------|--------------|-------------|----------------------------|
-| 1 | raw-domestic-001-call | quarantined | quarantined |
-| 2 | raw-domestic-002-welfare | quarantined | quarantined |
-| 3 | raw-domestic-003-weather | ok | ok (default) |
-| 4 | raw-domestic-004-main-road | ok | ok (default) |
-| 5 | raw-domestic-005-ems-available | ok | ok (default) |
-| 6 | raw-domestic-006-officer-update | quarantined | quarantined |
-| 7 | raw-domestic-007-incomplete-road | quarantined | quarantined |
-| 8 | raw-domestic-008-invalid-input | quarantined | quarantined |
-| 9 | raw-domestic-009-late-ems | ok | ok (default) |
-| 10 | raw-domestic-010-road-correction | ok | ok (default) |
+| Beat | raw_event_id | Live status | Manifest `expected_status` | Canonical `event_type` / notes |
+|------|--------------|-------------|----------------------------|--------------------------------|
+| 1 | raw-domestic-001-call | accepted → ok | ok (default) | `incident_reported`; IDs `incident-domestic-001`, `location-cedar-lane-014` |
+| 2 | raw-domestic-002-welfare | accepted → ok | ok (default) | `incident_reported`; same COP incident/location |
+| 3 | raw-domestic-003-weather | accepted → ok | ok (default) | `weather_alert_issued`; `weather-heavy-rain-001` |
+| 4 | raw-domestic-004-main-road | accepted → ok | ok (default) | `road_status_changed`; `road-main-street-bridge` |
+| 5 | raw-domestic-005-ems-available | accepted → ok | ok (default) | **`resource_status_changed`**; `resource-ems-004` |
+| 6 | raw-domestic-006-officer-update | accepted → ok | ok (default) | `unit_status_changed`; `unit-017` |
+| 7 | raw-domestic-007-incomplete-road | accepted → ok | ok (default) | `road_status_changed`; `road-brook-lane` (enriched so live can accept) |
+| 8 | raw-domestic-008-invalid-input | quarantined | quarantined | bare attributes; honest failure case |
+| 9 | raw-domestic-009-late-ems | accepted → ok | ok (default) | **`resource_status_changed`**; `resource-ems-004` unavailable |
+| 10 | raw-domestic-010-road-correction | accepted → ok | ok (default) | `road_status_changed`; `road-brook-lane` open |
 
 **Terra** (`terra/rev9/…`) and **Sol** (`sol/rev9/…`): both **ok**.
 
 **Notes from the run**
 
-- Luna was conservative on several “incident-shaped” beats (911 call, welfare
-  check, officer update, incomplete road) and returned `quarantined` rather than
-  `accepted`/`ok`. That is banked as-is; the manifest and offline `StubLuna`
-  quarantine set were aligned to those outcomes so CI stays strict and green.
-- Beat 8 (intentionally invalid input) quarantined as designed.
-- Weather, road closure, EMS availability, late EMS, and road correction accepted.
-- Terra analyze + Sol brief completed successfully against COP rev 9 with the
-  fixed manifest evidence / insight hydration.
+- Attribute enrichment fixed the earlier quarantine cascade: live Luna now
+  accepts beats 1–7, 9, and 10 and echoes the same COP IDs the deterministic
+  fixture pipeline uses.
+- EMS beats 5 and 9 correctly classify as `resource_status_changed` (not unit).
+- Beat 8 (intentionally malformed bare input) remains the only quarantine.
+- Offline `StubLuna` quarantine set is only `raw-domestic-008-invalid-input`.
 - Cost was on the order of ~12 structured OpenAI calls (cents). No secrets or
   API keys were written into the bank.
+
+**Historical note:** The first live pass earlier the same day (bare fixtures,
+~147s) banked five Luna quarantines (beats 1, 2, 6, 7, 8) because free-text
+payloads lacked intake IDs. That was correct Luna behavior; the data layer was
+the defect. This re-record supersedes that bank.
 
 ### Manual server + client (optional)
 
@@ -220,8 +227,9 @@ If the manifest changes, re-run offline identity proof, rewrite the stub bank
 - Only FileStore-keyed cassettes: `{agent}/…/{hash16}.json`
 - 12 files expected: 10× `luna/…`, 1× `terra/rev9/…`, 1× `sol/rev9/…`
 - No operator response dumps under the bank directory
-- **Current committed bank is live OpenAI content** from the 2026-07-21 pass
-  (§2a), not stubs. Offline stubs remain for the in-process identity loop only
-  (`TestDemoCastOfflineRecordReplay` / optional `MOSAIC_WRITE_DEMO_CASSETTES=1`).
+- **Current committed bank is live OpenAI content** from the 2026-07-21
+  post-enrichment re-record (§2a), not stubs. Offline stubs remain for the
+  in-process identity loop only (`TestDemoCastOfflineRecordReplay` / optional
+  `MOSAIC_WRITE_DEMO_CASSETTES=1`).
 - Do not re-run `MOSAIC_WRITE_DEMO_CASSETTES=1` against the committed path unless
   you intend to replace live content with stub JSON.

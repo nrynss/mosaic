@@ -1,0 +1,58 @@
+{
+  "schema_version": "1.0.0",
+  "key": "luna/raw-domestic-007-incomplete-road/5240853b365b46b6",
+  "agent": "luna",
+  "state_revision": 0,
+  "request_fingerprint": "5240853b365b46b664217fb7e671fd0bb5691461901b0e2305baaa947c27bcdd",
+  "prompt_version": "v1.0.0",
+  "prompt_hash": "3f943e46d22b34c339ec0dc59293500b8f29eef097ec8816e05781a2f90fe3c4",
+  "response_id": "resp_09ee41ba553eb5cb016a5f5b60c53881a2b20c9e2dbfccbd92",
+  "result_json": {
+    "canonical_event_id": "canonical-live-raw-domestic-007-incomplete-road",
+    "created_at": "2026-07-18T10:05:30Z",
+    "evidence": [
+      {
+        "explanation": "Structured intake attributes directly provide event_type road_status_changed, road_id road-brook-lane, status blocked, and the closure reason.",
+        "json_pointer": "/attributes",
+        "target_id": "raw-domestic-007-incomplete-road",
+        "target_kind": "raw_event"
+      }
+    ],
+    "luna_result_id": "luna-live-raw-domestic-007-incomplete-road",
+    "raw_event_id": "raw-domestic-007-incomplete-road",
+    "schema_version": "1.0.0",
+    "status": "accepted"
+  },
+  "canonical_event_json": {
+    "canonical_event_id": "canonical-live-raw-domestic-007-incomplete-road",
+    "canonical_seq": 2107483647,
+    "confidence": {
+      "basis": "Authoritative structured attributes directly supply the event type, road identifier, blocked status, and reason.",
+      "reasoning_support": "high",
+      "source_quality": "high",
+      "transformation_certainty": "high"
+    },
+    "entity_refs": [
+      {
+        "id": "road-brook-lane",
+        "kind": "road"
+      }
+    ],
+    "event_type": "road_status_changed",
+    "occurred_at": "2026-07-18T10:05:00Z",
+    "payload": {
+      "reason": "Closure reconstructed from frozen fixture context.",
+      "road_id": "road-brook-lane",
+      "status": "blocked"
+    },
+    "provenance": {
+      "model_run_id": "modelrun-live-luna-raw-domestic-007-incomplete-road",
+      "normalizer": "openai-luna",
+      "raw_event_id": "raw-domestic-007-incomplete-road"
+    },
+    "raw_event_id": "raw-domestic-007-incomplete-road",
+    "received_at": "2026-07-18T10:05:30Z",
+    "schema_version": "1.0.0"
+  },
+  "recorded_at": "2026-07-21T11:43:38.6445446Z"
+}

@@ -8,7 +8,14 @@
       "payload_bytes_b64": "OTExIGNhbGxlciByZXBvcnRzIGEgdmVyYmFsIGRvbWVzdGljIGRpc3R1cmJhbmNlIGF0IDE0IENlZGFyIExhbmUu",
       "raw_sha256": "bffccfdd859ea200099b2b927dc65914fe4146bc5079ff01653653d7af340802",
       "source_occurred_at": "2026-07-18T10:00:00Z", "received_at": "2026-07-18T10:00:10Z",
-      "attributes": { "story_beat": "911 call" }
+      "attributes": {
+        "story_beat": "911 call",
+        "event_type": "incident_reported",
+        "incident_id": "incident-domestic-001",
+        "category": "domestic-disturbance",
+        "location_id": "location-cedar-lane-014",
+        "summary": "Reported verbal domestic disturbance."
+      }
     },
     {
       "schema_version": "1.0.0", "raw_event_id": "raw-domestic-002-welfare",
@@ -16,7 +23,14 @@
       "payload_bytes_b64": "UHJpb3Igd2VsZmFyZSBjaGVjayBhdCAxNCBDZWRhciBMYW5lIG9jY3VycmVkIHR3byBkYXlzIGVhcmxpZXIu",
       "raw_sha256": "49860db8ddb11e2be82b0f7ccabb7604450b1aa334e4267edc4136ade71f544b",
       "source_occurred_at": "2026-07-18T10:00:30Z", "received_at": "2026-07-18T10:00:45Z",
-      "attributes": { "story_beat": "historical welfare check" }
+      "attributes": {
+        "story_beat": "historical welfare check",
+        "event_type": "incident_reported",
+        "incident_id": "incident-domestic-001",
+        "category": "domestic-disturbance",
+        "location_id": "location-cedar-lane-014",
+        "summary": "Historical welfare check associated with the location."
+      }
     },
     {
       "schema_version": "1.0.0", "raw_event_id": "raw-domestic-003-weather",
@@ -24,7 +38,14 @@
       "payload_bytes_b64": "V2VhdGhlciBzZXJ2aWNlIHJlcG9ydHMgaGVhdnkgcmFpbiBhZHZpc29yeSBpbiB0aGUgQ2VkYXIgZGlzdHJpY3Qu",
       "raw_sha256": "27aeb44b9555152a1245d46bc4dd70cd3e10ca05ce35648bd39ec0a35b8152ac",
       "source_occurred_at": "2026-07-18T10:01:00Z", "received_at": "2026-07-18T10:01:10Z",
-      "attributes": { "story_beat": "weather alert" }
+      "attributes": {
+        "story_beat": "weather alert",
+        "event_type": "weather_alert_issued",
+        "weather_alert_id": "weather-heavy-rain-001",
+        "status": "active",
+        "severity": "high",
+        "summary": "Heavy rain advisory in the Cedar district."
+      }
     },
     {
       "schema_version": "1.0.0", "raw_event_id": "raw-domestic-004-main-road",
@@ -32,7 +53,13 @@
       "payload_bytes_b64": "TWFpbiBTdHJlZXQgaXMgY2xvc2VkIGF0IHRoZSBicmlkZ2UgZHVlIHRvIGZsb29kaW5nLg==",
       "raw_sha256": "942a1f5813a9d64c8aa8d831d47cb8aa720071bd5e9c5df01b04269ca268d23e",
       "source_occurred_at": "2026-07-18T10:02:00Z", "received_at": "2026-07-18T10:02:10Z",
-      "attributes": { "story_beat": "road closure" }
+      "attributes": {
+        "story_beat": "road closure",
+        "event_type": "road_status_changed",
+        "road_id": "road-main-street-bridge",
+        "status": "blocked",
+        "reason": "Flooding at bridge."
+      }
     },
     {
       "schema_version": "1.0.0", "raw_event_id": "raw-domestic-005-ems-available",
@@ -40,7 +67,14 @@
       "payload_bytes_b64": "RU1TLTQgaXMgYXZhaWxhYmxlIGF0IENlbnRyYWwgU3RhdGlvbi4=",
       "raw_sha256": "5e9b3480398c54a220c6dda51755a4d9b0a5a428240a522399425fc8c137ecbf",
       "source_occurred_at": "2026-07-18T10:03:00Z", "received_at": "2026-07-18T10:03:15Z",
-      "attributes": { "story_beat": "EMS availability" }
+      "attributes": {
+        "story_beat": "EMS availability",
+        "event_type": "resource_status_changed",
+        "entity_kind": "resource",
+        "resource_id": "resource-ems-004",
+        "availability": "available",
+        "incident_id": "incident-domestic-001"
+      }
     },
     {
       "schema_version": "1.0.0", "raw_event_id": "raw-domestic-006-officer-update",
@@ -48,7 +82,13 @@
       "payload_bytes_b64": "VW5pdCAxNyByZXBvcnRzIGFycml2YWwgbmVhciAxNCBDZWRhciBMYW5lLg==",
       "raw_sha256": "e3424b3f125334a3ab4785db3924c01fe40ee80ffdcde7dce8e689373f500218",
       "source_occurred_at": "2026-07-18T10:04:00Z", "received_at": "2026-07-18T10:04:10Z",
-      "attributes": { "story_beat": "officer radio update" }
+      "attributes": {
+        "story_beat": "officer radio update",
+        "event_type": "unit_status_changed",
+        "unit_id": "unit-017",
+        "availability": "assigned",
+        "incident_id": "incident-domestic-001"
+      }
     },
     {
       "schema_version": "1.0.0", "raw_event_id": "raw-domestic-007-incomplete-road",
@@ -56,7 +96,13 @@
       "payload_bytes_b64": "QnJvb2sgTGFuZSBjbG9zdXJlIHJlcG9ydGVkOyByb2FkIGlkZW50aWZpZXIgb21pdHRlZC4=",
       "raw_sha256": "e0f03c37b77965f2f447283892c18292776efd891edd8d5e0f5de54a38d530b1",
       "source_occurred_at": "2026-07-18T10:05:00Z", "received_at": "2026-07-18T10:05:30Z",
-      "attributes": { "fixture": "incomplete road data" }
+      "attributes": {
+        "fixture": "incomplete road data",
+        "event_type": "road_status_changed",
+        "road_id": "road-brook-lane",
+        "status": "blocked",
+        "reason": "Closure reconstructed from frozen fixture context."
+      }
     },
     {
       "schema_version": "1.0.0", "raw_event_id": "raw-domestic-008-invalid-input",
@@ -72,7 +118,14 @@
       "payload_bytes_b64": "RU1TLTQgYmVjYW1lIHVuYXZhaWxhYmxlIGF0IDEwOjAyIGR1ZSB0byBhbm90aGVyIGFzc2lnbm1lbnQu",
       "raw_sha256": "c608cefa65e9300e3a5275ccff91aad423c524408b0d6489bd92b675deb3a012",
       "source_occurred_at": "2026-07-18T10:02:30Z", "received_at": "2026-07-18T10:09:00Z",
-      "attributes": { "fixture": "late delivery" }
+      "attributes": {
+        "fixture": "late delivery",
+        "event_type": "resource_status_changed",
+        "entity_kind": "resource",
+        "resource_id": "resource-ems-004",
+        "availability": "unavailable",
+        "incident_id": "incident-domestic-001"
+      }
     },
     {
       "schema_version": "1.0.0", "raw_event_id": "raw-domestic-010-road-correction",
@@ -80,7 +133,13 @@
       "payload_bytes_b64": "QnJvb2sgTGFuZSBoYXMgcmVvcGVuZWQgYWZ0ZXIgZGVicmlzIHJlbW92YWwu",
       "raw_sha256": "5d369cd3ae11937bf6766779a49f16ea2602e9fdce032e3070fee5d544c003d3",
       "source_occurred_at": "2026-07-18T10:10:00Z", "received_at": "2026-07-18T10:10:10Z",
-      "attributes": { "fixture": "superseding road correction" }
+      "attributes": {
+        "fixture": "superseding road correction",
+        "event_type": "road_status_changed",
+        "road_id": "road-brook-lane",
+        "status": "open",
+        "reason": "Debris removed."
+      }
     }
   ]
 }

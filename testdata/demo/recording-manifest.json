@@ -7,14 +7,12 @@
     {
       "kind": "luna",
       "beat_id": "baseline-01-911-call",
-      "raw_event_ref": "raw-domestic-001-call",
-      "expected_status": "quarantined"
+      "raw_event_ref": "raw-domestic-001-call"
     },
     {
       "kind": "luna",
       "beat_id": "baseline-02-welfare-check",
-      "raw_event_ref": "raw-domestic-002-welfare",
-      "expected_status": "quarantined"
+      "raw_event_ref": "raw-domestic-002-welfare"
     },
     {
       "kind": "luna",
@@ -34,14 +32,12 @@
     {
       "kind": "luna",
       "beat_id": "baseline-06-officer-update",
-      "raw_event_ref": "raw-domestic-006-officer-update",
-      "expected_status": "quarantined"
+      "raw_event_ref": "raw-domestic-006-officer-update"
     },
     {
       "kind": "luna",
       "beat_id": "fixture-07-repaired-incomplete-road",
-      "raw_event_ref": "raw-domestic-007-incomplete-road",
-      "expected_status": "quarantined"
+      "raw_event_ref": "raw-domestic-007-incomplete-road"
     },
     {
       "kind": "luna",
