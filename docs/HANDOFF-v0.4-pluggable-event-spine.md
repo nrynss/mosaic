@@ -393,25 +393,25 @@ Dependencies noted. Workstreams A→B are the foundation; C rides on them.
 ### Workstream A — Event spine (foundation)
 | ID | Task | Size | Deps | Claim | Status |
 |----|------|------|------|-------|--------|
-| A1 | Define `EventLog` / `EventConsumer` / `EventBus`, envelope, position; document the delivery contract | **M** | — | Opus agent | Done (`internal/eventlog`, 8a4ca53) |
-| A2 | Partition-key model: `partition_key` column, monotonic sequence, consumer checkpoint/cursor table | **M** | A1 | a2-partition-model | Done (`internal/pgstore` 0002 + tokens) |
+| A1 | Define `EventLog` / `EventConsumer` / `EventBus`, envelope, position; document the delivery contract | **M** | — | Opus agent | Done (`internal/eventlog`, 8a4ca53); harden(A) `1c559ef` |
+| A2 | Partition-key model: `partition_key` column, monotonic sequence, consumer checkpoint/cursor table | **M** | A1 | a2-partition-model | Done (`internal/pgstore` 0002 + tokens); harden(A) docs |
 
 ### Workstream B — Postgres backbone
 | ID | Task | Size | Deps | Claim | Status |
 |----|------|------|------|-------|--------|
-| B1 | `pgstore` implementing existing repository contracts; port schema + migrations; Postgres tx semantics (drop single-conn assumptions) | **L** | — | Opus agent | Done (`internal/pgstore`, 1f4937f) |
-| B2 | `EventLog.Append` on Postgres (INSERT + idempotency unique constraint) | **M** | A1, B1 | b2-pg-eventlog-append | Done (`pgstore.Store.Append`) |
-| B3 | `EventConsumer` via `SKIP LOCKED`, per-partition ordered, checkpointed; atomic project+position; multi-worker | **L** | A2, B2 | b3-pg-event-consumer | Done (`pgstore.EventConsumer`, advisory locks) |
-| B4 | `EventBus` via `LISTEN/NOTIFY`; replace in-process broker behind the interface | **M** | A1, B1 | b4-pg-event-bus | Done (`pgstore.EventBus` LISTEN/NOTIFY) |
-| B5 | Materialized COP read-model table maintained by projector; `GET /cop` reads it | **M** | B3 | b5-materialized-cop | Done (`cop_read_model` + PreferMaterializedRecovery) |
+| B1 | `pgstore` implementing existing repository contracts; port schema + migrations; Postgres tx semantics (drop single-conn assumptions) | **L** | — | Opus agent | Done (`internal/pgstore`, 1f4937f); harden(B) ownsPool + migrate lock |
+| B2 | `EventLog.Append` on Postgres (INSERT + idempotency unique constraint) | **M** | A1, B1 | b2-pg-eventlog-append | Done (`pgstore.Store.Append`); harden(B) constraint-scoped 23505 |
+| B3 | `EventConsumer` via per-partition advisory locks (ordered, checkpointed; atomic project+position; multi-worker) | **L** | A2, B2 | b3-pg-event-consumer | Done (`pgstore.EventConsumer`); harden(B) 40001 redelivery |
+| B4 | `EventBus` via `LISTEN/NOTIFY`; replace in-process broker behind the interface | **M** | A1, B1 | b4-pg-event-bus | Done (`pgstore.EventBus`); harden(B) reconnect |
+| B5 | Materialized COP read-model table maintained by projector; `GET /cop` reads it | **M** | B3 | b5-materialized-cop | Done (`cop_read_model`); harden(B) revision CAS |
 
 ### Workstream C — Simulation isolation & modes
 | ID | Task | Size | Deps | Claim | Status |
 |----|------|------|------|-------|--------|
-| C1 | Extract simulation into its own package/module; enforce dependency direction | **M** | — | c1-sim-extract | Done |
-| C2 | `BeatExecutor` — per-beat real `Append`; cumulative pacing + `MOSAIC_SIM_BEAT_SPACING`; optional burst mode | **M** | B2, C1 | c2-beat-executor | Done (`simulation.BeatExecutor` + equal spacing) |
-| C3 | Session isolation — `session_id` epoch; scoped recovery/COP/advisories; active-session indirection in API | **L** | B1, B5 | c3-session-epoch | Done (`ActiveSession` + session-scoped COP keys) |
-| C4 | Cassette — record/replay decorator around Terra/Sol `StructuredClient`; recording persistence keyed by beat/revision | **L** | C1 | c4-cassette | Done (`internal/simulation/cassette`) |
+| C1 | Extract simulation into its own package/module; enforce dependency direction | **M** | — | c1-sim-extract | Done; harden(C) |
+| C2 | `BeatExecutor` — per-beat real `Append`; equal spacing + min inter-beat after slow OnBeat; optional burst | **M** | B2, C1 | c2-beat-executor | Done; harden(C) shared envelope + spacing |
+| C3 | Session isolation — `session_id` epoch; progressive session COP (incl. second Play); scoped advisories | **L** | B1, B5 | c3-session-epoch | Done; harden(C) progressive second-Play |
+| C4 | Cassette — record/replay decorator around Terra/Sol `StructuredClient`; recording persistence keyed by beat/revision | **L** | C1 | c4-cassette | Done; harden(C) FileStore Get lock |
 | C5 | Three-mode wiring (Live / Replay / Fixture) + config + provider selection | **M** | C4 | c5-three-mode-wiring | Done (`MOSAIC_SIM_MODE` + cassette wrap) |
 
 ### Workstream D — UI
