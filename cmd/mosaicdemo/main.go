@@ -282,7 +282,13 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 		_ = closeDatabase()
 		return nil, fmt.Errorf("domain profile %q does not expose a simulation beat schedule", selected.ID())
 	}
-	simController, err := session.New(session.Config{Schedule: schedule})
+	// Active session holder tracks Start/Reset/End for C3. Read ports do not
+	// yet scope on ActiveSessionSource here: PreferMaterializedRecovery stays
+	// legacy (fallback) so the bulk-seeded COP remains visible until progressive
+	// BeatExecutor composition lands. Composition for empty-until-Play sets
+	// api.Config.ActiveSession and SessionScopedCOP in a later wiring pass.
+	activeSession := session.NewActiveSession()
+	simController, err := session.New(session.Config{Schedule: schedule, Active: activeSession})
 	if err != nil {
 		_ = closeDatabase()
 		return nil, fmt.Errorf("compose simulation controller: %w", err)

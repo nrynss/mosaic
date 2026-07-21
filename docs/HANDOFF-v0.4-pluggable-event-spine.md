@@ -380,8 +380,8 @@ Dependencies noted. Workstreams A→B are the foundation; C rides on them.
 |----|------|------|------|-------|--------|
 | C1 | Extract simulation into its own package/module; enforce dependency direction | **M** | — | c1-sim-extract | Done |
 | C2 | `BeatExecutor` — per-beat real `Append`; cumulative pacing + `MOSAIC_SIM_BEAT_SPACING`; optional burst mode | **M** | B2, C1 | c2-beat-executor | Done (`simulation.BeatExecutor` + equal spacing) |
-| C3 | Session isolation — `session_id` epoch; scoped recovery/COP/advisories; active-session indirection in API | **L** | B1, B5 | c3-session-epoch | In progress |
-| C4 | Cassette — record/replay decorator around Terra/Sol `StructuredClient`; recording persistence keyed by beat/revision | **L** | C1 | c4-cassette | In progress |
+| C3 | Session isolation — `session_id` epoch; scoped recovery/COP/advisories; active-session indirection in API | **L** | B1, B5 | c3-session-epoch | Done (`ActiveSession` + session-scoped COP keys) |
+| C4 | Cassette — record/replay decorator around Terra/Sol `StructuredClient`; recording persistence keyed by beat/revision | **L** | C1 | c4-cassette | Done (`internal/simulation/cassette`) |
 | C5 | Three-mode wiring (Live / Replay / Fixture) + config + provider selection | **M** | C4 | — | Todo |
 
 ### Workstream D — UI
@@ -393,9 +393,9 @@ Dependencies noted. Workstreams A→B are the foundation; C rides on them.
 ### Workstream E — Ops & pluggability proof
 | ID | Task | Size | Deps | Claim | Status |
 |----|------|------|------|-------|--------|
-| E1 | `docker-compose` = **two services** (stateless app + Postgres), the decided topology; app stays stateless. Single-container appliance is out of scope for v0.4 | **M** | B1 | e1-e3-fix | In progress (fix split-brain + Dockerfile) |
-| E2 | Interface **conformance test suite** (validates Postgres now; same suite validates a future Kafka/Redpanda impl) | **M** | A1 | e1-e3-fix | In progress (EventBus + multi-worker) |
-| E3 | Kafka/Redpanda introduction guide (implement the seams; wiring swap; Postgres stays read model) | **S** | A1 | e1-e3-fix | In progress (rewrite vs A1) |
+| E1 | `docker-compose` = **two services** (stateless app + Postgres), the decided topology; app stays stateless. Single-container appliance is out of scope for v0.4 | **M** | B1 | e1-e3-fix | Done (single durable store; Dockerfile stateless) |
+| E2 | Interface **conformance test suite** (validates Postgres now; same suite validates a future Kafka/Redpanda impl) | **M** | A1 | e1-e3-fix | Done (Log+Consumer+Bus+multi-worker) |
+| E3 | Kafka/Redpanda introduction guide (implement the seams; wiring swap; Postgres stays read model) | **S** | A1 | e1-e3-fix | Done (rewritten vs A1) |
 
 ### Workstream F — Tests & docs
 | ID | Task | Size | Deps | Claim | Status |
