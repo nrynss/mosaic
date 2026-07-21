@@ -236,6 +236,11 @@ func removeNullObjectProperties(value any) bool {
 	case map[string]any:
 		for key, child := range node {
 			if child == nil {
+				// Luna repair.fields[].original is required by the authored schema
+				// and may intentionally record a missing source value as null.
+				if key == "original" {
+					continue
+				}
 				delete(node, key)
 				changed = true
 				continue
