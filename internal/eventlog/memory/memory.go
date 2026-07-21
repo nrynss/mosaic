@@ -11,7 +11,6 @@ package memory
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +21,7 @@ import (
 var _ eventlog.EventLog = (*Log)(nil)
 
 // Log is a thread-safe, idempotent in-memory EventLog.
+// IdempotencyKey is global to the log (first-wins across partitions).
 type Log struct {
 	mu     sync.Mutex
 	seen   map[string]struct{}
@@ -37,7 +37,9 @@ func New() *Log {
 	}
 }
 
-// Append records e. Re-appending the same IdempotencyKey is a successful no-op.
+// Append records e. Re-appending the same IdempotencyKey is a successful no-op
+// (first-wins payload/type; key scope is global). Identity fields are validated
+// via [eventlog.ValidateEnvelope].
 func (l *Log) Append(ctx context.Context, e eventlog.EventEnvelope) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -45,19 +47,11 @@ func (l *Log) Append(ctx context.Context, e eventlog.EventEnvelope) error {
 	if l == nil {
 		return fmt.Errorf("memory event log is nil")
 	}
-	pk := strings.TrimSpace(e.PartitionKey)
-	ik := strings.TrimSpace(e.IdempotencyKey)
-	typ := strings.TrimSpace(e.Type)
-	if pk == "" {
-		return fmt.Errorf("PartitionKey is required")
+	env, err := eventlog.ValidateEnvelope(e)
+	if err != nil {
+		return err
 	}
-	if ik == "" {
-		return fmt.Errorf("IdempotencyKey is required")
-	}
-	if typ == "" {
-		return fmt.Errorf("Type is required")
-	}
-	payload := e.Payload
+	payload := env.Payload
 	if payload == nil {
 		payload = []byte{}
 	} else {
@@ -67,21 +61,21 @@ func (l *Log) Append(ctx context.Context, e eventlog.EventEnvelope) error {
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if _, exists := l.seen[ik]; exists {
+	if _, exists := l.seen[env.IdempotencyKey]; exists {
 		return nil
 	}
-	l.seq[pk]++
-	seq := l.seq[pk]
-	token := fmt.Sprintf("%s:%d", pk, seq)
-	l.seen[ik] = struct{}{}
+	l.seq[env.PartitionKey]++
+	seq := l.seq[env.PartitionKey]
+	token := fmt.Sprintf("%s:%d", env.PartitionKey, seq)
+	l.seen[env.IdempotencyKey] = struct{}{}
 	l.events = append(l.events, eventlog.Event{
 		EventEnvelope: eventlog.EventEnvelope{
-			PartitionKey:   pk,
-			IdempotencyKey: ik,
-			Type:           typ,
+			PartitionKey:   env.PartitionKey,
+			IdempotencyKey: env.IdempotencyKey,
+			Type:           env.Type,
 			Payload:        payload,
 		},
-		Position:  eventlog.NewPosition(pk, token),
+		Position:  eventlog.NewPosition(env.PartitionKey, token),
 		Sequence:  seq,
 		Timestamp: time.Now().UTC(),
 	})
@@ -99,6 +93,7 @@ func (l *Log) Len() int {
 }
 
 // Events returns a copy of appended events in append order (tests).
+// Each event's Payload is a defensive copy so callers cannot mutate storage.
 func (l *Log) Events() []eventlog.Event {
 	if l == nil {
 		return nil
@@ -106,6 +101,12 @@ func (l *Log) Events() []eventlog.Event {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	out := make([]eventlog.Event, len(l.events))
-	copy(out, l.events)
+	for i, e := range l.events {
+		out[i] = e
+		if e.Payload != nil {
+			// append to a non-nil empty base so zero-length payloads stay non-nil.
+			out[i].Payload = append([]byte{}, e.Payload...)
+		}
+	}
 	return out
 }

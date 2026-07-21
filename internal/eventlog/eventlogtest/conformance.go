@@ -47,9 +47,15 @@ func RunConformanceTests(t *testing.T, newStore Factory, opts ...Option) {
 	t.Run("AppendAndConsume", func(t *testing.T) { testAppendAndConsume(t, newStore) })
 	t.Run("Idempotency", func(t *testing.T) { testIdempotency(t, newStore) })
 	t.Run("IdempotentFirstWinsPayload", func(t *testing.T) { testIdempotentFirstWinsPayload(t, newStore) })
+	t.Run("IdempotencyGlobalAcrossPartitions", func(t *testing.T) { testIdempotencyGlobalAcrossPartitions(t, newStore) })
+	t.Run("RejectEmptyIdentityFields", func(t *testing.T) { testRejectEmptyIdentityFields(t, newStore) })
 	t.Run("PartitionKeyOrdering", func(t *testing.T) { testPartitionKeyOrdering(t, newStore) })
+	t.Run("SequenceNonDecreasingWithinPartition", func(t *testing.T) { testSequenceNonDecreasingWithinPartition(t, newStore) })
+	t.Run("MultiPartitionBothComplete", func(t *testing.T) { testMultiPartitionBothComplete(t, newStore) })
+	t.Run("PayloadIsolation", func(t *testing.T) { testPayloadIsolation(t, newStore) })
 	t.Run("AtLeastOnceRedelivery", func(t *testing.T) { testAtLeastOnceRedelivery(t, newStore) })
 	t.Run("PositionTokenIntegrity", func(t *testing.T) { testPositionTokenIntegrity(t, newStore) })
+	t.Run("ContextCancelEndsRun", func(t *testing.T) { testContextCancelEndsRun(t, newStore) })
 	t.Run("MultiWorkerPartitionIsolation", func(t *testing.T) {
 		if cfg.shared == nil {
 			t.Skip("WithSharedConsumers not configured")
@@ -220,6 +226,123 @@ func testIdempotentFirstWinsPayload(t *testing.T, newStore Factory) {
 	}
 }
 
+// testIdempotencyGlobalAcrossPartitions asserts IdempotencyKey is global: the
+// same key under two partition keys yields a single stored event (first-wins).
+func testIdempotencyGlobalAcrossPartitions(t *testing.T, newStore Factory) {
+	log, consumer, _, cleanup := newStore()
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	first := eventlog.EventEnvelope{
+		PartitionKey:   "global-a",
+		IdempotencyKey: "global-key-1",
+		Type:           "t-a",
+		Payload:        []byte("from-a"),
+	}
+	second := eventlog.EventEnvelope{
+		PartitionKey:   "global-b",
+		IdempotencyKey: "global-key-1",
+		Type:           "t-b",
+		Payload:        []byte("from-b"),
+	}
+	if err := log.Append(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := log.Append(ctx, second); err != nil {
+		t.Fatalf("second append: %v", err)
+	}
+
+	var (
+		mu    sync.Mutex
+		got   []eventlog.Event
+		count int
+	)
+	done := make(chan struct{})
+
+	go func() {
+		_ = consumer.Run(ctx, func(c context.Context, e eventlog.Event) error {
+			if e.IdempotencyKey != "global-key-1" {
+				return nil
+			}
+			mu.Lock()
+			got = append(got, e)
+			count++
+			if count >= 1 {
+				select {
+				case <-done:
+				default:
+					close(done)
+				}
+			}
+			mu.Unlock()
+			return nil
+		})
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for global idempotency event")
+	}
+
+	// Allow a brief window for a second erroneous delivery of the conflicting key.
+	time.Sleep(400 * time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 1 {
+		t.Fatalf("deliveries of global-key-1 = %d, want 1; events=%+v", len(got), got)
+	}
+	e := got[0]
+	if e.PartitionKey != "global-a" || e.Type != "t-a" || string(e.Payload) != "from-a" {
+		t.Fatalf("first-wins lost across partitions: %+v", e)
+	}
+}
+
+func testRejectEmptyIdentityFields(t *testing.T, newStore Factory) {
+	log, _, _, cleanup := newStore()
+	defer cleanup()
+
+	ctx := context.Background()
+	cases := []struct {
+		name string
+		env  eventlog.EventEnvelope
+	}{
+		{
+			name: "empty PartitionKey",
+			env:  eventlog.EventEnvelope{IdempotencyKey: "k", Type: "t"},
+		},
+		{
+			name: "whitespace PartitionKey",
+			env:  eventlog.EventEnvelope{PartitionKey: "  \t", IdempotencyKey: "k", Type: "t"},
+		},
+		{
+			name: "empty IdempotencyKey",
+			env:  eventlog.EventEnvelope{PartitionKey: "p", Type: "t"},
+		},
+		{
+			name: "whitespace IdempotencyKey",
+			env:  eventlog.EventEnvelope{PartitionKey: "p", IdempotencyKey: " ", Type: "t"},
+		},
+		{
+			name: "empty Type",
+			env:  eventlog.EventEnvelope{PartitionKey: "p", IdempotencyKey: "k"},
+		},
+		{
+			name: "whitespace Type",
+			env:  eventlog.EventEnvelope{PartitionKey: "p", IdempotencyKey: "k", Type: "\n"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := log.Append(ctx, tc.env); err == nil {
+				t.Fatal("expected Append to reject empty/whitespace identity field")
+			}
+		})
+	}
+}
+
 func testPartitionKeyOrdering(t *testing.T, newStore Factory) {
 	log, consumer, _, cleanup := newStore()
 	defer cleanup()
@@ -273,6 +396,179 @@ func testPartitionKeyOrdering(t *testing.T, newStore Factory) {
 		if received[i] != want {
 			t.Errorf("at index %d, want %q, got %q", i, want, received[i])
 		}
+	}
+}
+
+// testSequenceNonDecreasingWithinPartition asserts Sequence is monotonic within
+// a partition. Gaps (sparse sequences) are allowed; dense "event N of M" is not required.
+func testSequenceNonDecreasingWithinPartition(t *testing.T, newStore Factory) {
+	log, consumer, _, cleanup := newStore()
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Interleave another partition so global serials (if any) create sparsity.
+	partition := "p-seq"
+	other := "p-seq-other"
+	for i := 1; i <= 3; i++ {
+		if err := log.Append(ctx, eventlog.EventEnvelope{
+			PartitionKey:   partition,
+			IdempotencyKey: fmt.Sprintf("seq-main-%d", i),
+			Type:           "t",
+			Payload:        []byte(fmt.Sprintf("%d", i)),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := log.Append(ctx, eventlog.EventEnvelope{
+			PartitionKey:   other,
+			IdempotencyKey: fmt.Sprintf("seq-other-%d", i),
+			Type:           "t",
+			Payload:        []byte("x"),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var mu sync.Mutex
+	var sequences []uint64
+	done := make(chan struct{})
+
+	go func() {
+		_ = consumer.Run(ctx, func(c context.Context, e eventlog.Event) error {
+			if e.PartitionKey == partition {
+				mu.Lock()
+				sequences = append(sequences, e.Sequence)
+				if len(sequences) == 3 {
+					close(done)
+				}
+				mu.Unlock()
+			}
+			return nil
+		})
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for sequenced events")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(sequences) != 3 {
+		t.Fatalf("got %d sequences, want 3", len(sequences))
+	}
+	for i := 1; i < len(sequences); i++ {
+		if sequences[i] < sequences[i-1] {
+			t.Fatalf("sequence decreased within partition: %v", sequences)
+		}
+	}
+}
+
+// testMultiPartitionBothComplete asserts events from two partitions are all
+// delivered. It makes NO claim about global interleaving order.
+func testMultiPartitionBothComplete(t *testing.T, newStore Factory) {
+	log, consumer, _, cleanup := newStore()
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	wantKeys := []string{"mp-a1", "mp-a2", "mp-b1", "mp-b2"}
+	envelopes := []eventlog.EventEnvelope{
+		{PartitionKey: "mp-a", IdempotencyKey: "mp-a1", Type: "t", Payload: []byte("a1")},
+		{PartitionKey: "mp-b", IdempotencyKey: "mp-b1", Type: "t", Payload: []byte("b1")},
+		{PartitionKey: "mp-a", IdempotencyKey: "mp-a2", Type: "t", Payload: []byte("a2")},
+		{PartitionKey: "mp-b", IdempotencyKey: "mp-b2", Type: "t", Payload: []byte("b2")},
+	}
+	for _, env := range envelopes {
+		if err := log.Append(ctx, env); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var mu sync.Mutex
+	seen := map[string]bool{}
+	done := make(chan struct{})
+
+	go func() {
+		_ = consumer.Run(ctx, func(c context.Context, e eventlog.Event) error {
+			if e.PartitionKey != "mp-a" && e.PartitionKey != "mp-b" {
+				return nil
+			}
+			mu.Lock()
+			seen[e.IdempotencyKey] = true
+			complete := true
+			for _, k := range wantKeys {
+				if !seen[k] {
+					complete = false
+					break
+				}
+			}
+			if complete {
+				select {
+				case <-done:
+				default:
+					close(done)
+				}
+			}
+			mu.Unlock()
+			return nil
+		})
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		mu.Lock()
+		t.Fatalf("timeout waiting for multi-partition completion; seen=%v", seen)
+		mu.Unlock()
+	}
+}
+
+// testPayloadIsolation asserts mutating the caller's payload slice after Append
+// does not change the delivered payload.
+func testPayloadIsolation(t *testing.T, newStore Factory) {
+	log, consumer, _, cleanup := newStore()
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	partition := "p-payload-iso"
+	payload := []byte("stable-bytes")
+	env := eventlog.EventEnvelope{
+		PartitionKey:   partition,
+		IdempotencyKey: "iso-payload-1",
+		Type:           "t",
+		Payload:        payload,
+	}
+	if err := log.Append(ctx, env); err != nil {
+		t.Fatal(err)
+	}
+	payload[0] = 'X' // mutate after Append
+
+	done := make(chan eventlog.Event, 1)
+	go func() {
+		_ = consumer.Run(ctx, func(c context.Context, e eventlog.Event) error {
+			if e.PartitionKey == partition {
+				select {
+				case done <- e:
+				default:
+				}
+			}
+			return nil
+		})
+	}()
+
+	select {
+	case e := <-done:
+		if string(e.Payload) != "stable-bytes" {
+			t.Fatalf("delivered payload = %q, want isolated original", e.Payload)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for payload isolation event")
 	}
 }
 
@@ -384,11 +680,39 @@ func testPositionTokenIntegrity(t *testing.T, newStore Factory) {
 	if pos.PartitionKey() != pKey || pos.Token() != tokenStr {
 		t.Errorf("NewPosition round-trip failed")
 	}
+	if pos.IsZero() {
+		t.Error("delivered position must not be the portable zero cursor")
+	}
+}
+
+// testContextCancelEndsRun asserts Run returns promptly when ctx is cancelled.
+func testContextCancelEndsRun(t *testing.T, newStore Factory) {
+	_, consumer, _, cleanup := newStore()
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- consumer.Run(ctx, func(context.Context, eventlog.Event) error {
+			return nil
+		})
+	}()
+
+	// Let Run enter its loop, then cancel.
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-errCh:
+		// Any return (nil or ctx.Err()) is fine; hang is not.
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run did not return after context cancel")
+	}
 }
 
 // testMultiWorkerPartitionIsolation runs two consumers in the same group on a
-// shared backend and asserts every event is processed exactly once across
-// partitions (no double-processing).
+// shared backend and asserts every event is processed without double-processing
+// under successful handlers (no claim that the transport is exactly-once).
 func testMultiWorkerPartitionIsolation(t *testing.T, newShared SharedConsumersFactory) {
 	log, consumerA, consumerB, _, cleanup := newShared()
 	defer cleanup()
@@ -462,7 +786,7 @@ func testMultiWorkerPartitionIsolation(t *testing.T, newShared SharedConsumersFa
 	defer mu.Unlock()
 	for _, k := range allKeys {
 		if n := seen[k]; n != 1 {
-			t.Errorf("idempotency key %q processed %d times, want 1", k, n)
+			t.Errorf("idempotency key %q processed %d times under successful handlers, want 1 (no double-process)", k, n)
 		}
 	}
 }

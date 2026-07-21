@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -60,25 +59,12 @@ func (s *Store) Append(ctx context.Context, e eventlog.EventEnvelope) error {
 	return fmt.Errorf("append event log: %w", err)
 }
 
-// normalizeEventEnvelope trims identity fields and enforces non-empty keys.
-// PartitionKey is required here (not the degenerate empty single-partition form
-// allowed by the interface docs): empty keys would collapse every producer into
-// one ordering unit and defeat per-incident parallelism.
+// normalizeEventEnvelope applies the shared [eventlog.ValidateEnvelope] contract
+// and wraps failures with ErrInvalidRecord so callers keep the pgstore error type.
 func normalizeEventEnvelope(e eventlog.EventEnvelope) (eventlog.EventEnvelope, error) {
-	out := eventlog.EventEnvelope{
-		PartitionKey:   strings.TrimSpace(e.PartitionKey),
-		IdempotencyKey: strings.TrimSpace(e.IdempotencyKey),
-		Type:           strings.TrimSpace(e.Type),
-		Payload:        e.Payload,
-	}
-	if out.IdempotencyKey == "" {
-		return eventlog.EventEnvelope{}, fmt.Errorf("%w: IdempotencyKey is required", ErrInvalidRecord)
-	}
-	if out.PartitionKey == "" {
-		return eventlog.EventEnvelope{}, fmt.Errorf("%w: PartitionKey is required", ErrInvalidRecord)
-	}
-	if out.Type == "" {
-		return eventlog.EventEnvelope{}, fmt.Errorf("%w: Type is required", ErrInvalidRecord)
+	out, err := eventlog.ValidateEnvelope(e)
+	if err != nil {
+		return eventlog.EventEnvelope{}, fmt.Errorf("%w: %v", ErrInvalidRecord, err)
 	}
 	return out, nil
 }

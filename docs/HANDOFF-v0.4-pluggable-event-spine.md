@@ -48,7 +48,7 @@ Postgres:
 
 | Layer | Responsibility | Now | Later (scale) |
 |-------|----------------|-----|---------------|
-| **Log (transport)** | Append + ordered consume of events | Postgres (`SKIP LOCKED` + sequence) | Kafka / Redpanda / NATS JetStream |
+| **Log (transport)** | Append + ordered consume of events | Postgres (per-partition claim + sequence + checkpoint) | Kafka / Redpanda / NATS JetStream |
 | **System of record / read model** | Immutable provenance + materialized COP | **Postgres — stays forever** | Postgres (unchanged) |
 | **Fan-out** | Notify SSE gateways of COP change | Postgres `LISTEN/NOTIFY` | Redis / NATS / compacted topic |
 
@@ -68,7 +68,9 @@ seam means we *slide into it*, not rewrite.
 - **Postgres does the whole operational layer** — no Redis, no Kafka, no Mongo at
   current scale:
   - immutable append-only event log with **foreign keys enforcing provenance**;
-  - ordered projection queue via `SELECT … FOR UPDATE SKIP LOCKED`;
+  - ordered projection queue via **per-partition session advisory locks** (claim
+    one partition key, process in sequence order, checkpoint the cursor) — not
+    row-level `SKIP LOCKED` on individual events (that would break per-key order);
   - fan-out via `LISTEN/NOTIFY` (replaces the in-process broker, gains
     cross-instance fan-out);
   - materialized COP read-model table for cheap `GET /cop`.
@@ -98,10 +100,11 @@ type EventEnvelope struct {
 }
 
 // Read side. Ordered *per partition key*, at-least-once. The implementation
-// owns position/offset tracking — callers never see it.
+// owns position/offset tracking. Callers receive opaque Position metadata
+// (exported for diagnostics / system-of-record) but never advance a raw offset.
 type EventConsumer interface {
     Run(ctx context.Context, handle func(context.Context, Event) error) error
-    // handle returns nil => ack/advance; error => redeliver.
+    // handle nil => implementation advances ("consumed through"); error => redeliver.
 }
 
 // Fan-out for the UI. Small payloads (a revision/id, not the whole COP).
@@ -112,14 +115,18 @@ type EventBus interface {
 ```
 
 **Postgres implementation now:** `Append` = INSERT with a unique constraint on
-`IdempotencyKey`; `Run` = `SKIP LOCKED` claim grouped by `PartitionKey`,
-processing each key in sequence order, checkpointing a cursor; `EventBus` =
-`LISTEN/NOTIFY`.
+`IdempotencyKey` (global first-wins); `Run` = per-partition **advisory lock** claim,
+process each key in sequence order, checkpoint a cursor (often in the same TX as
+handler success); `EventBus` = `LISTEN/NOTIFY`. Opaque `Position` is exported for
+diagnostics and SoR metadata — not a seek/arithmetic API.
 
-**Kafka/Redpanda later:** `Append` = produce to a topic keyed by `PartitionKey`;
-`Run` = consumer group with committed offsets; `EventBus` = compacted topic or
-keep Redis/NATS. **Same interfaces, different wiring at composition. Producers and
-consumers — including the simulation — do not change a line.**
+**Kafka/Redpanda later:** `Append` = produce to a topic keyed by `PartitionKey`
+(dedup is **not free** — adapter needs an external store/outbox for the same
+first-wins contract); `Run` = consumer group with committed offsets; `EventBus` =
+compacted topic or keep Redis/NATS. Parallelism is implementation-defined
+(logical key claim vs physical partitions). **Same interfaces, different wiring
+at composition. Producers and consumers — including the simulation — do not
+change a line.**
 
 ### 2.4 The delivery contract (the rule that prevents coupling)
 
@@ -136,29 +143,32 @@ portability decision are the **same decision**.
 ### 2.5 The one real cost of portability (pay it now)
 
 Postgres-only tempts you to append an event *and* project it in one ACID
-transaction — Kafka cannot. So:
+transaction — Kafka cannot. So the hard rule is:
 
-> The projector **consumes from the log interface** and commits
-> `(projection update + position advance)` atomically — **never**
-> `(append + project)`.
+> **Never** `(append + project)` as the product path.
 
-Both backends honor project-plus-position; only Postgres honors
-append-plus-project. Choosing the atomic boundary both systems can honor is the
-entire price of the Kafka door staying open. Everything else is free once the
-interfaces are log-shaped.
+Handlers **must** be idempotent (delivery is at-least-once). Backends **should**
+make successful handle + position advance atomic when the store allows it
+(Postgres can). The **portable floor** is process-then-advance with at-least-once
+redelivery — not “one shared transaction model” for both Postgres and Kafka.
+Both backends express “I processed this event and advanced past it”; only
+co-located Postgres could honor append-plus-project. Paying that boundary now
+keeps the Kafka door open.
 
 ### 2.6 Partition key = scale and determinism, one decision
 
 - `partition_key` on events (default: incident id; domain-scoped for
-  multi-dimension).
-- A monotonic sequence gives total order; a *subsequence per key* is still
-  ordered, so per-incident order is free.
-- Projector workers claim `WHERE partition_key = …` via `SKIP LOCKED` and process
-  each key in sequence order → **different incidents project in parallel, each
-  strictly ordered**. This is the "1000 events at once" answer without breaking
-  determinism.
-- Physical parallelism later: declarative `PARTITION BY HASH (partition_key)` —
-  same engine, no model change.
+  multi-dimension). Non-empty after trim; no empty-key degenerate stream.
+- A backend-defined sequence is monotonic within a key (may be sparse); a
+  *subsequence per key* is ordered, so per-incident order is free. Sequence is
+  diagnostic only — not for resumption or gap detection (`Position` owns cursor
+  metadata).
+- Projector workers **claim one partition key** (Postgres: session advisory lock
+  on the key, not row-level `SKIP LOCKED` on events) and process it in sequence
+  order → **different incidents project in parallel, each strictly ordered**.
+  This is the "1000 events at once" answer without breaking determinism.
+- Physical parallelism later: declarative `PARTITION BY HASH (partition_key)` or
+  Kafka partitions — same logical decision, implementation-defined mapping.
 
 ### 2.7 "New dimension" story
 

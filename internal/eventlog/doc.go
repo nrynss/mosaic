@@ -11,9 +11,11 @@
 //
 //  1. Log (transport). Append events and consume them in order. This package's
 //     [EventLog] (append side) and [EventConsumer] (read side) are that seam.
-//     Now: a Postgres table with a monotonic sequence claimed via
-//     SELECT ... FOR UPDATE SKIP LOCKED. Later: a Kafka/Redpanda topic keyed by
+//     Now: a Postgres table with a monotonic sequence, claimed per partition and
+//     checkpointed as work completes. Later: a Kafka/Redpanda topic keyed by
 //     partition, consumed by a consumer group. Only this layer is replaced.
+//     Package docs speak only claim / order / checkpoint semantics — not a
+//     particular lock primitive (SKIP LOCKED, advisory locks, etc.).
 //
 //  2. System of record / read model. The immutable provenance store and the
 //     materialized common operating picture (COP). This is Postgres forever and
@@ -33,8 +35,8 @@
 // # The delivery contract
 //
 // Every guarantee this package promises is the WEAKEST that BOTH a Postgres
-// SKIP LOCKED queue and a Kafka consumer group can honor. No consumer may rely
-// on more:
+// claim/checkpoint queue and a Kafka consumer group can honor. No consumer may
+// rely on more:
 //
 //   - At-least-once, never exactly-once. An event may be delivered more than
 //     once (crash between side effect and position advance, a redelivery after a
@@ -56,38 +58,59 @@
 //
 // # The atomic-boundary rule
 //
-// A Postgres-only design tempts you to append an event and project it in one ACID
-// transaction. Kafka cannot do that. So the projector consumes from the log seam
-// and commits, in a single transaction:
+// Handlers MUST be idempotent: delivery is at-least-once, so a crash or
+// rebalance can redeliver an event after partial side effects.
 //
-//	(projection update + position advance)   -- both backends honor this
+// Backends SHOULD make handle success and position advance atomic when the
+// storage model allows it (Postgres can commit projection work and a checkpoint
+// in one transaction). That is an implementation strength, not a portable floor.
 //
-// NEVER:
+// The portable floor is process-then-advance with at-least-once redelivery: the
+// consumer invokes handle, and on nil return the implementation advances the
+// consuming position past that event. If the process dies between handle success
+// and advance, the event may be redelivered; idempotent handlers absorb that.
 //
-//	(append + project)                       -- only Postgres honors this
+// NEVER pair append with projection in one product path:
 //
-// Both backends can atomically record "I updated the read model AND advanced my
-// consuming position to here." Only Postgres can atomically "append a new event
-// AND project it." Choosing the boundary both systems honor is the entire price
-// of keeping the log pluggable; see [EventConsumer] for how the contract is
-// expressed in the handler signature.
+//	(append + project)   -- only co-located Postgres can honor this; Kafka cannot
+//
+// Both backends can express "I processed this event and advanced past it"
+// (atomically when possible, process-then-advance otherwise). Only a single
+// database can atomically "append a new event AND project it." Choosing the
+// boundary both systems can honor is the entire price of keeping the log
+// pluggable; see [EventConsumer] for how the contract is expressed in the
+// handler signature.
 //
 // # Partition key: scale and determinism, one decision
 //
 // The partition key is simultaneously the sharding unit and the ordering unit.
-// A monotonic sequence gives a total order; the subsequence for any single key
-// is still ordered, so per-incident order is free. Workers claim one key at a
-// time and process it in sequence order, so different incidents project in
+// A backend-defined sequence gives per-partition order; the subsequence for any
+// single key is ordered, so per-incident order is free. Workers claim one key at
+// a time and process it in sequence order, so different incidents project in
 // parallel while each stays strictly ordered — the "1000 events at once" answer
 // that does not break determinism. Physical parallelism later (hash partitioning,
-// Kafka partitions) is the same decision expressed in infrastructure.
+// Kafka partitions) is the same decision expressed in infrastructure; how
+// logical keys map onto physical partitions is implementation-defined.
+//
+// # Kafka / distributed-log costs (honest)
+//
+//   - Append idempotency is not free on Kafka. Postgres enforces a unique
+//     IdempotencyKey constraint cheaply; a Kafka producer must use an external
+//     store, transactional outbox, or equivalent to give the same first-wins
+//     no-op. Callers still see the same Append contract; the cost sits in the
+//     adapter.
+//   - Parallelism is implementation-defined: logical per-key claim (one worker
+//     drains a partition key) versus hashing keys onto physical Kafka partitions
+//     with consumer-group assignment. The interface promises per-key order and
+//     concurrent keys; it does not prescribe the claim mechanism.
 //
 // # What must never leak
 //
 // Nothing backend-specific may appear in this package's API: no SQL, no
 // *sql.Tx, no Postgres or Kafka types, and no raw offsets-as-integers callers can
 // do arithmetic on. Position tracking is owned entirely by the implementation;
-// callers never see or advance a raw offset. If a construct cannot be honored by
-// both a Postgres SKIP LOCKED queue and a Kafka consumer group, it does not
-// belong in these interfaces.
+// callers receive opaque [Position] values for diagnostics and system-of-record
+// metadata, but never advance a raw offset themselves. If a construct cannot be
+// honored by both a claim/checkpoint queue and a Kafka consumer group, it does
+// not belong in these interfaces.
 package eventlog

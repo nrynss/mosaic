@@ -34,27 +34,31 @@ type EventLog interface {
 }
 
 type EventEnvelope struct {
-    PartitionKey   string // routing + per-key ordering (e.g. incident id)
-    IdempotencyKey string // source dedup token
-    Type           string // application label, opaque to transport
+    PartitionKey   string // routing + per-key ordering; non-empty after trim
+    IdempotencyKey string // global source dedup token (first-wins payload/type)
+    Type           string // application label, opaque to transport; required
     Payload        []byte // opaque body; transport never interprets it
 }
 ```
+
+`Append` rejects empty/whitespace `PartitionKey`, `IdempotencyKey`, and `Type`
+(shared `ValidateEnvelope`). IdempotencyKey scope is **global** to the log, not
+per partition.
 
 ### EventConsumer (read side)
 
 ```go
 type EventConsumer interface {
     // Run delivers events ordered per PartitionKey, at-least-once.
-    // handle nil  => ack / advance position
+    // handle nil  => implementation advances position ("consumed through")
     // handle err  => no ack; event will be redelivered
     Run(ctx context.Context, handle func(context.Context, Event) error) error
 }
 
 type Event struct {
     EventEnvelope
-    Position  Position  // opaque per-partition cursor
-    Sequence  uint64    // diagnostic only; not a global offset
+    Position  Position  // opaque per-partition cursor (exported diagnostics/SoR)
+    Sequence  uint64    // backend-defined; monotonic within partition; may be sparse
     Timestamp time.Time // descriptive metadata only
 }
 ```
@@ -72,9 +76,12 @@ type EventBus interface {
 
 ### Position
 
-`Position` is an opaque per-partition cursor (`PartitionKey()` + `Token()`).
-Callers **must not** do arithmetic on tokens. The zero position means “before
-the first event.” Equality is only meaningful within the same partition.
+`Position` is an opaque per-partition cursor (`PartitionKey()` + `Token()`),
+exported for diagnostics and system-of-record metadata — not a seek API.
+Callers **must not** do arithmetic on tokens. Only the all-zero position is the
+portable “before the first event” marker; an empty token with a non-empty
+partition may be a backend start marker. Equality is only meaningful within the
+same partition.
 
 ### Delivery contract (weakest common semantics)
 
@@ -90,8 +97,8 @@ the projection boundary. Do not claim exactly-once delivery from the transport.
 
 | Seam | Type | Behaviour |
 |------|------|-----------|
-| `EventLog` | `*pgstore.Store` | `Append` → `INSERT` into `event_log`; unique on `idempotency_key` → first-wins no-op |
-| `EventConsumer` | `pgstore.EventConsumer` | Per-partition advisory locks; process in sequence; checkpoint in same TX as handle |
+| `EventLog` | `*pgstore.Store` | `Append` → `INSERT` into `event_log`; unique on `idempotency_key` (global) → first-wins no-op |
+| `EventConsumer` | `pgstore.EventConsumer` | Per-partition **advisory locks** (not row `SKIP LOCKED`); process in sequence; checkpoint in same TX as handle when possible |
 | `EventBus` | `pgstore.EventBus` | `LISTEN/NOTIFY` via dedicated connections; bounded drop-new buffers |
 
 Composition constructs these next to the durable record store:
@@ -142,25 +149,35 @@ var log eventlog.EventLog = klog
 There is no `pglog` package today; the Postgres log is `pgstore`. A future
 Kafka adapter is a new package that implements the same three interfaces.
 
-## 5. Atomic project + position (never append + project)
+## 5. Atomicity boundary (never append + project)
 
-The portability rule:
+Hard rule:
 
-> The projector **consumes from the log interface** and commits
-> **(projection update + position advance)** atomically —
-> **never (append + project)**.
+> **Never (append + project)** as the product path.
+
+Handlers **must** be idempotent. Backends **should** make successful handle +
+position advance atomic when storage allows it. The **portable floor** is
+process-then-advance with at-least-once redelivery — not “one shared transaction”
+required of both Postgres and Kafka.
 
 Why: Postgres *could* append and project in one ACID transaction; Kafka cannot.
-Both backends can commit “I updated the read model **and** advanced my
-consuming position.” Encoding append+project into the product path would nail
-the spine to Postgres.
+Both backends can express “I processed this event and advanced past it”
+(atomically when possible). Encoding append+project into the product path would
+nail the spine to Postgres.
 
 On the Postgres consumer path, `EventConsumer.Run` invokes `handle` inside
 `Store.WithinTransaction`. A nil return UPSERTs the consumer checkpoint in the
 same transaction. On error the transaction rolls back and the event is
 redelivered (at-least-once). Handlers that also materialize the COP (via
 `pgstore.MaterializingProjector`) should save the read model on that same TX
-context so project+position+materialize stay atomic.
+context so project+position+materialize stay atomic **where the backend can**.
+
+### Kafka Append dedup cost
+
+Postgres enforces global `IdempotencyKey` uniqueness cheaply. A Kafka adapter
+must pay for the same first-wins contract via an external store, transactional
+outbox, or equivalent — **Append dedup is not free**. Parallelism is also
+implementation-defined (logical key claim vs hashing onto physical partitions).
 
 ## 6. Conformance gate for new backends (E2)
 
@@ -178,10 +195,14 @@ The suite covers:
 
 - Append + consume payload integrity
 - Idempotent append (including **first-wins** when a retry carries a different payload)
-- Per-partition-key ordering
+- Global idempotency across partitions (same key, two PKs → one row wins)
+- Reject empty/whitespace PartitionKey, IdempotencyKey, Type
+- Per-partition-key ordering; Sequence non-decreasing within partition (sparse OK)
+- Multi-partition both complete (no global order claim)
+- Payload isolation after Append mutation
 - At-least-once redelivery after handler error
-- Position token integrity
-- Multi-worker same consumer group: different partitions, no double-processing
+- Position token integrity; context cancel ends Run cleanly
+- Multi-worker same consumer group: no double-process under successful handlers
 - EventBus: Publish/Subscribe, cancel closes channel, topic isolation, backpressure does not hang Publish
 
 Postgres wires the suite in `internal/pgstore/conformance_test.go` (skipped unless
@@ -204,9 +225,9 @@ The UI and public API continue to read Postgres. Kafka is not a query store.
 1. Implement `eventlog.EventLog`, `EventConsumer`, and (if used) `EventBus`.
 2. Pass `eventlogtest.RunConformanceTests` in CI.
 3. Wire the new types only in the composition root; leave producers/consumers alone.
-4. Keep project+position atomic in the consumer handle; never append+project.
-5. Keep partition key = incident (or domain-scoped key) so per-key order holds.
-6. Treat delivery as at-least-once; rely on IdempotencyKey for effect-once.
+4. Never append+project; prefer atomic handle+advance when possible; portable floor is process-then-advance + idempotent handlers.
+5. Keep partition key = incident (or domain-scoped key) so per-key order holds; non-empty after trim.
+6. Treat delivery as at-least-once; rely on global IdempotencyKey for effect-once (budget for Append dedup cost on Kafka).
 7. Leave Postgres as system of record; do not put COP snapshots on the bus.
 
 See also:
