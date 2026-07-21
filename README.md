@@ -213,11 +213,16 @@ gcloud run deploy mosaic-demo \
   --image=us-central1-docker.pkg.dev/YOUR_PROJECT_ID/mosaic-repo/mosaic-demo:latest \
   --max-instances=1 \
   --concurrency=8 \
-  --set-env-vars="MOSAIC_DB_PATH=/tmp/mosaic.db,MOSAIC_LUNA_PROVIDER=live,MOSAIC_TERRA_PROVIDER=live,MOSAIC_SOL_PROVIDER=live" \
+  --set-env-vars="MOSAIC_DB_PATH=/tmp/mosaic.db,MOSAIC_LUNA_PROVIDER=live,MOSAIC_TERRA_PROVIDER=live,MOSAIC_SOL_PROVIDER=live,MOSAIC_SIM_MODE=live,MOSAIC_CASSETTE_DIR=/tmp/mosaic-recordings" \
   --set-secrets="OPENAI_API_KEY=openai-api-key:latest" \
   --allow-unauthenticated \
   --region=us-central1
 ```
+
+Image must include versioned prompts under `prompts/{luna,terra,sol}/` (see
+`Dockerfile`). `MOSAIC_SIM_MODE=live` records Terra/Sol cassette banks under
+`/tmp` (ephemeral on Cloud Run). Cassette mode is process-level only — not
+surfaced in the UI.
 
 * **Public URL:** [https://mosaic.nryn.dev](https://mosaic.nryn.dev)  
 * **Cloud Run:** [https://mosaic-demo-358513274447.us-central1.run.app](https://mosaic-demo-358513274447.us-central1.run.app)  
