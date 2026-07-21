@@ -25,15 +25,9 @@ The image builds two deterministic artifacts:
 - the public Svelte dashboard, bounded API, and fixture-only advisory history; and
 - the domestic-disturbance fixture and its ontology schemas.
 
-The container contains no PostgreSQL service. It runs a single process with one
-SQLite file on the named mosaic-data volume. The database volume survives a
-normal stop, and mosaicdemo idempotently re-delivers the frozen fixture on
-startup.
+The Compose setup defines a two-service topology: the application runs in a stateless container (`mosaic`), while persistent storage is provided by a PostgreSQL 16 container (`db`). The database volume is backed by a named `postgres-data` volume which survives restarts.
 
-Compose first runs the short-lived mosaic-data-init service as root only to
-create and assign the named volume to the runtime UID. It exits before mosaic
-starts; the application container remains nonroot, read-only, and without Linux
-capabilities.
+Before the application starts, it waits for the database service to be healthy (`pg_isready` check). The application container remains nonroot, read-only, and without Linux capabilities.
 
 This demo has no real data, privacy classification, retention workflow, or
 deletion automation. Its checked-in records are synthetic only.
@@ -242,14 +236,14 @@ PostgreSQL, shared dispatch/outbox, and multi-instance coordination are future d
 docker compose down
 ~~~
 
-The named SQLite volume remains. To remove it and start the synthetic demo from
+The named Postgres volume remains. To remove it and start the synthetic demo from
 an empty durable store, run this destructive reset only when that is intended:
 
 ~~~powershell
 docker compose down --volumes
 ~~~
 
-This removes only Compose's mosaic-data volume. It does not affect localmodels
+This removes only Compose's postgres-data volume. It does not affect localmodels
 or repository files.
 
 For startup diagnostics:

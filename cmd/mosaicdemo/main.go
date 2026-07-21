@@ -25,6 +25,7 @@ import (
 
 	"mosaic.local/mosaic/internal/api"
 	"mosaic.local/mosaic/internal/contracts"
+	"mosaic.local/mosaic/internal/pgstore"
 	"mosaic.local/mosaic/internal/recurrence"
 	"mosaic.local/mosaic/internal/reference/registry"
 	"mosaic.local/mosaic/internal/simulation/session"
@@ -212,17 +213,65 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 		return nil, err
 	}
 
-	database, err := store.Open(ctx, configuration.DatabasePath)
-	if err != nil {
-		return nil, fmt.Errorf("open SQLite database %q: %w", configuration.DatabasePath, err)
+	var (
+		records         contracts.ImmutableRecordRepository
+		advisoryHistory contracts.AdvisoryHistoryReader
+		closeDatabase   func() error
+		operations      api.OperationsReader
+		sqliteStore     *store.Store
+	)
+
+	isPostgres := strings.HasPrefix(configuration.DatabasePath, "postgres://") || strings.HasPrefix(configuration.DatabasePath, "postgresql://")
+
+	if isPostgres {
+		pg, err := pgstore.Open(ctx, configuration.DatabasePath)
+		if err != nil {
+			return nil, fmt.Errorf("open Postgres database: %w", err)
+		}
+		records = pg
+		advisoryHistory = pg
+		closeDatabase = func() error { return pg.Close() }
+		operations = nil // falls back to unavailableOperationsReader
+
+		// Open a transient in-memory SQLite store so the SQLite-only
+		// domestic-disturbance simulation can still be composed and run.
+		sqlite, err := store.Open(ctx, ":memory:")
+		if err != nil {
+			_ = closeDatabase()
+			return nil, fmt.Errorf("open transient SQLite database: %w", err)
+		}
+		sqliteStore = sqlite
+		originalClose := closeDatabase
+		closeDatabase = func() error {
+			err1 := sqlite.Close()
+			err2 := originalClose()
+			if err1 != nil {
+				return err1
+			}
+			return err2
+		}
+	} else {
+		db, err := store.Open(ctx, configuration.DatabasePath)
+		if err != nil {
+			return nil, fmt.Errorf("open SQLite database %q: %w", configuration.DatabasePath, err)
+		}
+		records = db
+		advisoryHistory = db
+		sqliteStore = db
+		closeDatabase = func() error { return db.Close() }
+
+		operations, err = api.NewSQLiteOperationsReader(db)
+		if err != nil {
+			_ = closeDatabase()
+			return nil, fmt.Errorf("compose SQLite operations reader: %w", err)
+		}
 	}
-	closeDatabase := func() error { return database.Close() }
 
 	// Compose builds the profile's deterministic scenario, fixture advisory
-	// replay, and evidence resolver over the shared store. Run then seeds them:
+	// replay, and evidence resolver over the SQLite store. Run then seeds them:
 	// P05's durable source idempotency means a later start verifies and recovers
 	// the original history without appending duplicate events or advisory records.
-	domainRuntime, err := selected.Compose(ctx, database, configuration.AssetRoot)
+	domainRuntime, err := selected.Compose(ctx, sqliteStore, configuration.AssetRoot)
 	if err != nil {
 		_ = closeDatabase()
 		return nil, fmt.Errorf("compose domain profile %q: %w", selected.ID(), err)
@@ -246,7 +295,7 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 	schemaDir := filepath.Join(configuration.AssetRoot, "ontology")
 	fixtureDir := filepath.Join(configuration.AssetRoot, "datasets", selected.ID())
 	identities := selected.Identities()
-	models, err := composeModels(ctx, database, configuration.AssetRoot, fixtureDir, schemaDir, identities.Supervisor, configuration.ModelEnv)
+	models, err := composeModels(ctx, sqliteStore, configuration.AssetRoot, fixtureDir, schemaDir, identities.Supervisor, configuration.ModelEnv)
 	if err != nil {
 		_ = closeDatabase()
 		return nil, fmt.Errorf("compose model adapters: %w", err)
@@ -264,17 +313,12 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 	}
 	detector := recurrence.NewDetector(area, window, time.Now)
 
-	operations, err := api.NewSQLiteOperationsReader(database)
-	if err != nil {
-		_ = closeDatabase()
-		return nil, fmt.Errorf("compose SQLite operations reader: %w", err)
-	}
 	apiServer, err := api.New(api.Config{
 		Recovery:          domainRuntime,
-		Records:           database,
+		Records:           records,
 		Evidence:          domainRuntime,
 		Operations:        operations,
-		AdvisoryHistory:   database,
+		AdvisoryHistory:   advisoryHistory,
 		AdvisoryMode:      "fixture_composed",
 		Stream:            stream.NewBroker(),
 		Actors:            api.PublicActorResolver{ViewerIdentity: identities.Viewer, SupervisorIdentity: identities.Supervisor},

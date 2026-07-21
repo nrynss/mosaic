@@ -1,11 +1,18 @@
 services:
-  mosaic-data-init:
-    image: busybox:1.37.0
-    user: "0:0"
-    command: ["sh", "-c", "mkdir -p /var/lib/mosaic && chown -R 65532:65532 /var/lib/mosaic"]
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: mosaic
+      POSTGRES_USER: mosaic
+      POSTGRES_PASSWORD: mosaic
     volumes:
-      - mosaic-data:/var/lib/mosaic
-    restart: "no"
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mosaic -d mosaic"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
 
   mosaic:
     build:
@@ -13,8 +20,8 @@ services:
       dockerfile: Dockerfile
     image: mosaic-demo:local
     depends_on:
-      mosaic-data-init:
-        condition: service_completed_successfully
+      db:
+        condition: service_healthy
     ports:
       - "${MOSAIC_PORT:-8080}:8080"
     # Root .env is used for ${…} interpolation (OPENAI_API_KEY, etc.).
@@ -22,14 +29,12 @@ services:
     # fixture at runtime. Billing balance is unrelated to mode selection.
     environment:
       MOSAIC_LISTEN_ADDR: ":8080"
-      MOSAIC_DB_PATH: "/var/lib/mosaic/mosaic.db"
+      MOSAIC_DB_PATH: "postgres://mosaic:mosaic@db:5432/mosaic?sslmode=disable"
       MOSAIC_UI_DIR: "/srv/mosaic/ui"
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
       MOSAIC_LUNA_PROVIDER: "${MOSAIC_LUNA_PROVIDER:-live}"
       MOSAIC_TERRA_PROVIDER: "${MOSAIC_TERRA_PROVIDER:-live}"
       MOSAIC_SOL_PROVIDER: "${MOSAIC_SOL_PROVIDER:-live}"
-    volumes:
-      - mosaic-data:/var/lib/mosaic
     read_only: true
     tmpfs:
       - /tmp
@@ -40,4 +45,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  mosaic-data:
+  postgres-data:
