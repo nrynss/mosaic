@@ -13,6 +13,7 @@ import (
 type TerraClient struct {
 	transport    *transport
 	instructions string
+	schema       structuredOutputSchema
 }
 
 // NewTerraClient constructs a live Terra client. APIKey and versioned prompt
@@ -29,7 +30,11 @@ func NewTerraClient(cfg Config) (*TerraClient, error) {
 	if instructions == "" {
 		return nil, fmt.Errorf("terra instructions are required")
 	}
-	return &TerraClient{transport: t, instructions: instructions}, nil
+	schema, err := loadStructuredOutputSchema(cfg.SchemaDir, insightSchemaRoute)
+	if err != nil {
+		return nil, fmt.Errorf("load Terra output schema: %w", err)
+	}
+	return &TerraClient{transport: t, instructions: instructions, schema: schema}, nil
 }
 
 // Assess performs one Responses API call and maps structured Insight JSON or refusal.
@@ -49,7 +54,8 @@ func (c *TerraClient) Assess(ctx context.Context, request terra.Request) (terra.
 
 	result, err := c.transport.call(ctx, structuredCall{
 		Instructions: c.instructions,
-		SchemaName:   "insight",
+		SchemaName:   c.schema.name,
+		Schema:       c.schema.document,
 		UserInput:    input,
 	})
 	if err != nil {
@@ -58,8 +64,12 @@ func (c *TerraClient) Assess(ctx context.Context, request terra.Request) (terra.
 	if result.Refusal != "" {
 		return terra.Response{ResponseID: result.ResponseID, RefusalDetail: result.Refusal}, nil
 	}
+	insightJSON, err := withoutNullObjectProperties(result.JSON)
+	if err != nil {
+		return terra.Response{}, err
+	}
 	return terra.Response{
-		InsightJSON: result.JSON,
+		InsightJSON: insightJSON,
 		ResponseID:  result.ResponseID,
 	}, nil
 }

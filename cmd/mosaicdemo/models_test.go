@@ -35,6 +35,26 @@ func TestLoadVersionedPromptUsesArtifactContentAndHash(t *testing.T) {
 	}
 }
 
+func TestLoadVersionedLunaPromptUsesArtifactContentAndHash(t *testing.T) {
+	root := repositoryRoot(t)
+	prompt, err := loadVersionedPrompt(root, openaimodel.AgentLuna, "v1.0.0")
+	if err != nil {
+		t.Fatalf("load Luna prompt: %v", err)
+	}
+	contents, err := os.ReadFile(filepath.Join(root, "prompts", "luna", "v1.0.0.md"))
+	if err != nil {
+		t.Fatalf("read Luna prompt fixture: %v", err)
+	}
+	if prompt.Instructions != strings.TrimSpace(string(contents)) {
+		t.Fatal("loaded Luna instructions do not match the versioned prompt artifact")
+	}
+	sum := sha256.Sum256(contents)
+	want := "v1.0.0+sha256:" + hex.EncodeToString(sum[:])
+	if prompt.Provenance != want {
+		t.Fatalf("Luna prompt provenance = %q, want %q", prompt.Provenance, want)
+	}
+}
+
 func TestLoadVersionedPromptRejectsMissingAndEmptyArtifacts(t *testing.T) {
 	root := t.TempDir()
 	if _, err := loadVersionedPrompt(root, openaimodel.AgentTerra, "v1.0.0"); err == nil {
@@ -158,6 +178,26 @@ func TestComposeModelsLiveTerraRequiresVersionedPrompt(t *testing.T) {
 	)
 	if err == nil || !strings.Contains(err.Error(), "load live Terra prompt") {
 		t.Fatalf("compose live Terra without prompt error = %v", err)
+	}
+}
+
+func TestComposeModelsLiveLunaRequiresVersionedPrompt(t *testing.T) {
+	ctx := context.Background()
+	root := repositoryRoot(t)
+	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "models-live-luna-missing-prompt.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	_, err = composeModels(ctx, database, t.TempDir(),
+		filepath.Join(root, "datasets", simulator.DomesticDisturbance),
+		filepath.Join(root, "ontology"),
+		"supervisor-demo",
+		modelEnv{APIKey: "test-key", Luna: contracts.ProviderLive},
+	)
+	if err == nil || !strings.Contains(err.Error(), "load live Luna prompt") {
+		t.Fatalf("compose live Luna without prompt error = %v", err)
 	}
 }
 func TestComposeModelsLiveSelectionWithKey(t *testing.T) {
