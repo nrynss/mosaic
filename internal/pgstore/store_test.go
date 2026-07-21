@@ -107,6 +107,8 @@ func TestOpenAppliesMigrationsAndRejectsHistoryMutation(t *testing.T) {
 	tables := []string{
 		"raw_events", "canonical_events", "luna_results", "insights", "recommendations",
 		"model_runs", "audit_records", "checkpoints", "canonical_projection_receipts",
+		// Event spine transport (migration 0002; B2/B3 implement against these).
+		"event_log", "event_consumer_checkpoints",
 	}
 	for _, table := range tables {
 		var regclass string
