@@ -11,9 +11,19 @@ import (
 // through unchanged. Composition wires this between MaterializingProjector and
 // Store so project+materialize writes the session epoch, not "default".
 //
-// When no session is active, Load reports (zero, false, nil) and Save is a
-// no-op success — there is no durable default row to clobber, and API recovery
-// already returns an empty board when Active reports inactive.
+// # Inactive session behaviour (intentional silent no-op)
+//
+// When ActiveSessionSource reports no active session:
+//
+//   - LoadCOPReadModel returns (zero, false, nil) — same as a cold/missing key.
+//   - SaveCOPReadModel returns nil without writing — intentional silent success.
+//
+// This is NOT an error path. Demos and recovery treat "no active session" as an
+// empty board; projectors must not fail or invent a DefaultCOPReadModelKey row
+// when the pointer is inactive. Callers that need a hard failure when nothing
+// is active should check ActiveSessionSource themselves before Save. Changing
+// Save to return an error would break progressive demos and existing tests
+// that project while the session pointer is cleared between epochs.
 type SessionScopedCOP struct {
 	Inner  contracts.COPReadModelRepository
 	Active contracts.ActiveSessionSource
@@ -43,8 +53,11 @@ func (s *SessionScopedCOP) LoadCOPReadModel(ctx context.Context) (contracts.Proj
 	return s.Inner.LoadCOPReadModelKey(ctx, key)
 }
 
-// SaveCOPReadModel UPSERTs under the active session key. No active session is
-// a successful no-op so projectors do not fail when the board is empty.
+// SaveCOPReadModel UPSERTs under the active session key.
+//
+// SILENT NO-OP: when no session is active this returns nil without calling
+// Inner. See type docs — do not "fix" by returning an error here; demos
+// and empty-board recovery depend on success-with-no-write semantics.
 func (s *SessionScopedCOP) SaveCOPReadModel(ctx context.Context, result contracts.ProjectionResult) error {
 	key, ok := s.sessionKey()
 	if !ok {

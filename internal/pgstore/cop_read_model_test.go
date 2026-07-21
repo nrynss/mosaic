@@ -123,6 +123,60 @@ func TestCOPReadModelUpsertAdvancesRevision(t *testing.T) {
 	}
 }
 
+func TestCOPReadModelStaleSaveDoesNotRegressRevision(t *testing.T) {
+	// P0: revision CAS — concurrent/stale Save must not overwrite a higher revision.
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	if err := s.SaveCOPReadModel(ctx, sampleProjection(10, "high")); err != nil {
+		t.Fatalf("save high: %v", err)
+	}
+	// Stale lower revision.
+	if err := s.SaveCOPReadModel(ctx, sampleProjection(3, "stale")); err != nil {
+		t.Fatalf("stale save: %v", err)
+	}
+	got, found, err := s.LoadCOPReadModel(ctx)
+	if err != nil || !found {
+		t.Fatalf("load: found=%v err=%v", found, err)
+	}
+	if got.StateRevision != 10 || got.COP["label"] != "high" {
+		t.Fatalf("stale save overwrote higher revision: %#v", got)
+	}
+
+	// Equal revision with lower through_canonical_seq must not regress seq.
+	higherThrough := sampleProjection(10, "high-through")
+	higherThrough.Checkpoint.ThroughCanonicalSeq = 50
+	if err := s.SaveCOPReadModel(ctx, higherThrough); err != nil {
+		t.Fatalf("save higher through: %v", err)
+	}
+	lowerThrough := sampleProjection(10, "low-through")
+	lowerThrough.Checkpoint.ThroughCanonicalSeq = 5
+	if err := s.SaveCOPReadModel(ctx, lowerThrough); err != nil {
+		t.Fatalf("save lower through: %v", err)
+	}
+	got, _, err = s.LoadCOPReadModel(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Checkpoint.ThroughCanonicalSeq != 50 || got.COP["label"] != "high-through" {
+		t.Fatalf("equal revision with lower through overwrote: %#v", got)
+	}
+
+	// Equal revision with greater through must advance.
+	evenHigher := sampleProjection(10, "even-higher")
+	evenHigher.Checkpoint.ThroughCanonicalSeq = 99
+	if err := s.SaveCOPReadModel(ctx, evenHigher); err != nil {
+		t.Fatalf("save even higher through: %v", err)
+	}
+	got, _, err = s.LoadCOPReadModel(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Checkpoint.ThroughCanonicalSeq != 99 || got.COP["label"] != "even-higher" {
+		t.Fatalf("greater through at same revision not applied: %#v", got)
+	}
+}
+
 func TestCOPReadModelKeyIsolationAcrossSessions(t *testing.T) {
 	// Two session keys must not clobber each other (C3 acceptance).
 	ctx := context.Background()

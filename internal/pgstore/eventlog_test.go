@@ -3,7 +3,12 @@ package pgstore
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"mosaic.local/mosaic/internal/eventlog"
 )
@@ -82,6 +87,83 @@ func TestEventLogAppendIdempotentReappendIsNoOp(t *testing.T) {
 	}
 	if eventType != "raw.ingested" || string(payload) != "first" {
 		t.Fatalf("first-wins lost: type=%q payload=%q", eventType, payload)
+	}
+}
+
+func TestEventLogAppendConcurrentSameIdempotencyKey(t *testing.T) {
+	// P2: N goroutines same IdempotencyKey → one row, all Append return nil.
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	const n = 32
+	const key = "stress-same-key"
+	var (
+		wg       sync.WaitGroup
+		errCount atomic.Int64
+	)
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			defer wg.Done()
+			err := s.Append(ctx, eventlog.EventEnvelope{
+				PartitionKey:   "incident-1",
+				IdempotencyKey: key,
+				Type:           "raw.ingested",
+				Payload:        []byte(fmt.Sprintf("payload-%d", i)),
+			})
+			if err != nil {
+				errCount.Add(1)
+				t.Errorf("Append %d: %v", i, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	if errCount.Load() != 0 {
+		t.Fatalf("%d concurrent Append calls failed", errCount.Load())
+	}
+
+	var count int
+	if err := s.Pool().QueryRow(ctx, `SELECT COUNT(*) FROM event_log WHERE idempotency_key = $1`, key).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("row count = %d, want 1 after concurrent Append", count)
+	}
+}
+
+func TestIsIdempotencyUniqueViolation(t *testing.T) {
+	t.Parallel()
+
+	if isIdempotencyUniqueViolation(errors.New("not a pg error")) {
+		t.Fatal("plain error should not match")
+	}
+	if isIdempotencyUniqueViolation(&pgconn.PgError{Code: "23503", ConstraintName: eventLogIdempotencyConstraint}) {
+		t.Fatal("non-23505 should not match")
+	}
+	if !isIdempotencyUniqueViolation(&pgconn.PgError{
+		Code:           postgresUniqueViolation,
+		ConstraintName: eventLogIdempotencyConstraint,
+	}) {
+		t.Fatal("exact idempotency constraint should match")
+	}
+	if !isIdempotencyUniqueViolation(&pgconn.PgError{
+		Code:           postgresUniqueViolation,
+		ConstraintName: "custom_idempotency_key_uidx",
+	}) {
+		t.Fatal("constraint name containing idempotency_key should match")
+	}
+	if isIdempotencyUniqueViolation(&pgconn.PgError{
+		Code:           postgresUniqueViolation,
+		ConstraintName: "event_log_other_unique",
+	}) {
+		t.Fatal("unrelated unique constraint must not be treated as idempotent success")
+	}
+	if !isIdempotencyUniqueViolation(&pgconn.PgError{
+		Code:    postgresUniqueViolation,
+		Message: `duplicate key value violates unique constraint`,
+		Detail:  `Key (idempotency_key)=(x) already exists.`,
+	}) {
+		t.Fatal("empty ConstraintName with idempotency_key in Detail should match")
 	}
 }
 

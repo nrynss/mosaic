@@ -7,11 +7,20 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"mosaic.local/mosaic/internal/eventlog"
+)
+
+// EventBus reconnect backoff bounds. Best-effort: after a connection drop the
+// subscriber re-LISTENs; notes published during the gap are lost (recover via
+// re-reading the read model).
+const (
+	eventBusReconnectMinBackoff = 50 * time.Millisecond
+	eventBusReconnectMaxBackoff = 5 * time.Second
 )
 
 // Compile-time proof that EventBus satisfies the fan-out transport seam.
@@ -70,7 +79,17 @@ var ErrNotifyPayloadTooLarge = errors.New("pgstore: NOTIFY payload exceeds 7999-
 //
 // See TopicChannel. Logical topics such as "cop.updated" become safe Postgres
 // channel identifiers (e.g. "mb_cop_updated"). Long or illegal topics hash to a
-// stable "mb_h_<hex>" name so they remain usable without colliding.
+// stable "mb_h_<hex>" name so they remain usable without colliding. Distinct
+// topics that differ only by punctuation which collapses identically (e.g.
+// "a.b" vs "a_b") share one channel — keep a controlled topic vocabulary.
+//
+// # Reconnect (best-effort)
+//
+// runSubscriber reconnects with exponential backoff when WaitForNotification
+// fails for reasons other than subscribe-context cancellation. It re-LISTENs
+// on the same TopicChannel name and keeps the out channel open until ctx is
+// done. Notifications published while the listener is down are not replayed;
+// subscribers must treat fan-out as a hint and re-load durable state.
 //
 // # Backpressure
 //
@@ -154,22 +173,77 @@ func (b *EventBus) openListenConn(ctx context.Context) (*pgx.Conn, error) {
 	return conn, nil
 }
 
-// runSubscriber pumps NOTIFY payloads into out until ctx is done or the
-// connection fails, then closes out and the dedicated connection.
+// runSubscriber pumps NOTIFY payloads into out until ctx is done.
+//
+// On WaitForNotification errors other than ctx cancellation it closes the
+// broken connection, reconnects with exponential backoff, re-issues LISTEN,
+// and continues. The out channel stays open across reconnects so callers do
+// not observe a closed stream until their subscribe context ends. This is
+// best-effort fan-out: gaps during disconnect are not replayed.
 func (b *EventBus) runSubscriber(ctx context.Context, conn *pgx.Conn, channel string, out chan []byte) {
 	defer close(out)
 	defer func() {
-		// Use a detached context so teardown is not aborted by the already-
-		// cancelled subscribe ctx.
-		_ = conn.Close(context.Background())
+		if conn != nil {
+			// Detached context so teardown is not aborted by a cancelled subscribe ctx.
+			_ = conn.Close(context.Background())
+		}
 	}()
 
+	listenSQL := "LISTEN " + pgx.Identifier{channel}.Sanitize()
+	backoff := eventBusReconnectMinBackoff
+
 	for {
-		notification, err := conn.WaitForNotification(ctx)
-		if err != nil {
-			// ctx cancellation and connection close are normal shutdown paths.
+		if err := ctx.Err(); err != nil {
 			return
 		}
+
+		notification, err := conn.WaitForNotification(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				// Subscribe cancelled — normal shutdown.
+				return
+			}
+			// Connection dropped or other transport error: reconnect + re-LISTEN.
+			_ = conn.Close(context.Background())
+			conn = nil
+
+			for {
+				if err := sleepContext(ctx, backoff); err != nil {
+					return
+				}
+				next, openErr := b.openListenConn(ctx)
+				if openErr != nil {
+					if ctx.Err() != nil {
+						return
+					}
+					if backoff < eventBusReconnectMaxBackoff {
+						backoff *= 2
+						if backoff > eventBusReconnectMaxBackoff {
+							backoff = eventBusReconnectMaxBackoff
+						}
+					}
+					continue
+				}
+				if _, listenErr := next.Exec(ctx, listenSQL); listenErr != nil {
+					_ = next.Close(context.Background())
+					if ctx.Err() != nil {
+						return
+					}
+					if backoff < eventBusReconnectMaxBackoff {
+						backoff *= 2
+						if backoff > eventBusReconnectMaxBackoff {
+							backoff = eventBusReconnectMaxBackoff
+						}
+					}
+					continue
+				}
+				conn = next
+				backoff = eventBusReconnectMinBackoff
+				break
+			}
+			continue
+		}
+
 		// Defense-in-depth: ignore unexpected channels on this connection.
 		if notification.Channel != channel {
 			continue
@@ -200,10 +274,14 @@ func (b *EventBus) runSubscriber(ctx context.Context, conn *pgx.Conn, channel st
 //     (Postgres NAMEDATALEN-1), use a stable hash form instead:
 //     "mb_h_" + first 32 hex chars of SHA-256(original trimmed topic).
 //
-// The mapping is intentionally lossy for illegal characters but collision-free
-// for the hash path. Two different topics may sanitize to the same short name
-// only if they differ solely by punctuation that collapses identically (e.g.
-// "a.b" and "a_b"); prefer dotted topic names from a controlled vocabulary.
+// The mapping is intentionally lossy for illegal characters. The hash path is
+// collision-resistant (SHA-256 prefix) for over-long / empty-body topics.
+//
+// COLLISION NOTE: two different short topics may map to the same sanitized
+// channel when they differ only by punctuation that collapses identically
+// (e.g. "a.b" and "a_b" both become "mb_a_b"; "cop.updated" vs "cop_updated").
+// Prefer dotted topic names from a controlled vocabulary (eventlog topic
+// constants) and never mint free-form topics that could collide after sanitize.
 func TopicChannel(topic string) (string, error) {
 	topic = strings.TrimSpace(topic)
 	if topic == "" {

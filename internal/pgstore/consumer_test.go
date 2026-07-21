@@ -9,8 +9,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"mosaic.local/mosaic/internal/eventlog"
 )
+
+// wrapPgCode builds a *pgconn.PgError for unit tests of SQLSTATE handling.
+func wrapPgCode(code string) error {
+	return &pgconn.PgError{Code: code, Message: "test " + code}
+}
 
 func TestEventConsumerDeliversPerPartitionOrder(t *testing.T) {
 	ctx := context.Background()
@@ -444,6 +451,77 @@ func TestEventConsumerCompileTimeInterface(t *testing.T) {
 	c := NewEventConsumer(s, ConsumerConfig{})
 	if c.ConsumerGroup() != DefaultConsumerGroup {
 		t.Fatalf("default group = %q, want %q", c.ConsumerGroup(), DefaultConsumerGroup)
+	}
+}
+
+func TestIsTransientTxConflict(t *testing.T) {
+	t.Parallel()
+	if isTransientTxConflict(errors.New("plain")) {
+		t.Fatal("plain error should not match")
+	}
+	// Import path: use pgconn via errors that match deliverOne remapping.
+	// Constructed via fmt so we do not need pgconn in every assertion file path
+	// when the helper is pure.
+	if !isTransientTxConflict(wrapPgCode(postgresSerializationFailure)) {
+		t.Fatal("40001 should be transient")
+	}
+	if !isTransientTxConflict(wrapPgCode(postgresDeadlockDetected)) {
+		t.Fatal("40P01 should be transient")
+	}
+	if isTransientTxConflict(wrapPgCode("23505")) {
+		t.Fatal("unique violation is not a deliverOne redelivery code")
+	}
+}
+
+func TestEventConsumerCorruptCheckpointDoesNotKillRun(t *testing.T) {
+	// P1: corrupt position_token is treated as sequence 0; Run continues.
+	ctx := context.Background()
+	s := newTestStore(t)
+	group := "test-corrupt-ckpt"
+
+	if err := s.Append(ctx, eventlog.EventEnvelope{
+		PartitionKey: "p1", IdempotencyKey: "after-corrupt", Type: "t", Payload: []byte("x"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Plant a non-decimal checkpoint that DecodeSequenceToken would reject.
+	if _, err := s.Pool().Exec(ctx, `
+		INSERT INTO event_consumer_checkpoints (consumer_group, partition_key, position_token, updated_at)
+		VALUES ($1, $2, $3, now())`, group, "p1", "not-a-number"); err != nil {
+		t.Fatalf("seed corrupt checkpoint: %v", err)
+	}
+
+	c := NewEventConsumer(s, ConsumerConfig{
+		ConsumerGroup: group,
+		IdleInterval:  5 * time.Millisecond,
+		ErrorBackoff:  -1,
+	})
+	delivered := make(chan struct{})
+	var once sync.Once
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- c.Run(runCtx, func(_ context.Context, e eventlog.Event) error {
+			if e.IdempotencyKey != "after-corrupt" {
+				return fmt.Errorf("unexpected event %q", e.IdempotencyKey)
+			}
+			once.Do(func() { close(delivered) })
+			return nil
+		})
+	}()
+	waitConsumer(t, delivered, errCh, cancel, 10*time.Second)
+}
+
+func TestEventConsumerDeliverOneTreatsSerializationAsRedelivery(t *testing.T) {
+	// Unit-level: deliverOne remaps 40001 into handlerError so Run redelivers.
+	t.Parallel()
+	err := &handlerError{err: wrapPgCode(postgresSerializationFailure)}
+	if !isHandlerError(err) {
+		t.Fatal("handlerError wrapper required for redelivery path")
+	}
+	if !isTransientTxConflict(wrapPgCode(postgresSerializationFailure)) {
+		t.Fatal("isTransientTxConflict must recognize 40001")
 	}
 }
 

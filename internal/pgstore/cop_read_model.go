@@ -100,6 +100,14 @@ func (s *Store) SaveCOPReadModel(ctx context.Context, result contracts.Projectio
 }
 
 // SaveCOPReadModelKey UPSERTs the materialization for an explicit key.
+//
+// # Revision CAS
+//
+// ON CONFLICT only applies the update when the incoming row is strictly newer:
+// EXCLUDED.state_revision > stored.state_revision, or equal revision with a
+// strictly greater through_canonical_seq (NULL treated as -1 for comparison).
+// A concurrent or stale Save with a lower (or equal without progress) revision
+// is a successful no-op so the higher materialization is never regressed.
 func (s *Store) SaveCOPReadModelKey(ctx context.Context, key string, result contracts.ProjectionResult) error {
 	key = strings.TrimSpace(key)
 	if key == "" {
@@ -155,7 +163,13 @@ func (s *Store) SaveCOPReadModelKey(ctx context.Context, key string, result cont
 			cop_json = EXCLUDED.cop_json,
 			checkpoint_json = EXCLUDED.checkpoint_json,
 			through_canonical_seq = EXCLUDED.through_canonical_seq,
-			updated_at = now()`,
+			updated_at = now()
+		WHERE EXCLUDED.state_revision > cop_read_model.state_revision
+		   OR (
+				EXCLUDED.state_revision = cop_read_model.state_revision
+				AND COALESCE(EXCLUDED.through_canonical_seq, -1)
+				  > COALESCE(cop_read_model.through_canonical_seq, -1)
+		   )`,
 		key, result.StateRevision, projectedAt, copJSON, checkpointJSON, through,
 	); err != nil {
 		return fmt.Errorf("save cop read model %q: %w", key, err)

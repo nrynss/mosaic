@@ -100,6 +100,57 @@ func pgIdent(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
+func TestNewFromPoolCloseLeavesPoolUsable(t *testing.T) {
+	// P0 ownsPool: Close must not close a pool adopted via NewFromPool.
+	dsn := strings.TrimSpace(os.Getenv(testDSNEnv))
+	if dsn == "" {
+		t.Skipf("%s not set; skipping PostgreSQL integration test", testDSNEnv)
+	}
+	ctx := context.Background()
+
+	schema := fmt.Sprintf("mosaic_test_owns_%d_%d", time.Now().UnixNano(), schemaCounter.Add(1))
+	bootstrap, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect bootstrap: %v", err)
+	}
+	if _, err := bootstrap.Exec(ctx, fmt.Sprintf("CREATE SCHEMA %s", pgIdent(schema))); err != nil {
+		_ = bootstrap.Close(ctx)
+		t.Fatalf("create test schema: %v", err)
+	}
+	_ = bootstrap.Close(ctx)
+	t.Cleanup(func() { dropSchema(t, dsn, schema) })
+
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("parse DSN: %v", err)
+	}
+	cfg.ConnConfig.RuntimeParams["search_path"] = schema
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatalf("open pool: %v", err)
+	}
+	defer pool.Close()
+
+	s, err := NewFromPool(ctx, pool)
+	if err != nil {
+		t.Fatalf("NewFromPool: %v", err)
+	}
+	if s.ownsPool {
+		t.Fatal("NewFromPool must set ownsPool=false")
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	// Pool must still accept queries after Store.Close.
+	if err := pool.Ping(ctx); err != nil {
+		t.Fatalf("pool unusable after NewFromPool Store.Close: %v", err)
+	}
+	var one int
+	if err := pool.QueryRow(ctx, "SELECT 1").Scan(&one); err != nil || one != 1 {
+		t.Fatalf("query after Close: one=%d err=%v", one, err)
+	}
+}
+
 func TestOpenAppliesMigrationsAndRejectsHistoryMutation(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)

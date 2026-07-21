@@ -106,6 +106,25 @@ func TestTopicChannelDistinctTopics(t *testing.T) {
 	}
 }
 
+func TestTopicChannelPunctuationCollisionDocumented(t *testing.T) {
+	// Documents sanitize collision: "a.b" and "a_b" share one channel.
+	t.Parallel()
+	a, err := TopicChannel("a.b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := TopicChannel("a_b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a != b {
+		t.Fatalf("expected sanitize collision a.b / a_b → same channel; got %q vs %q", a, b)
+	}
+	if a != "mb_a_b" {
+		t.Fatalf("channel = %q, want mb_a_b", a)
+	}
+}
+
 func newTestEventBus(t *testing.T) *EventBus {
 	t.Helper()
 	s := newTestStore(t)

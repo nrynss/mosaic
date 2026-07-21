@@ -44,8 +44,18 @@ var (
 // holds a pgx connection pool; individual operations acquire connections as
 // needed, and WithinTransaction pins one connection for the duration of a
 // transaction.
+//
+// # Pool sizing for EventConsumer
+//
+// When this Store backs a multi-worker EventConsumer, size the pool at least
+// 2× the concurrent worker count: each worker holds one connection for the
+// session advisory lock while deliverOne borrows a second connection for the
+// project+position transaction. Undersizing starves either lock acquisition
+// or delivery under load. Open uses the pgxpool default; callers that share a
+// pool via NewFromPool should set MaxConns accordingly.
 type Store struct {
-	pool *pgxpool.Pool
+	pool     *pgxpool.Pool
+	ownsPool bool // true when Open created the pool; Close closes only then
 }
 
 var (
@@ -68,7 +78,7 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open PostgreSQL pool: %w", err)
 	}
-	s := &Store{pool: pool}
+	s := &Store{pool: pool, ownsPool: true}
 	if err := s.configure(ctx); err != nil {
 		pool.Close()
 		return nil, err
@@ -83,23 +93,25 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 // NewFromPool adopts an already-configured pgx pool and applies migrations. It
 // is useful when the caller owns pool lifecycle (for example a shared pool for
 // the event spine and read model). The caller retains ownership of the pool;
-// Close on the returned Store does not close a pool passed in here.
+// Close on the returned Store does not close a pool passed in here
+// (ownsPool is false).
 func NewFromPool(ctx context.Context, pool *pgxpool.Pool) (*Store, error) {
 	if pool == nil {
 		return nil, fmt.Errorf("%w: pool is required", ErrInvalidRecord)
 	}
-	s := &Store{pool: pool}
+	s := &Store{pool: pool, ownsPool: false}
 	if err := s.applyMigrations(ctx); err != nil {
 		return nil, err
 	}
 	return s, nil
 }
 
-// Close releases the connection pool opened by Open. Pools passed to
-// NewFromPool are owned by the caller and are not closed here.
+// Close releases the connection pool only when this Store owns it (created via
+// Open). Pools passed to NewFromPool remain open for the caller.
 func (s *Store) Close() error {
-	if s.pool != nil {
+	if s.pool != nil && s.ownsPool {
 		s.pool.Close()
+		s.pool = nil
 	}
 	return nil
 }
@@ -118,8 +130,29 @@ func (s *Store) configure(ctx context.Context) error {
 	return nil
 }
 
+// migrationAdvisoryLockKey is a stable 64-bit key for pg_advisory_lock so
+// concurrent Open/NewFromPool calls serialize DDL and the schema_migrations
+// ledger. Value is arbitrary but fixed: "mosaic pgstore migrations" as two
+// 32-bit halves via hashtext would vary by Postgres version; a constant does not.
+const migrationAdvisoryLockKey int64 = 0x4d4f534149435f4d // "MOSAIC_M" as hex-ish
+
 func (s *Store) applyMigrations(ctx context.Context) error {
-	if _, err := s.pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
+	// Hold a session advisory lock on one connection for the whole migrate
+	// pass so two processes cannot race CREATE TABLE / ledger inserts.
+	conn, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire connection for migrations: %w", err)
+	}
+	defer conn.Release()
+
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrationAdvisoryLockKey); err != nil {
+		return fmt.Errorf("acquire migration advisory lock: %w", err)
+	}
+	defer func() {
+		_, _ = conn.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, migrationAdvisoryLockKey)
+	}()
+
+	if _, err := conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
 		migration_name TEXT PRIMARY KEY,
 		applied_at TEXT NOT NULL
 	)`); err != nil {
@@ -136,7 +169,7 @@ func (s *Store) applyMigrations(ctx context.Context) error {
 			continue
 		}
 		var present int
-		err := s.pool.QueryRow(ctx,
+		err := conn.QueryRow(ctx,
 			"SELECT 1 FROM schema_migrations WHERE migration_name = $1", entry.Name(),
 		).Scan(&present)
 		if err == nil {
@@ -150,7 +183,7 @@ func (s *Store) applyMigrations(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", entry.Name(), err)
 		}
-		tx, err := s.pool.Begin(ctx)
+		tx, err := conn.Begin(ctx)
 		if err != nil {
 			return fmt.Errorf("begin migration %s: %w", entry.Name(), err)
 		}
@@ -833,7 +866,17 @@ func (s *Store) appendJSONRecord(ctx context.Context, table, idColumn, id string
 	if err != nil {
 		return err
 	}
-	statement := fmt.Sprintf("INSERT INTO %s (%s, state_revision, record_json) VALUES ($1, $2, $3::jsonb)", table, idColumn)
+	// Fixed SQL per known table — avoid free-form sprintf of identifiers.
+	var statement string
+	switch table {
+	case "insights":
+		statement = `INSERT INTO insights (insight_id, state_revision, record_json) VALUES ($1, $2, $3::jsonb)`
+	case "recommendations":
+		statement = `INSERT INTO recommendations (recommendation_id, state_revision, record_json) VALUES ($1, $2, $3::jsonb)`
+	default:
+		return fmt.Errorf("append %s: unsupported table", table)
+	}
+	_ = idColumn // callers pass the PK column for readability; SQL is fixed above
 	if _, err := exec.Exec(ctx, statement, id, stateRevision, recordJSON); err != nil {
 		return fmt.Errorf("append %s: %w", table, err)
 	}

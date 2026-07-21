@@ -8,9 +8,18 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"mosaic.local/mosaic/internal/eventlog"
+)
+
+// Postgres SQLSTATE codes treated as transient redelivery for deliverOne
+// (serializable conflict / deadlock). Same path as handlerError: ErrorBackoff,
+// never a fatal Run exit.
+const (
+	postgresSerializationFailure = "40001"
+	postgresDeadlockDetected     = "40P01"
 )
 
 // DefaultConsumerGroup is the projector's logical consumer group. Distinct
@@ -62,6 +71,13 @@ type ConsumerConfig struct {
 // hashtext collisions only over-serialize (two keys share a lock slot); they
 // never under-serialize.
 //
+// # Pool sizing
+//
+// Each active worker needs two pool connections while draining a partition:
+// one held for the advisory lock, and one for the serializable deliver TX.
+// Configure the shared pool with MaxConns >= 2× concurrent workers (see
+// Store docs).
+//
 // # Atomic project+position
 //
 // handle is invoked inside Store.WithinTransaction. On nil, the checkpoint is
@@ -69,7 +85,8 @@ type ConsumerConfig struct {
 // On error the transaction rolls back and the checkpoint does not advance, so
 // the event is redelivered later. Nested WithinTransaction calls join, so a
 // handler that projects via the TX context gets true atomicity with the
-// cursor advance.
+// cursor advance. Serializable conflicts (40001) and deadlocks (40P01) are
+// treated as redelivery, not fatal transport errors.
 type EventConsumer struct {
 	store        *Store
 	group        string
@@ -252,7 +269,10 @@ func (c *EventConsumer) tryProcessPartition(
 
 // deliverOne runs handle and, on success, UPSERTs the checkpoint in one
 // serializable transaction. Handler errors are wrapped so Run can distinguish
-// redelivery from fatal transport failures.
+// redelivery from fatal transport failures. Postgres serialization_failure
+// (40001) and deadlock_detected (40P01) are remapped to the same redelivery
+// path (ErrorBackoff) because concurrent multi-worker drains will hit them
+// under Serializable isolation; they must not exit Run.
 func (c *EventConsumer) deliverOne(
 	ctx context.Context,
 	event eventlog.Event,
@@ -275,8 +295,21 @@ func (c *EventConsumer) deliverOne(
 	if errors.As(txErr, &he) {
 		return txErr
 	}
+	if isTransientTxConflict(txErr) {
+		return &handlerError{err: txErr}
+	}
 	// Commit/begin failures are transport-level.
 	return fmt.Errorf("event consumer deliver: %w", txErr)
+}
+
+// isTransientTxConflict reports Postgres SQLSTATE codes that should redeliver
+// rather than kill the consumer loop.
+func isTransientTxConflict(err error) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return false
+	}
+	return pgErr.Code == postgresSerializationFailure || pgErr.Code == postgresDeadlockDetected
 }
 
 type handlerError struct {
@@ -353,7 +386,10 @@ func (c *EventConsumer) loadCheckpointSequence(ctx context.Context, partitionKey
 	}
 	seq, err := DecodeSequenceToken(*token)
 	if err != nil {
-		return 0, fmt.Errorf("consumer checkpoint for group %q partition %q: %w", c.group, partitionKey, err)
+		// Corrupt / non-decimal tokens are treated as sequence 0, matching
+		// listPartitionsWithWork (CASE WHEN ~ '^[1-9][0-9]*$' … ELSE 0). Never
+		// kill Run for a bad cursor — fail open to redelivery from the start.
+		return 0, nil
 	}
 	return seq, nil
 }
