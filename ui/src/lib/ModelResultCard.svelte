@@ -23,31 +23,73 @@
       (status === 'quarantined' ? 'Quarantined without a reason field' : '')
   );
 
-  let provenance = $derived(buildProvenance(cassetteMode, modelRun, result?.providers, agent));
+  let provenance = $derived(
+    buildProvenance(cassetteMode, modelRun, result?.providers, agent, status, error, result)
+  );
   let statusTone = $derived(statusClass(status));
 
-  function buildProvenance(mode, run, providers, agentName) {
+  /**
+   * Prefer response signals (provider + status) over process cassette mode.
+   * Process mode is only a secondary hint when the call did not return a model payload.
+   */
+  function buildProvenance(mode, run, providers, agentName, statusValue, errText, body) {
     const provider =
       run?.provider ||
       (providers && agentName ? providers[agentName] : '') ||
       '';
     const model = run?.model || '';
-    const modeLabel = modeLabelFor(mode, provider);
-    const bits = [modeLabel];
+    const processMode = String(mode || '').toLowerCase();
+    const outcome = outcomeLabel(statusValue, errText, body, provider, processMode);
+    const bits = [outcome];
     if (provider) bits.push(provider);
     if (model) bits.push(model);
+    if (processMode && !String(outcome).includes(processMode) && outcome !== 'replay (banked)') {
+      bits.push(`mode: ${processMode}`);
+    }
     return bits.filter(Boolean).join(' · ');
   }
 
-  function modeLabelFor(mode, provider) {
-    const m = String(mode || '').toLowerCase();
-    if (m === 'replay') return 'replay (banked)';
-    if (m === 'record') return 'record';
-    if (provider === 'openai' || m === 'live') return 'live';
-    if (provider === 'mosaic-fixture' || provider === 'fixture' || m === 'passthrough' || m === 'fixture') {
+  function outcomeLabel(statusValue, errText, body, provider, processMode) {
+    const st = String(statusValue || '').toLowerCase();
+    const failed =
+      Boolean(errText) ||
+      ['error', 'failed', 'unavailable', 'timed_out', 'invalid'].includes(st) ||
+      (body?.model_run?.failure_detail &&
+        String(body.model_run.failure_detail).includes('no recording for key'));
+
+    if (failed) {
+      if (processMode === 'replay') return 'replay · outcome: error';
+      if (processMode) return `${processMode} · outcome: error`;
+      return 'outcome: error';
+    }
+
+    // Successful model payload with fixture provider under replay = bank hit.
+    if (processMode === 'replay' && provider === 'mosaic-fixture' && body && !errText) {
+      if (['ok', 'accepted', 'repaired', 'quarantined', 'refused', 'rejected'].includes(st)) {
+        return 'replay (banked)';
+      }
+    }
+
+    if (provider === 'openai' || processMode === 'live' || processMode === 'record') {
+      if (processMode === 'record') return 'record';
+      return 'live';
+    }
+
+    if (
+      provider === 'mosaic-fixture' ||
+      provider === 'fixture' ||
+      processMode === 'passthrough' ||
+      processMode === 'fixture'
+    ) {
+      if (st === 'refused') return 'fixture (declined)';
       return 'fixture';
     }
-    if (m) return m;
+
+    if (processMode === 'replay') {
+      // Replay process mode but no successful banked model payload yet.
+      return 'mode: replay';
+    }
+    if (processMode) return `mode: ${processMode}`;
     return provider || 'unknown';
   }
 
@@ -152,7 +194,10 @@
         </p>
         {#if result?.canonical_event_id || lunaResult.canonical_event_id}
           <p class="id-line">
-            Canonical event: <code>{result?.canonical_event_id || lunaResult.canonical_event_id}</code>
+            Canonical event id: <code>{result?.canonical_event_id || lunaResult.canonical_event_id}</code>
+            <span class="api-boundary-note">
+              (operator API returns identifiers only — not full event_type/payload re-echo)
+            </span>
           </p>
         {/if}
         {#if lunaResult.status === 'quarantined' || status === 'quarantined' || quarantineReason}
@@ -335,5 +380,12 @@
 
   .luna-block {
     border-left-color: var(--info);
+  }
+
+  .api-boundary-note {
+    display: block;
+    margin-top: 0.15rem;
+    font-size: 0.54rem;
+    color: var(--ink-faint);
   }
 </style>

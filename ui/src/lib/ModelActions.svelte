@@ -8,6 +8,7 @@
     'baseline-01-911-call',
     'baseline-04-road-closure',
     'baseline-05-ems-availability',
+    'fixture-07-repaired-incomplete-road',
     'fixture-08-quarantined-input',
     'fixture-10-road-correction'
   ];
@@ -15,7 +16,9 @@
   let {
     readEnvelope,
     loadAdvisories,
-    cassetteModeHint = ''
+    cassetteModeHint = '',
+    /** Live COP state_revision from the workspace (number or undefined). */
+    copRevision = null
   } = $props();
 
   let loadState = $state('idle'); // idle | loading | ready | error
@@ -51,6 +54,14 @@
   let otherLuna = $derived(
     lunaSteps.filter((s) => !CURATED_BEAT_IDS.includes(s.beat_id))
   );
+  let expectedCOP = $derived(Number(interactions?.expected_cop_revision) || 9);
+  let liveCOP = $derived(
+    copRevision === null || copRevision === undefined || copRevision === ''
+      ? null
+      : Number(copRevision)
+  );
+  /** Terra/Sol bank keys embed revN — only enable when COP matches expected. */
+  let copReadyForModel = $derived(liveCOP !== null && !Number.isNaN(liveCOP) && liveCOP === expectedCOP);
 
   onMount(() => {
     void loadInteractions();
@@ -178,7 +189,10 @@
         type="button"
         class="action-btn primary"
         data-testid="generate-assessment"
-        disabled={actionState === 'loading' || !terraStep}
+        disabled={actionState === 'loading' || !terraStep || !copReadyForModel}
+        title={!copReadyForModel
+          ? `Play the scenario until COP rev ${expectedCOP} (current: ${liveCOP ?? '—'})`
+          : 'Generate Terra assessment from the demo manifest'}
         onclick={runTerra}
       >
         Generate assessment (Terra)
@@ -187,15 +201,22 @@
         type="button"
         class="action-btn primary"
         data-testid="request-briefing"
-        disabled={actionState === 'loading' || !solStep}
+        disabled={actionState === 'loading' || !solStep || !copReadyForModel}
+        title={!copReadyForModel
+          ? `Play the scenario until COP rev ${expectedCOP} (current: ${liveCOP ?? '—'})`
+          : 'Request Sol briefing from the demo manifest'}
         onclick={runSol}
       >
         Request briefing (Sol)
       </button>
     </div>
-    <p class="hint subtle">
-      Terra/Sol expect COP revision {interactions?.expected_cop_revision ?? 9} — play the scenario first.
-      Mode: <code>{cassetteMode || 'unknown'}</code>
+    <p class="hint subtle" class:problem={!copReadyForModel && loadState === 'ready'}>
+      {#if copReadyForModel}
+        COP rev {liveCOP} matches Terra/Sol bank (rev {expectedCOP}). Mode: <code>{cassetteMode || 'unknown'}</code>
+      {:else}
+        Terra/Sol disabled until COP rev {expectedCOP} (current: {liveCOP ?? '—'}) — play the scenario first.
+        Mode: <code>{cassetteMode || 'unknown'}</code>
+      {/if}
     </p>
 
     <div class="luna-block">
@@ -211,7 +232,7 @@
           <button
             type="button"
             class="action-btn luna-btn"
-            data-testid="interpret-event"
+            data-testid={`interpret-event-${step.beat_id}`}
             data-beat={step.beat_id}
             disabled={actionState === 'loading'}
             onclick={() => runLuna(step)}
@@ -242,7 +263,10 @@
               <button
                 type="button"
                 class="action-btn luna-btn"
-                data-testid="interpret-event-other"
+                data-testid={selectedOtherBeat
+                  ? `interpret-event-${selectedOtherBeat}`
+                  : 'interpret-event-other'}
+                data-beat={selectedOtherBeat || undefined}
                 disabled={actionState === 'loading' || !selectedOtherBeat}
                 onclick={runSelectedOther}
               >
@@ -356,6 +380,10 @@
 
   .hint.subtle {
     color: var(--ink-faint);
+  }
+
+  .hint.problem {
+    color: var(--warn);
   }
 
   .problem {

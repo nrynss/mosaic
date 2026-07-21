@@ -6,166 +6,163 @@ render the returned model output **honestly** — real when live, banked when re
 declined when fixture — without ever mutating the board. This is what lets the demo
 *show* the real Terra/Sol/Luna output that the cassette recorder banked.
 
-**Branch:** `feat/v0.4-pluggable-event-spine`
+**Branch:** `feat/v0.4-pluggable-event-spine`  
+**Status:** ✅ **Implemented** (2026-07-21)  
+**Implementation commits:**
+- `73f859a` — initial wiring (endpoint + UI + unit tests)
+- *(this close-out)* — review fixes: COP gate, provenance honesty, unique testids,
+  beat-7 curated, interactions→POST replay bank-hit test
+
 **Unblocks:** the replay-backed Playwright flow (see
-[playwright-demo-e2e.md](playwright-demo-e2e.md) §6.4).
-**Depends on:** cassette recorder (`1bb0974`) + committed bank `testdata/demo/cassettes/`.
-**Pairs with:** [fixture-enrichment-relive-record.md](fixture-enrichment-relive-record.md)
-(after enrichment, the banked Luna output is mostly `accepted` instead of quarantined —
-better to show).
+[playwright-demo-e2e.md](playwright-demo-e2e.md) §6.4).  
+**Depends on:** cassette recorder (`1bb0974`) + committed bank `testdata/demo/cassettes/`
++ fixture enrichment (`3eea527`).
 
 ---
 
-## 0. Current state (verified)
+## Implementation record (landed)
 
-- The UI **never** calls the model endpoints today. "Refresh advice" just re-fetches
-  `GET /api/v1/advisories` ([ui/src/lib/IncidentWorkspace.svelte](../../ui/src/lib/IncidentWorkspace.svelte)).
-  The board is driven entirely by the fixture/replay Play pipeline.
-- There is an established operator-POST pattern to reuse:
-  `readEnvelope('operator/…', { method:'POST', headers:{'Content-Type':'application/json'},
-  body: JSON.stringify({...}) })` — see
-  [ui/src/lib/ActionCards.svelte](../../ui/src/lib/ActionCards.svelte) (approve / annotate
-  / prepare-handoff). `apiURL`, `headersFor`, `readEnvelope` live in
-  [ui/src/App.svelte](../../ui/src/App.svelte); `headersFor()` already injects the
-  `X-Mosaic-Demo-Identity` header (so Sol's supervisor requirement should already be met —
-  verify).
-- Mode badges exist ([ui/src/lib/ModelModeIndicator.svelte](../../ui/src/lib/ModelModeIndicator.svelte)) —
-  reuse them to label output provenance (fixture / live / replay).
+| Decision / artifact | What shipped |
+|---------------------|--------------|
+| Manifest delivery | **(A)** `GET /api/v1/demo/interactions` — ready-to-POST steps from recording manifest + dataset raw events (`internal/democast.BuildInteractions`) |
+| UI components | `ui/src/lib/ModelActions.svelte`, `ModelResultCard.svelte`; hosted in `IncidentWorkspace.svelte` |
+| Terra | **Generate assessment** → POST `operator/analyze` with served payload; `data-testid="generate-assessment"` |
+| Sol | **Request briefing** → POST `operator/brief` + `X-Mosaic-Demo-Identity` from interactions doc; `data-testid="request-briefing"` |
+| Luna | Curated beats + “Show all beats”; unique `data-testid="interpret-event-{beat_id}"` |
+| Curated Luna set | 911, road closure, EMS, **repaired incomplete road (7)**, quarantine (8), road correction |
+| COP gate | Terra/Sol **disabled** until live COP `state_revision === expected_cop_revision` (9) |
+| Provenance | Prefers response signals (`model_run.provider` + status); only labels **replay (banked)** on successful banked payloads; errors show `replay · outcome: error` |
+| Luna canonical body | Operator API returns **identifiers only** (`canonical_event_id`) — intentional safety boundary; UI notes that it does not re-echo `event_type`/payload |
+| Bank-hit proof | `TestDemoInteractionsReplayBankHits` in `cmd/mosaicdemo`: GET interactions → Play → POST luna/terra/sol from served bodies under replay + committed bank |
+| Secrets | No keys in interactions JSON; browser never sends OpenAI credentials |
 
----
+### How to demo (replay, $0)
 
-## 1. The determinism crux (design driver — read first)
+```powershell
+$env:MOSAIC_SIM_MODE = "replay"
+$env:MOSAIC_CASSETTE_DIR = (Join-Path (Get-Location) "testdata\demo\cassettes")
+Remove-Item Env:OPENAI_API_KEY -ErrorAction SilentlyContinue
+# start mosaicdemo with asset-root = repo root, then:
+# 1) Play scenario → COP rev 9
+# 2) Generate assessment / Request briefing / Interpret curated beats
+# 3) Result card: banked insight/recommendation/LunaResult, executed:false, Decision history audit
+```
 
-Replay hits require **byte-identical requests** to what was banked (Luna keys on exact
-`RawEventJSON` bytes; Sol/Terra on exact evidence `{kind,id,pointer,explanation}` +
-insight ids + COP revision). **Therefore the demo's model actions must issue the exact
-requests the recorder banked** — free-form operator input (typed evidence explanations,
-ad-hoc raw events) will miss in replay.
+### Review close-out (all items addressed)
 
-**Single source of truth = the recording manifest**
-([testdata/demo/recording-manifest.json](../../testdata/demo/recording-manifest.json)).
-The UI must issue the manifest's operator payloads verbatim. Two ways to guarantee that:
-
-- **(A) Serve the manifest to the UI (recommended).** Add a small read-only endpoint,
-  e.g. `GET /api/v1/demo/interactions`, that returns the manifest's operator steps
-  (kind + payload only; no secrets). The UI renders one action per step and POSTs that
-  exact payload to the real operator endpoint. No drift; UI issues *real* API calls;
-  guaranteed replay hits. Reuse `internal/democast` manifest loading.
-- **(B) Mirror the payloads in the UI.** A UI-side constant duplicating the manifest.
-  Simpler, but drifts from the manifest — avoid.
-
-Recommend **(A)**.
-
----
-
-## 2. Mode behavior — one coherent story across all three
-
-The affordances behave correctly in every mode with no special-casing beyond labeling:
-
-| Mode | What the model call does | UI shows |
-|------|--------------------------|----------|
-| `fixture` (default/demo-safe) | interactive Terra/Sol return the deterministic **refuse** client; Luna fixture | "fixture declines interactive assessment" — honest, `provider: mosaic-fixture` |
-| `replay` (**the demo**) | served from the committed bank, **no network, no key** | **real banked** insight/recommendation/LunaResult, `provider: mosaic-fixture` (replay), `$0` |
-| `live` (deliberate) | real OpenAI call | real fresh output, `provider: openai` |
-
-The same buttons work in all three; only the provenance badge changes. Default the demo
-to **replay** so the audience sees real model output offline at `$0`.
+| # | Severity | Fix |
+|---|----------|-----|
+| 1 | suggestion | `TestDemoInteractionsReplayBankHits` POSTs served payloads under replay |
+| 2 | suggestion | Terra/Sol disabled until COP rev matches expected |
+| 3 | suggestion | Provenance uses response outcome, not process mode alone |
+| 4 | suggestion | Documented API boundary (id only); UI note on result card |
+| 5 | nit | Unique `interpret-event-{beat_id}` testids |
+| 6 | nit | Beat-7 promoted into curated grid |
 
 ---
 
-## 3. Affordances to add
+## 0. Current state (verified) — historical
 
-Follow the ActionCards POST pattern; render results in the incident workspace.
+- Before this parcel the UI **never** called model endpoints. "Refresh advice" only
+  re-fetched `GET /api/v1/advisories`.
+- Operator-POST pattern already existed in `ActionCards.svelte`; `headersFor` /
+  `readEnvelope` live in `App.svelte`.
 
-1. **Terra — "Generate assessment"** → `POST /operator/analyze` with the manifest's
-   evidence + note. Render the returned `Insight` (assertions, confidence, evidence),
-   or the honest terminal status (`refused` / `invalid` / `quarantined` / `error`).
-2. **Sol — "Request briefing"** (supervisor) → `POST /operator/brief` with the
-   manifest's insight ids + evidence. Render the `Recommendation` text + evidence, or
-   status. Requires the supervisor identity header (already sent by `headersFor()`).
-3. **Luna — "Interpret event"** → `POST /operator/interpret` with a beat's exact raw
-   event (from the manifest / `internal/democast/raw_events.go`). Render the
-   `LunaResult` status (`accepted`/`repaired`/`quarantined`) and, when present, the
-   canonical event (`event_type`, payload). **Show quarantines proudly** — e.g. beat 8,
-   and (pre-enrichment) the incident beats — with Luna's `reason`. That is the
-   anti-fabrication selling point.
+---
 
-Attach Luna "Interpret" to individual beats/events (the manifest defines the set); Terra
-and Sol as workspace-level actions at COP rev 9.
+## 1. The determinism crux (design driver)
+
+Replay hits require **byte-identical requests** to what was banked. Single source of
+truth = [testdata/demo/recording-manifest.json](../../testdata/demo/recording-manifest.json),
+served via **(A)** `GET /api/v1/demo/interactions` (not a UI mirror).
+
+---
+
+## 2. Mode behavior
+
+| Mode | Model call | UI shows |
+|------|------------|----------|
+| `fixture` / passthrough | Terra/Sol refuse; Luna fixture | fixture (declined) / fixture |
+| `replay` | banked cassette | **replay (banked)** + `mosaic-fixture` |
+| `live` / record | OpenAI | live / record |
+
+---
+
+## 3. Affordances (shipped)
+
+1. Terra — Generate assessment  
+2. Sol — Request briefing (supervisor identity)  
+3. Luna — Interpret event (curated + all beats); quarantines shown with reason  
 
 ---
 
 ## 4. Honest rendering + boundary (non-negotiable)
 
-Every model response is `executed: false` and appends an audit; the board **must not
-change** from these actions (agents propose, never dispose). The UI must:
-
-- Show the **provenance badge** (fixture / live / replay + model id) on each result so
-  the audience knows whether it's real, replayed, or declined.
-- Render non-`ok` outcomes truthfully (refusal detail, quarantine `reason`, failure) —
-  never hide them or fake success.
-- Reinforce the boundary: a visible "proposed, not applied — board unchanged" affordance;
-  the action also lands in Decision history as `executed:false` (existing behavior).
-- Never send secrets or the API key from the browser (the key is server-only).
+- Provenance badge reflects **outcome**, not only process mode  
+- Non-ok (refused / quarantined + reason / error) rendered truthfully  
+- “Proposed, not applied — board unchanged · executed: false”  
+- No browser-side API key  
 
 ---
 
 ## 5. Selectors for Playwright
 
-Add `data-testid` on the new controls and result regions so the replay-backed Playwright
-flow ([playwright-demo-e2e.md](playwright-demo-e2e.md)) can assert real banked text
-renders:
-`generate-assessment`, `request-briefing`, `interpret-event`, `model-result-card`,
-`model-result-status`, `model-provenance-badge`, `luna-quarantine-reason`.
+| testid | Notes |
+|--------|--------|
+| `generate-assessment` | Terra |
+| `request-briefing` | Sol |
+| `interpret-event-{beat_id}` | Unique per beat (e.g. `interpret-event-baseline-01-911-call`) |
+| `model-result-card` | Result region |
+| `model-result-status` | Terminal status pill |
+| `model-provenance-badge` | Provenance string |
+| `luna-quarantine-reason` | Quarantine reason block |
+
+Also: `data-beat` on Luna buttons and result card.
 
 ---
 
-## 6. Decisions to confirm
-1. **Manifest delivery:** endpoint (A) vs UI mirror (B). Recommend **A** (`GET
-   /api/v1/demo/interactions`).
-2. **Default demo mode:** replay (recommended) — audience sees real output, `$0`, offline.
-3. **Luna scope in UI:** interpret on all 10 beats vs a curated few (incident + a couple
-   status changes). Recommend a curated few for narrative flow, with the rest available.
-4. **Sequencing vs enrichment:** this parcel works today (shows current bank, incl.
-   quarantines), but reads best **after**
-   [fixture-enrichment-relive-record.md](fixture-enrichment-relive-record.md) so most
-   Luna beats are `accepted`. Either order is fine; note the dependency.
+## 6. Decisions (confirmed)
+
+1. Manifest delivery: **(A)** endpoint — done  
+2. Default demo mode: **replay** for audience demos — documented  
+3. Luna scope: curated (incl. beat 7 + 8) + show all — done  
+4. Sequencing: after enrichment (`3eea527`) — done  
 
 ---
 
 ## 7. Acceptance criteria
-- [ ] Terra/Sol/Luna affordances added, reusing the `readEnvelope` operator-POST pattern.
-- [ ] Requests are byte-identical to the manifest (via endpoint A or an equivalent
-      guarantee); **replay mode hits the bank with no key, no network** and renders real
-      banked output.
-- [ ] All three modes render coherently with an honest provenance badge (fixture declines /
-      live real / replay banked).
-- [ ] Non-`ok` outcomes (refusal / quarantine + `reason` / failure) render truthfully;
-      quarantine reason is visible.
-- [ ] Board is provably unchanged by any model action; action appears in Decision history
-      as `executed:false`.
-- [ ] No secret/API key ever leaves the server; browser sends none.
-- [ ] `data-testid`s added (§5) for the Playwright replay flow.
-- [ ] Works with the committed bank in CI-style replay (no key).
+
+- [x] Terra/Sol/Luna affordances added, reusing the `readEnvelope` operator-POST pattern.
+- [x] Requests match the manifest via `GET /api/v1/demo/interactions`; replay hits the
+      bank with no key (integration test + e2e democast path).
+- [x] All three modes render with honest provenance (fixture decline / live / replay banked;
+      errors not mislabeled as banked).
+- [x] Non-`ok` outcomes (refusal / quarantine + `reason` / failure) render truthfully.
+- [x] Board unchanged; `executed: false`; Decision history refreshed after actions.
+- [x] No secret/API key leaves the server; browser sends none.
+- [x] `data-testid`s for Playwright (`interpret-event-{beat_id}` unique form).
+- [x] CI-style replay path works without key.
 
 ---
 
 ## 8. Non-goals
+
 - No board mutation from model output (hard boundary).
-- No browser-side API key or live-by-default (demo defaults to replay).
-- No free-form operator model input in the demo path (would miss replay); free-form is a
-  live-only power-user concern, out of scope here.
+- No browser-side API key or live-by-default.
+- No free-form operator model input in the demo path.
+- Full canonical event body re-echo to the browser (API returns ids only).
 
 ---
 
 ## 9. Files & symbols index
+
 | Area | Path |
 |---|---|
-| Operator endpoints | [internal/api/operator.go](../../internal/api/operator.go) — `handleOperatorAnalyze/Brief/Interpret`, `hydrateOperatorInsights` |
-| UI fetch helpers | [ui/src/App.svelte](../../ui/src/App.svelte) — `apiURL`, `headersFor`, `readEnvelope` |
-| Operator-POST pattern to reuse | [ui/src/lib/ActionCards.svelte](../../ui/src/lib/ActionCards.svelte) |
-| Board / advisories host | [ui/src/lib/IncidentWorkspace.svelte](../../ui/src/lib/IncidentWorkspace.svelte) |
-| Mode / provenance badges | [ui/src/lib/ModelModeIndicator.svelte](../../ui/src/lib/ModelModeIndicator.svelte) |
-| Manifest (request identity) | [testdata/demo/recording-manifest.json](../../testdata/demo/recording-manifest.json), `internal/democast/manifest.go`, `raw_events.go` |
-| Replay bank | `testdata/demo/cassettes/`, [demo-cassette-recorder.md](../runbook/demo-cassette-recorder.md) |
-| Identity header | [internal/api/server.go](../../internal/api/server.go) `IdentityHeader` = `X-Mosaic-Demo-Identity`, `supervisor-demo` |
+| Interactions builder | [internal/democast/interactions.go](../../internal/democast/interactions.go) |
+| API handler | [internal/api/demo_interactions.go](../../internal/api/demo_interactions.go) |
+| Route / DemoAssetRoot | [internal/api/server.go](../../internal/api/server.go), [cmd/mosaicdemo/main.go](../../cmd/mosaicdemo/main.go) |
+| UI actions / results | [ui/src/lib/ModelActions.svelte](../../ui/src/lib/ModelActions.svelte), [ModelResultCard.svelte](../../ui/src/lib/ModelResultCard.svelte) |
+| Workspace host | [ui/src/lib/IncidentWorkspace.svelte](../../ui/src/lib/IncidentWorkspace.svelte) |
+| Bank-hit integration test | `cmd/mosaicdemo` — `TestDemoInteractionsReplayBankHits` |
+| Manifest | [testdata/demo/recording-manifest.json](../../testdata/demo/recording-manifest.json) |
+| Replay bank | `testdata/demo/cassettes/` |

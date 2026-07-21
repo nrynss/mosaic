@@ -165,6 +165,7 @@
       {readEnvelope}
       {loadAdvisories}
       cassetteModeHint={advisories?.cassette_mode || ''}
+      copRevision={cop?.state_revision ?? cop?.cop?.state_revision ?? null}
     />
   {/if}
 
