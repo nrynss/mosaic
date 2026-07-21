@@ -253,8 +253,8 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 		// models, records, and advisories. SQLite file path and Postgres DSN
 		// never split across two stores.
 		domainStore composeStore
-		// recovery is domainRuntime by default; Postgres prefers the
-		// materialized COP read model when present.
+		// preferMaterialized: Postgres durable COP table, or progressive SQLite
+		// in-memory MemoryCOP session board cache (D1h R2).
 		preferMaterialized contracts.COPReadModelRepository
 	)
 
@@ -291,6 +291,12 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 			_ = closeDatabase()
 			return nil, fmt.Errorf("compose SQLite operations reader: %w", err)
 		}
+		// Progressive SQLite: session board cache (D1h R2). Durable store keeps
+		// append-only history; PreferMaterializedRecovery + Active scopes the
+		// operator COP view so Reset / a second session does not flash prior Play.
+		if !configuration.SeedOnStart {
+			preferMaterialized = store.NewMemoryCOP()
+		}
 	}
 
 	// Active session epoch (C3): empty board until Play; natural end leaves
@@ -306,11 +312,17 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 
 	// Compose builds the profile's deterministic scenario, fixture advisory
 	// continuum, and evidence resolver over the single durable store. Active is
-	// passed so Postgres materialization writes session-scoped COP keys.
-	// SessionAdvisories lets progressive ProcessBeat Record fixture stage ids.
+	// passed so materialization writes session-scoped COP keys (Postgres durable
+	// table; progressive SQLite in-memory MemoryCOP). SessionAdvisories lets
+	// progressive ProcessBeat Record fixture stage ids.
 	composeCtx := domesticdisturbance.WithActiveSession(ctx, activeSession)
 	if sessionAdvisories != nil {
 		composeCtx = domesticdisturbance.WithSessionAdvisories(composeCtx, sessionAdvisories)
+	}
+	// Share MemoryCOP with domain MaterializingProjector (SQLite progressive).
+	// Postgres ignores this context value and uses its own store table.
+	if preferMaterialized != nil && !isPostgres && !configuration.SeedOnStart {
+		composeCtx = domesticdisturbance.WithCOPMaterialization(composeCtx, preferMaterialized)
 	}
 	domainRuntime, err := selected.Compose(composeCtx, records, configuration.AssetRoot)
 	if err != nil {
@@ -421,8 +433,9 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 	detector := recurrence.NewDetector(area, window, time.Now)
 
 	// Recovery: progressive path scopes on ActiveSession (empty until Play).
-	// Postgres prefers session-scoped materialization; SQLite uses domain recover
-	// gated by ActiveSession on the API Server.
+	// Both Postgres (durable) and progressive SQLite (MemoryCOP) prefer
+	// session-scoped materialization — never full-store Recover while Active
+	// is set, so a second session / Reset cannot flash prior Play COP (D1h R2).
 	recovery := api.RecoveryReader(domainRuntime)
 	var apiActive contracts.ActiveSessionSource
 	if !seedOnStart {

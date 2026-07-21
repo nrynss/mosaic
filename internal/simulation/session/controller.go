@@ -35,6 +35,11 @@
 // Emission order always follows the Order field (ascending), not the schedule
 // slice order.
 //
+// Progressive processing order (R1): for each beat, wait for spacing, then
+// OnBeat (EventLog.Append + ProcessBeat) when set, then emitBeat SSE only on
+// success. Clients that reload COP on beat SSE therefore never flash a stale
+// revision. Nil OnBeat keeps emit-only behaviour (seed overlay / pure SSE).
+//
 // Stream backpressure: each subscriber has a bounded buffer (default 64). When
 // the buffer is full the oldest pending event is dropped so a slow consumer
 // cannot block the controller indefinitely (drop-oldest).
@@ -123,11 +128,14 @@ type Config struct {
 	// Natural beat completion leaves Active set so the final COP remains visible.
 	Active *ActiveSession
 
-	// OnBeat is invoked after each successful SSE beat emission (mutex released).
-	// Composition uses it for the progressive EventLog path: Append the raw
-	// event, then synchronously ingest+project (+ advisory continuum). A non-nil
-	// error stops further beats and ends the session cleanly (Active left set so
-	// partial progress remains visible). Nil means SSE-only emission.
+	// OnBeat is invoked after spacing wait and before SSE beat emission (mutex
+	// released). Composition uses it for the progressive EventLog path: Append
+	// the raw event, then synchronously ingest+project (+ advisory continuum).
+	// Only on success does the controller emitBeat so clients reload COP after
+	// the projection advanced (avoids a stale-revision flash). A non-nil error
+	// skips emit for that beat, stops further beats, and ends the session
+	// cleanly (Active left set so partial progress remains visible). Nil means
+	// SSE-only emission (seed overlay / tests without progressive processing).
 	OnBeat func(ctx context.Context, beat contracts.ScheduledBeat) error
 }
 
@@ -418,17 +426,18 @@ func (c *Controller) runBeats(
 			completed = false
 			break
 		}
-		if !c.emitBeat(sessionID, beat) {
-			completed = false
-			break
-		}
-		// OnBeat runs after SSE emission with the controller mutex released so
-		// domain work (EventLog.Append + sync ingest) cannot deadlock Status/End.
+		// OnBeat first (mutex released) so domain work advances COP before SSE.
+		// emitBeat only after success — clients that reload on beat events must
+		// not flash a stale revision (R1). Nil OnBeat keeps emit-only behaviour.
 		if c.onBeat != nil {
 			if err := c.onBeat(ctx, beat); err != nil {
 				completed = false
 				break
 			}
+		}
+		if !c.emitBeat(sessionID, beat) {
+			completed = false
+			break
 		}
 	}
 

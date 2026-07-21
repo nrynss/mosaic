@@ -104,19 +104,77 @@ func TestNewApplicationEmptyBoardUntilPlay(t *testing.T) {
 	if _, err := app.simulation.Start(context.Background()); err != nil {
 		t.Fatalf("simulation Start: %v", err)
 	}
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		if app.simulation.Status().Status == contracts.SessionEnded {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if app.simulation.Status().Status != contracts.SessionEnded {
-		t.Fatalf("session status = %q, want ended", app.simulation.Status().Status)
-	}
+	// Active session but no ProcessBeat yet → session materialization empty.
+	assertEmptyCOP(t, app.handler)
+	waitSessionEnded(t, app.simulation, 15*time.Second)
 
 	assertFixtureCOP(t, app.handler)
 	assertFixtureAdvisories(t, app.handler)
+}
+
+// TestNewApplicationSQLiteSessionCOPIsolationAfterReset proves D1h R2: with the
+// same SQLite file, session-scoped MemoryCOP + PreferMaterializedRecovery keep
+// the board view isolated. After Play the active session shows rev 9; explicit
+// End clears Active so prior materialization is not shown; a second Play on the
+// same durable store reaches rev 9 for the new active session only.
+func TestNewApplicationSQLiteSessionCOPIsolationAfterReset(t *testing.T) {
+	root := repositoryRoot(t)
+	ui := makeDashboard(t)
+	database := filepath.Join(t.TempDir(), "mosaic-session-iso.db")
+	app, err := newApplication(context.Background(), config{
+		ListenAddress: "127.0.0.1:0",
+		DatabasePath:  database,
+		UIDirectory:   ui,
+		AssetRoot:     root,
+		BeatSpacing:   time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("compose application: %v", err)
+	}
+	t.Cleanup(func() { _ = app.close() })
+
+	if app.simulation == nil {
+		t.Fatal("simulation controller is nil")
+	}
+	if _, err := app.simulation.Start(context.Background()); err != nil {
+		t.Fatalf("first Start: %v", err)
+	}
+	waitSessionEnded(t, app.simulation, 15*time.Second)
+	assertFixtureCOP(t, app.handler)
+
+	// Explicit End clears Active → empty board (prior session materialization
+	// remains in MemoryCOP but must not be served without an active epoch).
+	if _, err := app.simulation.End(context.Background()); err != nil {
+		t.Fatalf("End after first play: %v", err)
+	}
+	assertEmptyCOP(t, app.handler)
+
+	// Reset (end+start) on the same DB file: new session epoch; after Play, rev 9.
+	if _, err := app.simulation.Reset(context.Background()); err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+	waitSessionEnded(t, app.simulation, 15*time.Second)
+	assertFixtureCOP(t, app.handler)
+
+	// End again: inactive view empty (no leak of second session either).
+	if _, err := app.simulation.End(context.Background()); err != nil {
+		t.Fatalf("End after second play: %v", err)
+	}
+	assertEmptyCOP(t, app.handler)
+}
+
+func waitSessionEnded(t *testing.T, sim interface {
+	Status() contracts.SimulationSession
+}, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if sim.Status().Status == contracts.SessionEnded {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("session status = %q, want ended", sim.Status().Status)
 }
 
 func TestNewApplicationRejectsPartialAdvisoryHistory(t *testing.T) {

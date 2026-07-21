@@ -477,6 +477,17 @@ textarea { resize: vertical; }
 .simulation-controls-bar .secondary-button { background: transparent; color: var(--ink-dim); border-color: var(--line-strong); }
 .simulation-controls-bar .secondary-button:hover:not(:disabled) { color: var(--ink); border-color: var(--ink-dim); }
 
+/* Honest sublabel under “Refresh banked advice” (D1h R3) — not a re-run claim. */
+.simulation-controls-bar .button-sublabel {
+  display: block;
+  margin-top: 0.15rem;
+  font-weight: 500;
+  font-size: 0.55rem;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--ink-faint);
+}
+
 .error-display {
   flex-basis: 100%;
   color: var(--alert);

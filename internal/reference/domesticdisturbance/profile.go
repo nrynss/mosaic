@@ -18,12 +18,17 @@ import (
 )
 
 // activeSessionContextKey carries an optional ActiveSessionSource into Compose
-// so Postgres materialization can write session-scoped COP keys (C3/D1).
+// so session materialization can write session-scoped COP keys (C3/D1/D1h).
 type activeSessionContextKey struct{}
 
 // sessionAdvisoriesContextKey carries the optional in-memory session→advisory
 // id index so progressive fixture stages can Record against the active epoch.
 type sessionAdvisoriesContextKey struct{}
+
+// copMaterializationContextKey carries an optional COPReadModelRepository used
+// by the progressive SQLite path as a session board cache (D1h R2). Postgres
+// uses its durable cop_read_model table instead and ignores this value.
+type copMaterializationContextKey struct{}
 
 // WithActiveSession attaches the active-session holder for Compose. Nil is a
 // no-op. Composition creates the holder before Compose so MaterializingProjector
@@ -45,6 +50,17 @@ func WithSessionAdvisories(ctx context.Context, recorder simulator.SessionAdviso
 	return context.WithValue(ctx, sessionAdvisoriesContextKey{}, recorder)
 }
 
+// WithCOPMaterialization attaches an in-memory (or other) COP read-model
+// backend for progressive SQLite session isolation. Pair with WithActiveSession
+// so MaterializingProjector writes SessionCOPReadModelKey(sessionID). Nil is a
+// no-op. PreferMaterializedRecovery in composition must share the same instance.
+func WithCOPMaterialization(ctx context.Context, repo contracts.COPReadModelRepository) context.Context {
+	if repo == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, copMaterializationContextKey{}, repo)
+}
+
 func activeSessionFromContext(ctx context.Context) contracts.ActiveSessionSource {
 	if ctx == nil {
 		return nil
@@ -59,6 +75,14 @@ func sessionAdvisoriesFromContext(ctx context.Context) simulator.SessionAdvisory
 	}
 	recorder, _ := ctx.Value(sessionAdvisoriesContextKey{}).(simulator.SessionAdvisoryRecorder)
 	return recorder
+}
+
+func copMaterializationFromContext(ctx context.Context) contracts.COPReadModelRepository {
+	if ctx == nil {
+		return nil
+	}
+	repo, _ := ctx.Value(copMaterializationContextKey{}).(contracts.COPReadModelRepository)
+	return repo
 }
 
 const ID = dataset.DomesticDisturbance
@@ -94,7 +118,8 @@ func (domainProfile) Validate(assetRoot string) error {
 
 func (domainProfile) Compose(ctx context.Context, repository contracts.ImmutableRecordRepository, assetRoot string) (profile.Runtime, error) {
 	active := activeSessionFromContext(ctx)
-	domain, wrapProjector, resolver, err := bindDomainStore(repository, active)
+	sessionCOP := copMaterializationFromContext(ctx)
+	domain, wrapProjector, resolver, err := bindDomainStore(repository, active, sessionCOP)
 	if err != nil {
 		return nil, err
 	}
@@ -132,8 +157,18 @@ func (domainProfile) Compose(ctx context.Context, repository contracts.Immutable
 // bindDomainStore accepts either durable backend and wires optional COP
 // materialization + evidence resolution for that backend only. No dual-store
 // path is offered: Compose fails closed when the repository is neither SQLite
-// nor Postgres. When active is set on Postgres, materialization is session-keyed.
-func bindDomainStore(repository contracts.ImmutableRecordRepository, active contracts.ActiveSessionSource) (
+// nor Postgres.
+//
+// When active is set:
+//   - Postgres: durable cop_read_model rows are session-keyed.
+//   - SQLite progressive: sessionCOP (typically store.MemoryCOP from composition)
+//     is session-keyed so GET /cop is isolated per Play without a durable
+//     materialization table (D1h R2).
+func bindDomainStore(
+	repository contracts.ImmutableRecordRepository,
+	active contracts.ActiveSessionSource,
+	sessionCOP contracts.COPReadModelRepository,
+) (
 	simulator.DomainStore,
 	func(contracts.Projector) contracts.Projector,
 	api.EvidenceResolver,
@@ -147,6 +182,16 @@ func bindDomainStore(repository contracts.ImmutableRecordRepository, active cont
 		resolver, err := api.NewSQLiteEvidenceResolver(backend, StateFacts{})
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("compose governed evidence resolver: %w", err)
+		}
+		// Progressive SQLite: materialize into the shared in-memory session COP
+		// cache when composition supplied one (same PreferMaterializedRecovery
+		// backend used for GET /cop).
+		if active != nil && sessionCOP != nil {
+			copRepo := pgstore.NewSessionScopedCOP(sessionCOP, active)
+			wrap := func(inner contracts.Projector) contracts.Projector {
+				return pgstore.NewMaterializingProjector(inner, copRepo)
+			}
+			return backend, wrap, resolver, nil
 		}
 		return backend, nil, resolver, nil
 	case *pgstore.Store:

@@ -156,7 +156,7 @@
         {:else}
           Refresh advice
         {/if}
-        <HelpTip text="Re-polls / re-loads current assessments and recommendations for this synthetic call (operator analyze path when live). Not the same as “Replay last run”, which only means free banked-cassette semantics when the process was started with MOSAIC_SIM_MODE=replay." label="About Refresh advice" />
+        <HelpTip text="Re-polls / re-loads current assessments and recommendations for this synthetic call (operator analyze path when live). Separate from “Refresh banked advice”, which is enabled only when the process was started with MOSAIC_SIM_MODE=replay and also only re-fetches — it does not re-bank or hot-swap mode." label="About Refresh advice" />
       </button>
     </div>
   </div>

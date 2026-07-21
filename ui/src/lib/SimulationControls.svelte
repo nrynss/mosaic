@@ -114,20 +114,20 @@
     }
   }
 
-  async function replayLastRun() {
+  async function refreshBankedAdvice() {
     if (!replayEnabled) {
       return;
     }
     isSubmitting = true;
     errorMsg = '';
     actionState = 'loading';
-    actionMessage = 'Replaying banked advice (cassette mode)…';
+    actionMessage = 'Refreshing banked advice from the server…';
     try {
       if (typeof loadAdvisories === 'function') {
         await loadAdvisories();
       }
       actionState = 'ready';
-      actionMessage = 'Using banked cassette recordings — no paid API call for this refresh.';
+      actionMessage = 'Re-fetched server advice (process already in replay). Not a re-run of Terra/Sol cassette banking.';
     } catch (e) {
       errorMsg = e.message;
       actionState = 'error';
@@ -170,19 +170,24 @@
     </button>
     <button
       class="secondary-button"
-      onclick={replayLastRun}
+      onclick={refreshBankedAdvice}
       disabled={isSubmitting || !replayEnabled}
       aria-disabled={!replayEnabled}
       title={replayEnabled
-        ? 'Refresh advice using banked cassette recordings (no paid API call)'
+        ? 'Re-fetch advice from the server (process already in MOSAIC_SIM_MODE=replay). Does not re-bank or re-run cassette capture.'
         : 'Start the process with MOSAIC_SIM_MODE=replay (and the same CASSETTE_DIR) after banking a live run'}
     >
-      Replay last run
+      {#if replayEnabled}
+        Refresh banked advice
+        <span class="button-sublabel">re-fetch only · not a re-run</span>
+      {:else}
+        Refresh banked advice
+      {/if}
       <HelpTip
         text={replayEnabled
-          ? 'Process is in cassette Replay. This re-fetches advisories through banked Terra/Sol recordings — free, no OpenAI call. Different from “Refresh advice”, which re-polls the same path without claiming banked-cassette semantics.'
-          : 'Free cassette replay is process-level only. Bank a live run with MOSAIC_SIM_MODE=live (record), then restart with MOSAIC_SIM_MODE=replay and the same MOSAIC_CASSETTE_DIR. This button does not hot-swap mode mid-process.'}
-        label="About Replay last run"
+          ? 'Free cassette applies only when this process was started with MOSAIC_SIM_MODE=replay (same MOSAIC_CASSETTE_DIR as the live bank). This control re-fetches advice already served in replay mode — it does not re-bank a live run, re-invoke Terra/Sol capture, or hot-swap mode mid-process. “Refresh advice” on the board is the same re-poll without the banked-cassette label.'
+          : 'Free cassette replay is process-level only. Bank a live run with MOSAIC_SIM_MODE=live (record), then restart with MOSAIC_SIM_MODE=replay and the same MOSAIC_CASSETTE_DIR. This button does not hot-swap mode mid-process or re-run a cassette.'}
+        label="About Refresh banked advice"
       />
     </button>
     <button class="secondary-button" onclick={resetSimulation} disabled={isSubmitting}>

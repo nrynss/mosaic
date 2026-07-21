@@ -580,17 +580,46 @@ func TestStatusCopyIsIndependent(t *testing.T) {
 	}
 }
 
-func TestOnBeatInvokedInOrderAfterEachEmission(t *testing.T) {
+func TestOnBeatInvokedInOrderBeforeEachEmission(t *testing.T) {
 	var mu sync.Mutex
 	var seen []string
+	var earlySSE []string
+	// Prove R1: OnBeat runs before emitBeat by checking that the matching
+	// beat SSE is not yet in the subscriber buffer when OnBeat executes.
+	// runBeats is single-threaded (wait → OnBeat → emit), so a non-blocking
+	// drain at the start of OnBeat must not already hold this beat's SSE.
+	var sub contracts.SimulationStreamSubscription
 	ctrl := newTestController(t, testBeats(), func(cfg *Config) {
 		cfg.OnBeat = func(_ context.Context, beat contracts.ScheduledBeat) error {
+			if sub != nil {
+				for {
+					select {
+					case ev := <-sub.Events():
+						if ev.Type != contracts.StreamEventBeat {
+							continue
+						}
+						payload, _ := ev.Payload.(map[string]any)
+						id, _ := payload["beat_id"].(string)
+						if id == beat.BeatID {
+							mu.Lock()
+							earlySSE = append(earlySSE, id)
+							mu.Unlock()
+						}
+					default:
+						goto recorded
+					}
+				}
+			}
+		recorded:
 			mu.Lock()
 			seen = append(seen, beat.BeatID)
 			mu.Unlock()
 			return nil
 		}
 	})
+	sub = ctrl.Subscribe()
+	t.Cleanup(sub.Cancel)
+
 	if _, err := ctrl.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -601,6 +630,9 @@ func TestOnBeatInvokedInOrderAfterEachEmission(t *testing.T) {
 	want := []string{"beat-a", "beat-b", "beat-c"}
 	if !equalStrings(seen, want) {
 		t.Fatalf("OnBeat order = %v, want %v", seen, want)
+	}
+	if len(earlySSE) != 0 {
+		t.Fatalf("SSE arrived before OnBeat for beats %v (R1 order violated)", earlySSE)
 	}
 }
 
@@ -618,14 +650,53 @@ func TestOnBeatErrorStopsFurtherBeatsAndEndsSession(t *testing.T) {
 			return nil
 		}
 	})
+	sub := ctrl.Subscribe()
+	t.Cleanup(sub.Cancel)
 	if _, err := ctrl.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	waitStatus(t, ctrl, contracts.SessionEnded, time.Second)
+	// Collect buffered events: failed OnBeat must not emit that beat SSE.
+	events := collectUntilQuiet(t, sub, 100*time.Millisecond)
+	var beatEvents int
+	for _, ev := range events {
+		if ev.Type == contracts.StreamEventBeat {
+			beatEvents++
+		}
+	}
 	mu.Lock()
 	defer mu.Unlock()
 	if len(seen) != 1 || seen[0] != "beat-a" {
 		t.Fatalf("OnBeat seen = %v, want only beat-a", seen)
+	}
+	if beatEvents != 0 {
+		t.Fatalf("SSE beat emissions = %d, want 0 when OnBeat fails before emit", beatEvents)
+	}
+}
+
+// collectUntilQuiet drains subscription events until idle for idle duration.
+func collectUntilQuiet(t *testing.T, sub contracts.SimulationStreamSubscription, idle time.Duration) []contracts.SimulationStreamEvent {
+	t.Helper()
+	var out []contracts.SimulationStreamEvent
+	timer := time.NewTimer(idle)
+	defer timer.Stop()
+	for {
+		select {
+		case ev, ok := <-sub.Events():
+			if !ok {
+				return out
+			}
+			out = append(out, ev)
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(idle)
+		case <-timer.C:
+			return out
+		}
 	}
 }
 

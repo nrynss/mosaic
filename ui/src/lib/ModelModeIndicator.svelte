@@ -34,10 +34,10 @@
 
   function cassetteModeTip(key) {
     if (key === 'replay') {
-      return 'Inference path: cassette Replay (MOSAIC_SIM_MODE=replay). Banked Terra/Sol responses — no paid API call.';
+      return 'Inference path: cassette Replay — process started with MOSAIC_SIM_MODE=replay. Terra/Sol serve banked responses (no paid API call). Mode is fixed at process start; UI “Refresh banked advice” only re-fetches, it does not re-bank or switch mode.';
     }
     if (key === 'record') {
-      return 'Inference path: Live recording (MOSAIC_SIM_MODE=live). Live OpenAI calls are banked for later free replay.';
+      return 'Inference path: Live recording (MOSAIC_SIM_MODE=live). Live OpenAI calls are banked for later free replay after a restart with MOSAIC_SIM_MODE=replay.';
     }
     return 'Inference path: Fixture / demo pack (default). Pre-built scenario advice, not cassette replay of a prior live run.';
   }
