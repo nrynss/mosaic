@@ -363,7 +363,7 @@ Dependencies noted. Workstreams A→B are the foundation; C rides on them.
 ### Workstream A — Event spine (foundation)
 | ID | Task | Size | Deps | Claim | Status |
 |----|------|------|------|-------|--------|
-| A1 | Define `EventLog` / `EventConsumer` / `EventBus`, envelope, position; document the delivery contract | **M** | — | Opus agent (worktree) | In progress |
+| A1 | Define `EventLog` / `EventConsumer` / `EventBus`, envelope, position; document the delivery contract | **M** | — | Opus agent | Done (`internal/eventlog`, 8a4ca53) |
 | A2 | Partition-key model: `partition_key` column, monotonic sequence, consumer checkpoint/cursor table | **M** | A1 | — | Todo |
 
 ### Workstream B — Postgres backbone
