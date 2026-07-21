@@ -55,8 +55,10 @@ type modelEnv struct {
 
 	// CassetteStore, when non-nil, overrides FileStore construction (tests).
 	CassetteStore cassette.Store
-	// testLiveTerra / testLiveSol, when non-nil, replace OpenAI client construction
-	// for the matching live agent (tests inject counting stubs).
+	// testLiveLuna / testLiveTerra / testLiveSol, when non-nil, replace OpenAI
+	// client construction for the matching live agent (tests inject stubs so
+	// record→replay can be validated offline with no network).
+	testLiveLuna  openaimodel.LunaStructuredClient
 	testLiveTerra terra.StructuredClient
 	testLiveSol   sol.StructuredClient
 }
@@ -235,19 +237,27 @@ func composeModels(
 		// fixture mode remains prompt-independent.
 		base := openaimodel.Config{APIKey: env.APIKey, SchemaDir: schemaDir}
 		if construct[openaimodel.AgentLuna] == contracts.ProviderLive {
-			lunaPrompt, err = loadVersionedPrompt(assetRoot, openaimodel.AgentLuna, "v1.0.0")
-			if err != nil {
-				return modelBundle{}, fmt.Errorf("load live Luna prompt: %w", err)
+			if env.testLiveLuna != nil {
+				liveLuna = env.testLiveLuna
+				// Still load prompt when available so cassette provenance is set.
+				if p, pErr := loadVersionedPrompt(assetRoot, openaimodel.AgentLuna, "v1.0.0"); pErr == nil {
+					lunaPrompt = p
+				}
+			} else {
+				lunaPrompt, err = loadVersionedPrompt(assetRoot, openaimodel.AgentLuna, "v1.0.0")
+				if err != nil {
+					return modelBundle{}, fmt.Errorf("load live Luna prompt: %w", err)
+				}
+				client, err := openaimodel.NewLunaClient(openaimodel.Config{
+					APIKey:       base.APIKey,
+					SchemaDir:    base.SchemaDir,
+					Instructions: lunaPrompt.Instructions,
+				})
+				if err != nil {
+					return modelBundle{}, fmt.Errorf("compose live Luna client: %w", err)
+				}
+				liveLuna = client
 			}
-			client, err := openaimodel.NewLunaClient(openaimodel.Config{
-				APIKey:       base.APIKey,
-				SchemaDir:    base.SchemaDir,
-				Instructions: lunaPrompt.Instructions,
-			})
-			if err != nil {
-				return modelBundle{}, fmt.Errorf("compose live Luna client: %w", err)
-			}
-			liveLuna = client
 		}
 		if construct[openaimodel.AgentTerra] == contracts.ProviderLive {
 			if env.testLiveTerra != nil {

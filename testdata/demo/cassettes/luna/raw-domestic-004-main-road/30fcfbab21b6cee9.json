@@ -1,0 +1,64 @@
+{
+  "schema_version": "1.0.0",
+  "key": "luna/raw-domestic-004-main-road/30fcfbab21b6cee9",
+  "agent": "luna",
+  "state_revision": 0,
+  "request_fingerprint": "30fcfbab21b6cee922c5a1f73587b4a59c3eb5b166eea31db08cc5687ca0abec",
+  "prompt_version": "v1.0.0",
+  "prompt_hash": "c08e5460c76db1833a5be6f23a2ac6f60915bb00e11f24ef8add7b770d1864d4",
+  "response_id": "resp_0289264215bd6e7c016a5f540f4a808191bf96af4ba84228e8",
+  "result_json": {
+    "canonical_event_id": "canonical-live-raw-domestic-004-main-road",
+    "created_at": "2026-07-18T10:02:10Z",
+    "evidence": [
+      {
+        "explanation": "The base64-decoded text states that Main Street is closed at the bridge due to flooding.",
+        "json_pointer": "/payload_bytes_b64",
+        "target_id": "raw-domestic-004-main-road",
+        "target_kind": "raw_event"
+      },
+      {
+        "explanation": "The roads source directly supplies source record identifier road-004.",
+        "json_pointer": "/source/source_record_id",
+        "target_id": "raw-domestic-004-main-road",
+        "target_kind": "raw_event"
+      }
+    ],
+    "luna_result_id": "luna-live-raw-domestic-004-main-road",
+    "raw_event_id": "raw-domestic-004-main-road",
+    "schema_version": "1.0.0",
+    "status": "accepted"
+  },
+  "canonical_event_json": {
+    "canonical_event_id": "canonical-live-raw-domestic-004-main-road",
+    "canonical_seq": 67,
+    "confidence": {
+      "basis": "The decoded road-source payload directly identifies Main Street as closed and gives flooding as the reason; the source record directly supplies the road identifier.",
+      "reasoning_support": "high",
+      "source_quality": "high",
+      "transformation_certainty": "high"
+    },
+    "entity_refs": [
+      {
+        "id": "road-004",
+        "kind": "road"
+      }
+    ],
+    "event_type": "road_status_changed",
+    "occurred_at": "2026-07-18T10:02:00Z",
+    "payload": {
+      "reason": "flooding",
+      "road_id": "road-004",
+      "status": "blocked"
+    },
+    "provenance": {
+      "model_run_id": "modelrun-live-luna-raw-domestic-004-main-road",
+      "normalizer": "openai-luna",
+      "raw_event_id": "raw-domestic-004-main-road"
+    },
+    "raw_event_id": "raw-domestic-004-main-road",
+    "received_at": "2026-07-18T10:02:10Z",
+    "schema_version": "1.0.0"
+  },
+  "recorded_at": "2026-07-21T11:12:30.4382978Z"
+}

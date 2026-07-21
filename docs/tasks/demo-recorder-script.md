@@ -309,19 +309,17 @@ POST /api/v1/operator/brief   Header: X-Mosaic-Demo-Identity: supervisor-demo
 
 ---
 
-## 6. Design decisions to confirm with the requester
+## 6. Design decisions (confirmed)
 
-1. **Recorder form** — gated Go test (`MOSAIC_RECORD_LIVE=1`) vs a `cmd/democast`
-   tool vs a shell/python script. Recommend a **Go entrypoint** so it shares the e2e
-   harness and the manifest types with the replay verifier (one source of truth,
-   no drift). Shell is fine for a first cut but risks payload drift from the Go test.
-2. **Cassette bank location** — recommend `testdata/demo/cassettes/` committed;
-   confirm it must be excluded from the `recordings` gitignore rule.
-3. **Per-beat Luna scope** — all 10 beats (default) vs a curated subset. Some beats
-   are non-incident (weather, road correction, invalid input at beat 8); confirm we
-   want a live Luna bank for every one, including the intentionally-quarantined beat 8.
-4. **Audience visibility (§0)** — is this recorder a regression/verification asset
-   (a), or does the demo need UI wiring to *show* replayed output (b, separate parcel)?
+1. **Recorder form** — shared `internal/democast` package + gated Go tests
+   (`MOSAIC_RECORD_LIVE=1` for live; default CI runs no-live replay). No separate
+   `cmd/democast` required.
+2. **Cassette bank location** — `testdata/demo/cassettes/` (committed; outside
+   `.gitignore` `/recordings/`).
+3. **Per-beat Luna scope** — all 10 beats, including beat 8 quarantined input.
+4. **Audience visibility (§0)** — (a) verification/regression asset only for now.
+
+**Operator runbook:** [`docs/runbook/demo-cassette-recorder.md`](../runbook/demo-cassette-recorder.md).
 
 ---
 

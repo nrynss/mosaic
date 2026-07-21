@@ -1,0 +1,95 @@
+{
+  "scenario": "domestic-disturbance",
+  "expected_cop_revision": 9,
+  "supervisor_identity": "supervisor-demo",
+  "steps": [
+    { "kind": "play" },
+    {
+      "kind": "luna",
+      "beat_id": "baseline-01-911-call",
+      "raw_event_ref": "raw-domestic-001-call",
+      "expected_status": "quarantined"
+    },
+    {
+      "kind": "luna",
+      "beat_id": "baseline-02-welfare-check",
+      "raw_event_ref": "raw-domestic-002-welfare",
+      "expected_status": "quarantined"
+    },
+    {
+      "kind": "luna",
+      "beat_id": "baseline-03-weather-alert",
+      "raw_event_ref": "raw-domestic-003-weather"
+    },
+    {
+      "kind": "luna",
+      "beat_id": "baseline-04-road-closure",
+      "raw_event_ref": "raw-domestic-004-main-road"
+    },
+    {
+      "kind": "luna",
+      "beat_id": "baseline-05-ems-availability",
+      "raw_event_ref": "raw-domestic-005-ems-available"
+    },
+    {
+      "kind": "luna",
+      "beat_id": "baseline-06-officer-update",
+      "raw_event_ref": "raw-domestic-006-officer-update",
+      "expected_status": "quarantined"
+    },
+    {
+      "kind": "luna",
+      "beat_id": "fixture-07-repaired-incomplete-road",
+      "raw_event_ref": "raw-domestic-007-incomplete-road",
+      "expected_status": "quarantined"
+    },
+    {
+      "kind": "luna",
+      "beat_id": "fixture-08-quarantined-input",
+      "raw_event_ref": "raw-domestic-008-invalid-input",
+      "expected_status": "quarantined"
+    },
+    {
+      "kind": "luna",
+      "beat_id": "fixture-09-late-delivery",
+      "raw_event_ref": "raw-domestic-009-late-ems"
+    },
+    {
+      "kind": "luna",
+      "beat_id": "fixture-10-road-correction",
+      "raw_event_ref": "raw-domestic-010-road-correction"
+    },
+    {
+      "kind": "terra",
+      "state_revision": 9,
+      "evidence": [
+        {
+          "kind": "raw_event",
+          "id": "raw-domestic-001-call",
+          "explanation": "initial 911 call"
+        },
+        {
+          "kind": "raw_event",
+          "id": "raw-domestic-004-main-road",
+          "explanation": "road closure constrains access"
+        }
+      ],
+      "note": "demo refresh advice"
+    },
+    {
+      "kind": "sol",
+      "state_revision": 9,
+      "insights": [
+        { "insight_id": "insight-domestic-access-001" }
+      ],
+      "evidence": [
+        {
+          "kind": "raw_event",
+          "id": "raw-domestic-001-call",
+          "explanation": "live bank evidence"
+        }
+      ],
+      "note": "demo live incident brief"
+    }
+  ]
+}

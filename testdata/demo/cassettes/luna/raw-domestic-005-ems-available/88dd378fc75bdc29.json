@@ -1,0 +1,57 @@
+{
+  "schema_version": "1.0.0",
+  "key": "luna/raw-domestic-005-ems-available/88dd378fc75bdc29",
+  "agent": "luna",
+  "state_revision": 0,
+  "request_fingerprint": "88dd378fc75bdc29181649983b1f50e3f9bbc89a1817e9a986d72f862f3a75c6",
+  "prompt_version": "v1.0.0",
+  "prompt_hash": "c08e5460c76db1833a5be6f23a2ac6f60915bb00e11f24ef8add7b770d1864d4",
+  "response_id": "resp_082bb0356052a952016a5f541ea9f4819cb622da8cf6ae8781",
+  "result_json": {
+    "canonical_event_id": "canonical-live-raw-domestic-005-ems-available",
+    "created_at": "2026-07-18T10:03:15Z",
+    "evidence": [
+      {
+        "explanation": "The base64-encoded text/plain payload decodes to \"EMS-4 is available at Central Station.\", directly supporting the unit identifier and availability status.",
+        "json_pointer": "/payload_bytes_b64",
+        "target_id": "raw-domestic-005-ems-available",
+        "target_kind": "raw_event"
+      }
+    ],
+    "luna_result_id": "luna-live-raw-domestic-005-ems-available",
+    "raw_event_id": "raw-domestic-005-ems-available",
+    "schema_version": "1.0.0",
+    "status": "accepted"
+  },
+  "canonical_event_json": {
+    "canonical_event_id": "canonical-live-raw-domestic-005-ems-available",
+    "canonical_seq": 2084079035,
+    "confidence": {
+      "basis": "The decoded text/plain payload directly identifies EMS-4 and states that it is available.",
+      "reasoning_support": "high",
+      "source_quality": "high",
+      "transformation_certainty": "high"
+    },
+    "entity_refs": [
+      {
+        "id": "EMS-4",
+        "kind": "unit"
+      }
+    ],
+    "event_type": "unit_status_changed",
+    "occurred_at": "2026-07-18T10:03:00Z",
+    "payload": {
+      "availability": "available",
+      "unit_id": "EMS-4"
+    },
+    "provenance": {
+      "model_run_id": "modelrun-live-luna-raw-domestic-005-ems-available",
+      "normalizer": "openai-luna",
+      "raw_event_id": "raw-domestic-005-ems-available"
+    },
+    "raw_event_id": "raw-domestic-005-ems-available",
+    "received_at": "2026-07-18T10:03:15Z",
+    "schema_version": "1.0.0"
+  },
+  "recorded_at": "2026-07-21T11:12:42.6738098Z"
+}

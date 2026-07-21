@@ -1,0 +1,58 @@
+{
+  "schema_version": "1.0.0",
+  "key": "luna/raw-domestic-010-road-correction/d86301a9d6ad5270",
+  "agent": "luna",
+  "state_revision": 0,
+  "request_fingerprint": "d86301a9d6ad52700f73ef2a1ff28220dde34c4086bd45aaeadd97f42340b2f1",
+  "prompt_version": "v1.0.0",
+  "prompt_hash": "c08e5460c76db1833a5be6f23a2ac6f60915bb00e11f24ef8add7b770d1864d4",
+  "response_id": "resp_05067c6177e116fc016a5f54507e0481a2b69f826e7e87b96b",
+  "result_json": {
+    "canonical_event_id": "canonical-live-raw-domestic-010-road-correction",
+    "created_at": "2026-07-18T10:10:10Z",
+    "evidence": [
+      {
+        "explanation": "The base64 payload decodes to: Brook Lane has reopened after debris removal.",
+        "json_pointer": "/payload_bytes_b64",
+        "target_id": "raw-domestic-010-road-correction",
+        "target_kind": "raw_event"
+      }
+    ],
+    "luna_result_id": "luna-live-raw-domestic-010-road-correction",
+    "raw_event_id": "raw-domestic-010-road-correction",
+    "schema_version": "1.0.0",
+    "status": "accepted"
+  },
+  "canonical_event_json": {
+    "canonical_event_id": "canonical-live-raw-domestic-010-road-correction",
+    "canonical_seq": 6713,
+    "confidence": {
+      "basis": "The decoded text directly identifies Brook Lane, states that it reopened, and attributes the reopening to debris removal.",
+      "reasoning_support": "high",
+      "source_quality": "high",
+      "transformation_certainty": "high"
+    },
+    "entity_refs": [
+      {
+        "id": "Brook Lane",
+        "kind": "road"
+      }
+    ],
+    "event_type": "road_status_changed",
+    "occurred_at": "2026-07-18T10:10:00Z",
+    "payload": {
+      "reason": "debris removal",
+      "road_id": "Brook Lane",
+      "status": "open"
+    },
+    "provenance": {
+      "model_run_id": "modelrun-live-luna-raw-domestic-010-road-correction",
+      "normalizer": "openai-luna",
+      "raw_event_id": "raw-domestic-010-road-correction"
+    },
+    "raw_event_id": "raw-domestic-010-road-correction",
+    "received_at": "2026-07-18T10:10:10Z",
+    "schema_version": "1.0.0"
+  },
+  "recorded_at": "2026-07-21T11:13:39.5431608Z"
+}

@@ -1,0 +1,39 @@
+{
+  "schema_version": "1.0.0",
+  "key": "terra/rev9/692ce16b5454cc6c",
+  "agent": "terra",
+  "state_revision": 9,
+  "request_fingerprint": "692ce16b5454cc6c948fb7d14f72b9328231d4c3c4e938ea4c10bde2f707f96e",
+  "prompt_version": "v1.0.0",
+  "prompt_hash": "da9e7449a49dc6dc4b4bcde844989ee93ba1b67bd1196a3c8b30685b7635a7cc",
+  "response_id": "resp_015550a837866b7e016a5f5463c00c8192b142c30620cc4c00",
+  "insight_json": {
+    "assertions": [
+      "The reported road closure may constrain access associated with the open incident, but the supplied evidence does not establish that road-main-street-bridge is a route to the incident location."
+    ],
+    "confidence": {
+      "basis": "The initial call and road-closure evidence support a bounded potential access concern, while the supplied facts provide no explicit route linkage between the blocked road and the incident location.",
+      "reasoning_support": "medium",
+      "source_quality": "medium",
+      "transformation_certainty": "high"
+    },
+    "created_at": "2026-07-18T10:10:10Z",
+    "evidence": [
+      {
+        "explanation": "initial 911 call",
+        "target_id": "raw-domestic-001-call",
+        "target_kind": "raw_event"
+      },
+      {
+        "explanation": "road closure constrains access",
+        "target_id": "raw-domestic-004-main-road",
+        "target_kind": "raw_event"
+      }
+    ],
+    "insight_id": "insight-domestic-access-009",
+    "lifecycle_status": "active",
+    "schema_version": "1.0.0",
+    "state_revision": 9
+  },
+  "recorded_at": "2026-07-21T11:13:53.0808608Z"
+}

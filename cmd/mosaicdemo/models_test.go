@@ -649,6 +649,10 @@ func TestComposeModelsRecordModeWrapsLivePath(t *testing.T) {
 	t.Cleanup(func() { _ = database.Close() })
 
 	mem := cassette.NewMemoryStore()
+	lunaStub := &countingLunaClient{resp: openaimodel.LunaResponse{
+		ResultJSON: json.RawMessage(`{"schema_version":"1.0.0","luna_result_id":"luna-record","raw_event_id":"raw-x","status":"quarantined","reason":"stub","created_at":"2026-01-01T00:00:00Z"}`),
+		ResponseID: "resp-record-luna",
+	}}
 	terraStub := &countingTerraClient{resp: terra.Response{
 		InsightJSON: json.RawMessage(`{"schema_version":"1.0.0","insight_id":"ins-record"}`),
 		ResponseID:  "resp-record-terra",
@@ -665,10 +669,12 @@ func TestComposeModelsRecordModeWrapsLivePath(t *testing.T) {
 		modelEnv{
 			APIKey:          "test-key",
 			CassetteModeRaw: "record",
+			Luna:            contracts.ProviderLive,
 			Terra:           contracts.ProviderLive,
 			Sol:             contracts.ProviderLive,
 			CassetteStore:   mem,
 			CassetteDir:     t.TempDir(),
+			testLiveLuna:    lunaStub,
 			testLiveTerra:   terraStub,
 			testLiveSol:     solStub,
 		},
@@ -682,20 +688,22 @@ func TestComposeModelsRecordModeWrapsLivePath(t *testing.T) {
 	if bundle.ProviderSelection[openaimodel.AgentTerra] != contracts.ProviderLive {
 		t.Fatalf("terra provider = %s, want live", bundle.ProviderSelection[openaimodel.AgentTerra])
 	}
+	if bundle.ProviderSelection[openaimodel.AgentLuna] != contracts.ProviderLive {
+		t.Fatalf("luna provider = %s, want live", bundle.ProviderSelection[openaimodel.AgentLuna])
+	}
 
 	// Drive the decorated StructuredClients via applyCassette unit path is
 	// covered separately; here verify wrap helper banks into MemoryStore.
-	terraInner := terraStub
-	solInner := solStub
 	construct := contracts.AgentProviderSelection{
+		openaimodel.AgentLuna:  contracts.ProviderLive,
 		openaimodel.AgentTerra: contracts.ProviderLive,
 		openaimodel.AgentSol:   contracts.ProviderLive,
 	}
-	_, terraClient, solClient, mode, _, err := applyCassette(
+	lunaClient, terraClient, solClient, mode, _, err := applyCassette(
 		cassette.ModeRecord,
 		modelEnv{CassetteStore: mem, CassetteDir: t.TempDir()},
-		nil, terraInner, solInner, construct,
-		versionedPrompt{},
+		lunaStub, terraStub, solStub, construct,
+		versionedPrompt{Provenance: "v1.0.0+sha256:luna"},
 		versionedPrompt{Provenance: "v1.0.0+sha256:abc"},
 		versionedPrompt{Provenance: "v1.0.0+sha256:def"},
 	)
@@ -704,6 +712,14 @@ func TestComposeModelsRecordModeWrapsLivePath(t *testing.T) {
 	}
 	if mode != cassette.ModeRecord {
 		t.Fatalf("mode = %s", mode)
+	}
+	if _, err := lunaClient.Normalize(ctx, openaimodel.LunaRequest{
+		RawEventJSON: json.RawMessage(`{"raw_event_id":"raw-x"}`),
+	}); err != nil {
+		t.Fatalf("record Normalize: %v", err)
+	}
+	if lunaStub.calls.Load() != 1 {
+		t.Fatalf("inner luna calls = %d, want 1", lunaStub.calls.Load())
 	}
 	req := terra.Request{
 		StateRevision: 7,
@@ -715,11 +731,58 @@ func TestComposeModelsRecordModeWrapsLivePath(t *testing.T) {
 	if terraStub.calls.Load() != 1 {
 		t.Fatalf("inner terra calls = %d, want 1", terraStub.calls.Load())
 	}
-	if mem.Len() < 1 {
-		t.Fatal("expected at least one recording after Assess")
+	if mem.Len() < 2 {
+		t.Fatalf("expected at least two recordings after Luna+Assess, got %d", mem.Len())
 	}
 	_ = solClient
 	_ = bundle
+}
+
+func TestComposeModelsInjectsTestLiveLuna(t *testing.T) {
+	ctx := context.Background()
+	root := repositoryRoot(t)
+	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "models-luna-stub.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	lunaStub := &countingLunaClient{resp: openaimodel.LunaResponse{
+		ResultJSON: json.RawMessage(`{"schema_version":"1.0.0","luna_result_id":"luna-stub-1","raw_event_id":"raw-stub","status":"quarantined","reason":"offline stub","created_at":"2026-01-01T00:00:00Z"}`),
+		ResponseID: "resp-luna-stub",
+	}}
+	bundle, err := composeModels(ctx, database, root,
+		filepath.Join(root, "datasets", simulator.DomesticDisturbance),
+		filepath.Join(root, "ontology"),
+		"supervisor-demo",
+		modelEnv{
+			APIKey:       "test-key",
+			Luna:         contracts.ProviderLive,
+			testLiveLuna: lunaStub,
+			CassetteDir:  t.TempDir(),
+		},
+	)
+	if err != nil {
+		t.Fatalf("compose with testLiveLuna: %v", err)
+	}
+	out, err := bundle.Luna.Normalize(ctx, gen.RawEvent{
+		SchemaVersion: "1.0.0",
+		RawEventID:    "raw-stub",
+		ContentType:   "text/plain",
+		ReceivedAt:    "2026-01-01T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("Normalize via injected Luna: %v", err)
+	}
+	if lunaStub.calls.Load() != 1 {
+		t.Fatalf("luna stub calls = %d, want 1", lunaStub.calls.Load())
+	}
+	if out.Result.Status != "quarantined" {
+		t.Fatalf("result status = %q, want quarantined", out.Result.Status)
+	}
+	if out.ModelRun.ValidationStatus != "valid" {
+		t.Fatalf("model run status = %q, want valid", out.ModelRun.ValidationStatus)
+	}
 }
 
 func TestComposeModelsReplayModeDoesNotCallNetwork(t *testing.T) {
@@ -834,6 +897,26 @@ func TestComposeModelsInvalidCassetteMode(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "parse cassette mode") {
 		t.Fatalf("error = %v, want parse cassette mode", err)
 	}
+}
+
+// countingLunaClient is a test double for live Luna StructuredClient injection.
+type countingLunaClient struct {
+	calls atomic.Int32
+	resp  openaimodel.LunaResponse
+	err   error
+}
+
+func (c *countingLunaClient) Normalize(_ context.Context, _ openaimodel.LunaRequest) (openaimodel.LunaResponse, error) {
+	c.calls.Add(1)
+	if c.err != nil {
+		return openaimodel.LunaResponse{}, c.err
+	}
+	return openaimodel.LunaResponse{
+		ResultJSON:         append(json.RawMessage(nil), c.resp.ResultJSON...),
+		CanonicalEventJSON: append(json.RawMessage(nil), c.resp.CanonicalEventJSON...),
+		ResponseID:         c.resp.ResponseID,
+		RefusalDetail:      c.resp.RefusalDetail,
+	}, nil
 }
 
 // countingTerraClient is a test double for live Terra StructuredClient injection.
