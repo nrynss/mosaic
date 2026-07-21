@@ -25,15 +25,17 @@ const postgresUniqueViolation = "23505"
 // projection work in the same transaction (see the package atomic-boundary rule
 // in internal/eventlog).
 //
-// Validation requires non-empty PartitionKey, IdempotencyKey, and Type. A nil
-// Payload is stored as empty bytes so producers need not distinguish nil from
-// zero-length. Re-appending an already-seen IdempotencyKey returns nil without
-// inserting a second row (unique constraint + SQLSTATE 23505).
+// Validation requires non-empty PartitionKey, IdempotencyKey, and Type after
+// trimming whitespace. A nil Payload is stored as empty bytes so producers need
+// not distinguish nil from zero-length. Re-appending an already-seen
+// IdempotencyKey returns nil without inserting a second row (unique constraint
+// + SQLSTATE 23505).
 func (s *Store) Append(ctx context.Context, e eventlog.EventEnvelope) error {
-	if err := validateEventEnvelope(e); err != nil {
+	env, err := normalizeEventEnvelope(e)
+	if err != nil {
 		return err
 	}
-	payload := e.Payload
+	payload := env.Payload
 	if payload == nil {
 		payload = []byte{}
 	}
@@ -41,34 +43,42 @@ func (s *Store) Append(ctx context.Context, e eventlog.EventEnvelope) error {
 	// Append deliberately uses the pool, not the ambient WithinTransaction
 	// executor: the projector must never couple (append + project) into one
 	// ACID transaction. Sequence is assigned by BIGSERIAL.
-	_, err := s.pool.Exec(ctx, `INSERT INTO event_log
-		(partition_key, idempotency_key, event_type, payload)
+	_, err = s.pool.Exec(ctx, `INSERT INTO `+EventLogTable+`
+		(`+EventLogColPartitionKey+`, `+EventLogColIdempotencyKey+`, `+EventLogColEventType+`, `+EventLogColPayload+`)
 		VALUES ($1, $2, $3, $4)`,
-		e.PartitionKey, e.IdempotencyKey, e.Type, payload,
+		env.PartitionKey, env.IdempotencyKey, env.Type, payload,
 	)
 	if err == nil {
 		return nil
 	}
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == postgresUniqueViolation {
-		// Unique on idempotency_key: producer retry after ambiguous success.
+		// Unique on idempotency_key (only non-PK unique on this table): producer
+		// retry after ambiguous success. First-wins; payload/type on retry ignored.
 		return nil
 	}
 	return fmt.Errorf("append event log: %w", err)
 }
 
-func validateEventEnvelope(e eventlog.EventEnvelope) error {
-	if strings.TrimSpace(e.IdempotencyKey) == "" {
-		return fmt.Errorf("%w: IdempotencyKey is required", ErrInvalidRecord)
+// normalizeEventEnvelope trims identity fields and enforces non-empty keys.
+// PartitionKey is required here (not the degenerate empty single-partition form
+// allowed by the interface docs): empty keys would collapse every producer into
+// one ordering unit and defeat per-incident parallelism.
+func normalizeEventEnvelope(e eventlog.EventEnvelope) (eventlog.EventEnvelope, error) {
+	out := eventlog.EventEnvelope{
+		PartitionKey:   strings.TrimSpace(e.PartitionKey),
+		IdempotencyKey: strings.TrimSpace(e.IdempotencyKey),
+		Type:           strings.TrimSpace(e.Type),
+		Payload:        e.Payload,
 	}
-	// PartitionKey is required here (not the degenerate empty single-partition
-	// form allowed by the interface docs). Empty keys would collapse every
-	// producer into one ordering unit and defeat per-incident parallelism.
-	if strings.TrimSpace(e.PartitionKey) == "" {
-		return fmt.Errorf("%w: PartitionKey is required", ErrInvalidRecord)
+	if out.IdempotencyKey == "" {
+		return eventlog.EventEnvelope{}, fmt.Errorf("%w: IdempotencyKey is required", ErrInvalidRecord)
 	}
-	if strings.TrimSpace(e.Type) == "" {
-		return fmt.Errorf("%w: Type is required", ErrInvalidRecord)
+	if out.PartitionKey == "" {
+		return eventlog.EventEnvelope{}, fmt.Errorf("%w: PartitionKey is required", ErrInvalidRecord)
 	}
-	return nil
+	if out.Type == "" {
+		return eventlog.EventEnvelope{}, fmt.Errorf("%w: Type is required", ErrInvalidRecord)
+	}
+	return out, nil
 }
