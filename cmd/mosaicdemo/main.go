@@ -340,7 +340,12 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 	// (ingest+project+advisory continuum). Documented: EventLog is the append
 	// seam; the sync handler is the interactive consumer (not multi-worker Run).
 	var onBeat func(context.Context, contracts.ScheduledBeat) error
-	if progressive, ok := domainRuntime.(progressiveDomain); ok {
+	if !seedOnStart {
+		progressive, ok := domainRuntime.(progressiveDomain)
+		if !ok {
+			_ = closeDatabase()
+			return nil, fmt.Errorf("domain profile %q does not support progressive ProcessBeat (required unless MOSAIC_SEED_ON_START)", selected.ID())
+		}
 		partitionKey := selected.ID()
 		onBeat = func(beatCtx context.Context, beat contracts.ScheduledBeat) error {
 			payload, err := progressive.RawEventPayload(beat.RawEventID)
@@ -370,18 +375,13 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 	// flood control required — board is already final). Progressive uses spacing.
 	sessionCfg := session.Config{
 		Schedule: schedule,
-		Active:   activeSession,
-		OnBeat:   onBeat,
 	}
 	if !seedOnStart {
 		sessionCfg.BeatSpacing = beatSpacing
 		sessionCfg.Active = activeSession
-	} else {
-		// Legacy seed: leave Active nil so GET /cop shows the seeded board
-		// without requiring Play. Controller still works for SSE overlay.
-		sessionCfg.Active = nil
-		sessionCfg.OnBeat = nil
+		sessionCfg.OnBeat = onBeat
 	}
+	// else: Active nil + OnBeat nil so GET /cop shows the seeded board without Play.
 	simController, err := session.New(sessionCfg)
 	if err != nil {
 		_ = closeDatabase()
