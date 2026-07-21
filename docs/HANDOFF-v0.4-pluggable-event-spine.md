@@ -371,8 +371,8 @@ Dependencies noted. Workstreams A→B are the foundation; C rides on them.
 |----|------|------|------|-------|--------|
 | B1 | `pgstore` implementing existing repository contracts; port schema + migrations; Postgres tx semantics (drop single-conn assumptions) | **L** | — | Opus agent | Done (`internal/pgstore`, 1f4937f) |
 | B2 | `EventLog.Append` on Postgres (INSERT + idempotency unique constraint) | **M** | A1, B1 | b2-pg-eventlog-append | Done (`pgstore.Store.Append`) |
-| B3 | `EventConsumer` via `SKIP LOCKED`, per-partition ordered, checkpointed; atomic project+position; multi-worker | **L** | A2, B2 | b3-pg-event-consumer | In progress |
-| B4 | `EventBus` via `LISTEN/NOTIFY`; replace in-process broker behind the interface | **M** | A1, B1 | b4-pg-event-bus | In progress |
+| B3 | `EventConsumer` via `SKIP LOCKED`, per-partition ordered, checkpointed; atomic project+position; multi-worker | **L** | A2, B2 | b3-pg-event-consumer | Done (`pgstore.EventConsumer`, advisory locks) |
+| B4 | `EventBus` via `LISTEN/NOTIFY`; replace in-process broker behind the interface | **M** | A1, B1 | b4-pg-event-bus | Done (`pgstore.EventBus` LISTEN/NOTIFY) |
 | B5 | Materialized COP read-model table maintained by projector; `GET /cop` reads it | **M** | B3 | — | Todo |
 
 ### Workstream C — Simulation isolation & modes

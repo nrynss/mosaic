@@ -12,7 +12,7 @@ import (
 )
 
 // Compile-time proof that Store satisfies the EventLog transport seam.
-// Append is the only method required today; EventConsumer arrives in B3.
+// EventConsumer and EventBus are separate types (see consumer.go, eventbus.go).
 var _ eventlog.EventLog = (*Store)(nil)
 
 // postgresUniqueViolation is the SQLSTATE for unique_violation (ON CONFLICT /

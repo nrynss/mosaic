@@ -189,20 +189,30 @@ func (c *EventConsumer) tryProcessPartition(
 	if err != nil {
 		return partitionOutcomeIdle, fmt.Errorf("acquire connection for partition lock: %w", err)
 	}
-	defer conn.Release()
+	// Session advisory locks stick to the connection. Always unlock before
+	// Release; if unlock fails, destroy the connection so a held lock cannot
+	// poison the pool for a later borrower.
+	releaseLockConn := func(locked bool) {
+		if locked {
+			if err := unlockPartitionAdvisoryLock(context.Background(), conn, c.group, partitionKey); err != nil {
+				hijacked := conn.Hijack()
+				_ = hijacked.Close(context.Background())
+				return
+			}
+		}
+		conn.Release()
+	}
 
 	locked, err := tryPartitionAdvisoryLock(ctx, conn, c.group, partitionKey)
 	if err != nil {
+		releaseLockConn(false)
 		return partitionOutcomeIdle, err
 	}
 	if !locked {
+		releaseLockConn(false)
 		return partitionOutcomeLocked, nil
 	}
-	defer func() {
-		// Best-effort unlock; connection return also drops session locks if the
-		// pool discards the conn, but unlock keeps the conn reusable cleanly.
-		_ = unlockPartitionAdvisoryLock(context.Background(), conn, c.group, partitionKey)
-	}()
+	defer releaseLockConn(true)
 
 	handledAny := false
 	for {
@@ -399,13 +409,20 @@ func (c *EventConsumer) upsertCheckpoint(ctx context.Context, partitionKey strin
 		return err
 	}
 	token := EncodeSequenceToken(sequence)
+	// Only move the cursor forward. Under exclusive partition locks this is
+	// belt-and-suspenders against a corrupt or raced token going backwards.
 	_, err = exec.Exec(ctx, `
 		INSERT INTO `+EventConsumerCheckpointsTable+`
 			(`+CheckpointColConsumerGroup+`, `+CheckpointColPartitionKey+`, `+CheckpointColPositionToken+`, `+CheckpointColUpdatedAt+`)
 		VALUES ($1, $2, $3, now())
 		ON CONFLICT (`+CheckpointColConsumerGroup+`, `+CheckpointColPartitionKey+`) DO UPDATE
 		SET `+CheckpointColPositionToken+` = EXCLUDED.`+CheckpointColPositionToken+`,
-		    `+CheckpointColUpdatedAt+` = EXCLUDED.`+CheckpointColUpdatedAt+``,
+		    `+CheckpointColUpdatedAt+` = EXCLUDED.`+CheckpointColUpdatedAt+`
+		WHERE CASE
+			WHEN `+EventConsumerCheckpointsTable+`.`+CheckpointColPositionToken+` ~ '^[1-9][0-9]*$'
+			THEN `+EventConsumerCheckpointsTable+`.`+CheckpointColPositionToken+`::bigint
+			ELSE 0
+		END < EXCLUDED.`+CheckpointColPositionToken+`::bigint`,
 		c.group, partitionKey, token,
 	)
 	if err != nil {
@@ -436,6 +453,11 @@ func unlockPartitionAdvisoryLock(ctx context.Context, conn *pgxpool.Conn, group,
 	).Scan(&unlocked)
 	if err != nil {
 		return fmt.Errorf("advisory unlock for %q/%q: %w", group, partitionKey, err)
+	}
+	if !unlocked {
+		// false means this session did not hold the lock — treat as failure so
+		// the caller can discard the connection rather than risk pool poison.
+		return fmt.Errorf("advisory unlock for %q/%q: lock was not held", group, partitionKey)
 	}
 	return nil
 }

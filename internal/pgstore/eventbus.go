@@ -83,8 +83,12 @@ type EventBus struct {
 
 // NewEventBus returns a LISTEN/NOTIFY EventBus that publishes through pool and
 // opens dedicated listen connections from pool.Config().ConnConfig. pool must
-// be non-nil and remain open for the lifetime of the bus.
+// be non-nil and remain open for the lifetime of the bus. A nil pool panics —
+// fan-out misconfiguration should fail at composition, not on the first Publish.
 func NewEventBus(pool *pgxpool.Pool) *EventBus {
+	if pool == nil {
+		panic("pgstore: NewEventBus requires a non-nil pool")
+	}
 	return &EventBus{pool: pool}
 }
 
@@ -135,7 +139,7 @@ func (b *EventBus) Subscribe(ctx context.Context, topic string) (<-chan []byte, 
 	}
 
 	out := make(chan []byte, subscriberBufferSize)
-	go b.runSubscriber(ctx, conn, out)
+	go b.runSubscriber(ctx, conn, channel, out)
 	return out, nil
 }
 
@@ -152,7 +156,7 @@ func (b *EventBus) openListenConn(ctx context.Context) (*pgx.Conn, error) {
 
 // runSubscriber pumps NOTIFY payloads into out until ctx is done or the
 // connection fails, then closes out and the dedicated connection.
-func (b *EventBus) runSubscriber(ctx context.Context, conn *pgx.Conn, out chan []byte) {
+func (b *EventBus) runSubscriber(ctx context.Context, conn *pgx.Conn, channel string, out chan []byte) {
 	defer close(out)
 	defer func() {
 		// Use a detached context so teardown is not aborted by the already-
@@ -165,6 +169,10 @@ func (b *EventBus) runSubscriber(ctx context.Context, conn *pgx.Conn, out chan [
 		if err != nil {
 			// ctx cancellation and connection close are normal shutdown paths.
 			return
+		}
+		// Defense-in-depth: ignore unexpected channels on this connection.
+		if notification.Channel != channel {
+			continue
 		}
 		// Copy the payload so callers own the slice independently of pgx buffers.
 		note := []byte(notification.Payload)
