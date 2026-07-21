@@ -393,7 +393,7 @@ Dependencies noted. Workstreams A→B are the foundation; C rides on them.
 ### Workstream E — Ops & pluggability proof
 | ID | Task | Size | Deps | Claim | Status |
 |----|------|------|------|-------|--------|
-| E1 | `docker-compose` = **two services** (stateless app + Postgres), the decided topology; app stays stateless. Single-container appliance is out of scope for v0.4 | **M** | B1 | — | Todo |
+| E1 | `docker-compose` = **two services** (stateless app + Postgres), the decided topology; app stays stateless. Single-container appliance is out of scope for v0.4 | **M** | B1 | Opus agent | In progress |
 | E2 | Interface **conformance test suite** (validates Postgres now; same suite validates a future Kafka/Redpanda impl) | **M** | A1 | — | Todo |
 | E3 | Kafka/Redpanda introduction guide (implement the seams; wiring swap; Postgres stays read model) | **S** | A1 | — | Todo |
 
