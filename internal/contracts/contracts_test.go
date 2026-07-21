@@ -49,6 +49,20 @@ func TestAdvisoryHistoryReaderRemainsBoundedDomainSnapshot(t *testing.T) {
 	}
 }
 
+type copReadModelFixture struct{}
+
+func (copReadModelFixture) LoadCOPReadModel(context.Context) (ProjectionResult, bool, error) {
+	return ProjectionResult{}, false, nil
+}
+func (copReadModelFixture) SaveCOPReadModel(context.Context, ProjectionResult) error { return nil }
+
+func TestCOPReadModelRepositoryRemainsLoadSaveSeam(t *testing.T) {
+	var _ COPReadModelRepository = copReadModelFixture{}
+	if DefaultCOPReadModelKey != "default" {
+		t.Fatalf("DefaultCOPReadModelKey = %q, want default", DefaultCOPReadModelKey)
+	}
+}
+
 type simulationScheduleFixture struct{}
 
 func (simulationScheduleFixture) Beats() []ScheduledBeat {

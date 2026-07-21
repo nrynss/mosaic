@@ -109,6 +109,8 @@ func TestOpenAppliesMigrationsAndRejectsHistoryMutation(t *testing.T) {
 		"model_runs", "audit_records", "checkpoints", "canonical_projection_receipts",
 		// Event spine transport (migration 0002; B2/B3 implement against these).
 		"event_log", "event_consumer_checkpoints",
+		// Materialized COP read model (migration 0003; B5).
+		"cop_read_model",
 	}
 	for _, table := range tables {
 		var regclass string

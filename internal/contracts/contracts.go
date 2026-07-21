@@ -79,6 +79,24 @@ type ProjectionResult struct {
 	Checkpoint    gen.Checkpoint
 }
 
+// DefaultCOPReadModelKey is the active COP materialization key until session
+// isolation (C3) introduces per-session epochs. Callers that do not yet scope
+// by session always read and write this key.
+const DefaultCOPReadModelKey = "default"
+
+// COPReadModelRepository is the mutable system-of-record COP snapshot used for
+// cheap GET /cop. It is separate from append-only checkpoints (recovery) and
+// from the event log (transport). Implementations UPSERT one row per key;
+// missing rows are reported as (zero, false, nil), not an error.
+//
+// Save is expected to join an ambient WithinTransaction when one is present so
+// project+position+materialize can commit atomically on the Postgres consumer
+// path. See pgstore.MaterializingProjector.
+type COPReadModelRepository interface {
+	LoadCOPReadModel(ctx context.Context) (ProjectionResult, bool, error)
+	SaveCOPReadModel(ctx context.Context, result ProjectionResult) error
+}
+
 // ProjectorDispatcher schedules a committed canonical event for its deterministic projector.
 type ProjectorDispatcher interface {
 	DispatchCanonicalEvent(ctx context.Context, canonicalEventID string) error
