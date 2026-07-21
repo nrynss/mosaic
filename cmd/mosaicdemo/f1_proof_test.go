@@ -83,18 +83,21 @@ func TestF1ProgressiveProjectionIntermediateRevisions(t *testing.T) {
 }
 
 // TestF1SessionReplayIsolationTwoSequentialPlays proves two sequential sessions
-// on the same durable store: End clears the board; durable history remains;
-// second Play reaches rev 9 for the new active session only.
+// on the same durable store and process: End clears the board; durable history
+// remains; second Play advances COP progressively (not full-Recover jump) and
+// reaches rev 9 for the new active session only; IntactRestart advisories are
+// gated by progressive revision.
 func TestF1SessionReplayIsolationTwoSequentialPlays(t *testing.T) {
 	root := repositoryRoot(t)
 	ui := makeDashboard(t)
 	database := filepath.Join(t.TempDir(), "f1-session-iso.db")
+	// Spacing slow enough that second-Play mid-session COP samples can land.
 	app, err := newApplication(context.Background(), config{
 		ListenAddress: "127.0.0.1:0",
 		DatabasePath:  database,
 		UIDirectory:   ui,
 		AssetRoot:     root,
-		BeatSpacing:   time.Millisecond,
+		BeatSpacing:   40 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatalf("compose: %v", err)
@@ -109,7 +112,7 @@ func TestF1SessionReplayIsolationTwoSequentialPlays(t *testing.T) {
 	if first.SessionID == "" {
 		t.Fatal("empty first session id")
 	}
-	waitSessionEnded(t, app.simulation, 15*time.Second)
+	waitSessionEnded(t, app.simulation, 20*time.Second)
 	assertFixtureCOP(t, app.handler)
 	assertFixtureAdvisories(t, app.handler)
 
@@ -120,6 +123,12 @@ func TestF1SessionReplayIsolationTwoSequentialPlays(t *testing.T) {
 	assertEmptyAdvisories(t, app.handler)
 
 	// Durable append-only history remains after End (empty board is view isolation).
+	// Must not hold the app's DB open concurrently (SQLite single-writer); use
+	// the composed store via recovery only when available — reopen after End
+	// is fine for file-backed SQLite when app still has the connection...
+	// Prefer listing through a short-lived open only if path allows; otherwise
+	// skip dual-open and trust first-play fixture asserts + second-play ladder.
+	// File-backed modernc sqlite often allows multi-read; keep the check.
 	durable, err := store.Open(context.Background(), database)
 	if err != nil {
 		t.Fatalf("open durable: %v", err)
@@ -142,8 +151,8 @@ func TestF1SessionReplayIsolationTwoSequentialPlays(t *testing.T) {
 		t.Fatalf("durable advisories after first = insights:%d recs:%d, want 2/1", len(history.Insights), len(history.Recommendations))
 	}
 
-	// Session 2 on same process + DB file: distinct epoch; session-scoped COP
-	// must reach rev 9 without flashing prior session when Active is set (D1h R2).
+	// Session 2 same process + DB: distinct epoch; progressive COP must climb
+	// through intermediate revisions (P05 duplicates must not full-Recover).
 	second, err := app.simulation.Start(context.Background())
 	if err != nil {
 		t.Fatalf("second Start: %v", err)
@@ -151,11 +160,46 @@ func TestF1SessionReplayIsolationTwoSequentialPlays(t *testing.T) {
 	if second.SessionID == "" || second.SessionID == first.SessionID {
 		t.Fatalf("second session id = %q, first = %q; want distinct epochs", second.SessionID, first.SessionID)
 	}
+
+	seen2 := map[int64]bool{}
+	var samples2 []int64
+	midSessionInsights := -1
+	deadline2 := time.Now().Add(25 * time.Second)
+	for time.Now().Before(deadline2) {
+		rev := copRevision(t, app.handler)
+		if rev > 0 && !seen2[rev] {
+			seen2[rev] = true
+			samples2 = append(samples2, rev)
+		}
+		// Before progressive rev 7, IntactRestart must not surface fixture insights.
+		if rev > 0 && rev < 7 && midSessionInsights < 0 {
+			midSessionInsights = advisoryInsightCount(t, app.handler)
+		}
+		if app.simulation.Status().Status == contracts.SessionEnded && rev == 9 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	waitSessionEnded(t, app.simulation, 15*time.Second)
 	assertFixtureCOP(t, app.handler)
 
-	// Second session must re-index session-scoped advisories even when durable
-	// continuum stages are already intact (IntactRestart path).
+	if !seen2[9] {
+		t.Fatalf("second Play never observed final revision 9; samples=%v", samples2)
+	}
+	intermediate2 := 0
+	for rev := range seen2 {
+		if rev > 0 && rev < 9 {
+			intermediate2++
+		}
+	}
+	if intermediate2 < 2 {
+		t.Fatalf("second Play intermediate COP revisions = %d (samples=%v); want ≥2 in (0,9) (full-Recover smell)", intermediate2, samples2)
+	}
+	if midSessionInsights > 0 {
+		t.Fatalf("mid-session (rev<7) insights = %d, want 0 (IntactRestart must not re-index early)", midSessionInsights)
+	}
+
+	// After complete second Play, fixture advisories are re-indexed for the epoch.
 	assertFixtureAdvisories(t, app.handler)
 
 	if _, err := app.simulation.End(context.Background()); err != nil {
@@ -163,6 +207,25 @@ func TestF1SessionReplayIsolationTwoSequentialPlays(t *testing.T) {
 	}
 	assertEmptyCOP(t, app.handler)
 	assertEmptyAdvisories(t, app.handler)
+}
+
+func advisoryInsightCount(t *testing.T, handler http.Handler) int {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "http://mosaic.test/api/v1/advisories", nil)
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("advisories status = %d: %s", resp.Code, resp.Body.String())
+	}
+	var body struct {
+		Data struct {
+			Insights []any `json:"insights"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode advisories: %v", err)
+	}
+	return len(body.Data.Insights)
 }
 
 // TestF1FixtureCassetteModeSurfacedOnProgressivePath proves default fixture/

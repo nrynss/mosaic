@@ -513,10 +513,29 @@ func (s *Service) Ingest(ctx context.Context, raw gen.RawEvent) (ingestion.Outco
 }
 
 // IngestBeat looks up one declared fixture beat by id, delivers its raw event
-// through P05, fails closed on dispatch errors, and returns the recovered COP
-// snapshot after that beat. Used by the progressive interactive path (one beat
-// at a time) instead of bulk Run.
+// through P05, fails closed on dispatch errors, and returns the full-store
+// recovered COP snapshot after that beat. Used by bulk Run. The interactive
+// progressive path uses DeliverBeat + ProgressiveCOPFromBeatIDs instead so a
+// second Play on a durable store does not jump the session board to final rev.
 func (s *Service) IngestBeat(ctx context.Context, beatID string) (TimelineEntry, error) {
+	entry, err := s.DeliverBeat(ctx, beatID)
+	if err != nil {
+		return TimelineEntry{}, err
+	}
+	projected, err := s.Recover(ctx)
+	if err != nil {
+		return TimelineEntry{}, fmt.Errorf("recover after beat %q: %w", beatID, err)
+	}
+	entry.StateRevision = projected.StateRevision
+	entry.COP = cloneCOP(projected.COP)
+	return entry, nil
+}
+
+// DeliverBeat looks up one declared fixture beat by id and delivers its raw
+// event through P05 without full-store Recover. StateRevision and COP are left
+// zero; callers that need a session-progressive board must follow with
+// ProgressiveCOPFromBeatIDs over the beats processed this session.
+func (s *Service) DeliverBeat(ctx context.Context, beatID string) (TimelineEntry, error) {
 	if s == nil || s.fixture == nil {
 		return TimelineEntry{}, errors.New("simulator is not configured")
 	}
@@ -547,9 +566,14 @@ func (s *Service) IngestBeat(ctx context.Context, beatID string) (TimelineEntry,
 	if outcome.DispatchError != nil {
 		return TimelineEntry{}, fmt.Errorf("dispatch beat %q: %w", beat.BeatID, outcome.DispatchError)
 	}
-	projected, err := s.Recover(ctx)
-	if err != nil {
-		return TimelineEntry{}, fmt.Errorf("recover after beat %q: %w", beat.BeatID, err)
+	// On first delivery, CanonicalEventID comes from the ingest outcome. On
+	// exact P05 duplicates the outcome omits it; resolve from the fixture map
+	// so progressive session projection can still select durable events.
+	canonicalID := outcome.CanonicalEventID
+	if canonicalID == "" {
+		if out, ok := s.fixture.outputByRaw[beat.RawEventID]; ok && out.canonical != nil {
+			canonicalID = out.canonical.CanonicalEventID
+		}
 	}
 	return TimelineEntry{
 		Beat:             beat,
@@ -557,10 +581,73 @@ func (s *Service) IngestBeat(ctx context.Context, beatID string) (TimelineEntry,
 		LifecycleStatus:  outcome.Status,
 		Duplicate:        outcome.Duplicate,
 		LunaResultID:     outcome.LunaResultID,
-		CanonicalEventID: outcome.CanonicalEventID,
-		StateRevision:    projected.StateRevision,
-		COP:              cloneCOP(projected.COP),
+		CanonicalEventID: canonicalID,
 	}, nil
+}
+
+// ProgressiveCOPFromBeatIDs rebuilds a session-progressive COP by replaying only
+// the durable canonical events that correspond to the given fixture beat IDs
+// (in durable sequence order). Result is materialised via WrapProjector when
+// configured (session-scoped COP key). Empty beat sets or only non-projectable
+// beats yield a zero ProjectionResult without materialising.
+//
+// This is the progressive board source for interactive Play: full-store Recover
+// is NOT used, so a second session on an already-seeded durable log still
+// advances revision 1→9 across beats instead of jumping to final rev on beat 1.
+func (s *Service) ProgressiveCOPFromBeatIDs(ctx context.Context, beatIDs []string) (contracts.ProjectionResult, error) {
+	if s == nil || s.fixture == nil {
+		return contracts.ProjectionResult{}, errors.New("simulator is not configured")
+	}
+	want := make(map[string]struct{}, len(beatIDs))
+	for _, beatID := range beatIDs {
+		beatID = strings.TrimSpace(beatID)
+		if beatID == "" {
+			continue
+		}
+		for _, candidate := range s.fixture.Beats {
+			if candidate.BeatID != beatID {
+				continue
+			}
+			if out, ok := s.fixture.outputByRaw[candidate.RawEventID]; ok && out.canonical != nil {
+				id := strings.TrimSpace(out.canonical.CanonicalEventID)
+				if id != "" {
+					want[id] = struct{}{}
+				}
+			}
+			break
+		}
+	}
+	if len(want) == 0 {
+		return contracts.ProjectionResult{}, nil
+	}
+	all, err := s.store.ListCanonicalEventsAfter(ctx, 0)
+	if err != nil {
+		return contracts.ProjectionResult{}, fmt.Errorf("list canonical events for progressive COP: %w", err)
+	}
+	filtered := make([]gen.CanonicalEvent, 0, len(want))
+	for _, event := range all {
+		if _, ok := want[event.CanonicalEventID]; ok {
+			filtered = append(filtered, event)
+		}
+	}
+	if len(filtered) == 0 {
+		// Beats resolved to fixture canonical ids that are not yet durable
+		// (should not happen after DeliverBeat on a known fixture).
+		return contracts.ProjectionResult{}, nil
+	}
+	sort.SliceStable(filtered, func(i, j int) bool {
+		return filtered[i].CanonicalSeq < filtered[j].CanonicalSeq
+	})
+
+	projector, err := state.NewProjector(s.store, s.store, s.store)
+	if err != nil {
+		return contracts.ProjectionResult{}, err
+	}
+	var asProjector contracts.Projector = projector
+	if s.wrapProjector != nil {
+		asProjector = s.wrapProjector(asProjector)
+	}
+	return asProjector.Replay(ctx, gen.Checkpoint{}, filtered)
 }
 
 // RawEventPayload returns the JSON-serialized fixture raw event for Append to

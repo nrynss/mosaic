@@ -20,6 +20,25 @@ const EventTypeRawEvent = "raw.event"
 // the framework default is a single simulation partition, not a dataset path.
 const DefaultPartitionKey = "simulation"
 
+// RawEventEnvelope builds the EventLog envelope used by both BeatExecutor and
+// composition OnBeat paths. partitionKey empty → DefaultPartitionKey;
+// IdempotencyKey is always rawEventID; Type is always EventTypeRawEvent.
+// Nil payload is normalised to empty bytes so backends do not diverge on nil.
+func RawEventEnvelope(partitionKey, rawEventID string, payload []byte) eventlog.EventEnvelope {
+	if partitionKey == "" {
+		partitionKey = DefaultPartitionKey
+	}
+	if payload == nil {
+		payload = []byte{}
+	}
+	return eventlog.EventEnvelope{
+		PartitionKey:   partitionKey,
+		IdempotencyKey: rawEventID,
+		Type:           EventTypeRawEvent,
+		Payload:        payload,
+	}
+}
+
 // BeatSource loads frozen raw-event payload bytes for a raw_event_id.
 // Injected by composition — simulation never hardcodes dataset filesystem paths.
 type BeatSource interface {
@@ -219,17 +238,7 @@ func (e *BeatExecutor) appendBeat(ctx context.Context, beat contracts.ScheduledB
 	if err != nil {
 		return fmt.Errorf("simulation: load raw event %q: %w", rawID, err)
 	}
-	if payload == nil {
-		// Match EventLog backends that store nil as empty BYTEA; avoid
-		// nil-vs-empty ambiguity at the envelope layer.
-		payload = []byte{}
-	}
-	env := eventlog.EventEnvelope{
-		PartitionKey:   e.partitionKey,
-		IdempotencyKey: rawID, // stable source identity; at-least-once safe
-		Type:           EventTypeRawEvent,
-		Payload:        payload,
-	}
+	env := RawEventEnvelope(e.partitionKey, rawID, payload)
 	if err := e.log.Append(ctx, env); err != nil {
 		return fmt.Errorf("simulation: append beat %q: %w", beat.BeatID, err)
 	}

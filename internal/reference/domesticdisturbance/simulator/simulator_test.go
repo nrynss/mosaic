@@ -183,6 +183,72 @@ func TestIngestBeatProgressiveAdvancesRevision(t *testing.T) {
 	}
 }
 
+// TestProgressiveCOPFromBeatIDsSecondPassAdvancesLadder proves that after a
+// full durable seed, replaying only a prefix of beat IDs yields intermediate
+// revisions (not full-store Recover rev 9). This is the second-Play honesty fix.
+func TestProgressiveCOPFromBeatIDsSecondPassAdvancesLadder(t *testing.T) {
+	ctx := context.Background()
+	service, _ := newTestService(t, ctx)
+	if _, err := service.Run(ctx); err != nil {
+		t.Fatalf("seed Run: %v", err)
+	}
+	// Full-store Recover is already final.
+	full, err := service.Recover(ctx)
+	if err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	if full.StateRevision != 9 {
+		t.Fatalf("full Recover revision = %d, want 9", full.StateRevision)
+	}
+
+	beats := service.Beats()
+	if len(beats) < 4 {
+		t.Fatalf("beats = %d, want ≥4", len(beats))
+	}
+	// Prefix of 3 beats → progressive rev should be 3 (all projectable baselines).
+	var prefix []string
+	for i := 0; i < 3; i++ {
+		prefix = append(prefix, beats[i].BeatID)
+	}
+	progressive, err := service.ProgressiveCOPFromBeatIDs(ctx, prefix)
+	if err != nil {
+		t.Fatalf("ProgressiveCOPFromBeatIDs: %v", err)
+	}
+	if progressive.StateRevision != 3 {
+		t.Fatalf("progressive prefix-3 revision = %d, want 3 (not full Recover 9)", progressive.StateRevision)
+	}
+
+	// Grow prefix beat-by-beat; revisions must climb and stay below 9 until late.
+	var ids []string
+	seen := map[int64]bool{}
+	for _, beat := range beats {
+		ids = append(ids, beat.BeatID)
+		// Deliver (duplicate) keeps P05 honest; progressive COP ignores full Recover.
+		if _, err := service.DeliverBeat(ctx, beat.BeatID); err != nil {
+			t.Fatalf("DeliverBeat %s: %v", beat.BeatID, err)
+		}
+		got, err := service.ProgressiveCOPFromBeatIDs(ctx, ids)
+		if err != nil {
+			t.Fatalf("ProgressiveCOP after %s: %v", beat.BeatID, err)
+		}
+		if got.StateRevision > 0 {
+			seen[got.StateRevision] = true
+		}
+	}
+	if !seen[9] {
+		t.Fatalf("never reached progressive rev 9; seen=%v", seen)
+	}
+	intermediate := 0
+	for rev := range seen {
+		if rev > 0 && rev < 9 {
+			intermediate++
+		}
+	}
+	if intermediate < 2 {
+		t.Fatalf("intermediate progressive revs = %d (seen=%v); want ≥2 in (0,9)", intermediate, seen)
+	}
+}
+
 func TestServiceBeatsMatchScenario(t *testing.T) {
 	ctx := context.Background()
 	service, _ := newTestService(t, ctx)

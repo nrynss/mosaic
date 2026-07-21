@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -645,7 +646,7 @@ func TestOnBeatErrorStopsFurtherBeatsAndEndsSession(t *testing.T) {
 			seen = append(seen, beat.BeatID)
 			mu.Unlock()
 			if beat.BeatID == "beat-a" {
-				return context.Canceled
+				return errors.New("inject onbeat failure for test")
 			}
 			return nil
 		}
@@ -659,9 +660,17 @@ func TestOnBeatErrorStopsFurtherBeatsAndEndsSession(t *testing.T) {
 	// Collect buffered events: failed OnBeat must not emit that beat SSE.
 	events := collectUntilQuiet(t, sub, 100*time.Millisecond)
 	var beatEvents int
+	var endedPayload map[string]any
 	for _, ev := range events {
 		if ev.Type == contracts.StreamEventBeat {
 			beatEvents++
+		}
+		if ev.Type == contracts.StreamEventStatusChange {
+			if p, ok := ev.Payload.(map[string]any); ok {
+				if p["status"] == string(contracts.SessionEnded) {
+					endedPayload = p
+				}
+			}
 		}
 	}
 	mu.Lock()
@@ -671,6 +680,93 @@ func TestOnBeatErrorStopsFurtherBeatsAndEndsSession(t *testing.T) {
 	}
 	if beatEvents != 0 {
 		t.Fatalf("SSE beat emissions = %d, want 0 when OnBeat fails before emit", beatEvents)
+	}
+	// P2: status_change ended carries on_beat_error reason + beat_id + error.
+	if endedPayload == nil {
+		t.Fatal("missing status_change ended payload")
+	}
+	if endedPayload["reason"] != "on_beat_error" {
+		t.Fatalf("ended reason = %#v, want on_beat_error", endedPayload["reason"])
+	}
+	if endedPayload["beat_id"] != "beat-a" {
+		t.Fatalf("ended beat_id = %#v, want beat-a", endedPayload["beat_id"])
+	}
+	if errStr, _ := endedPayload["error"].(string); errStr == "" {
+		t.Fatalf("ended error empty; payload=%#v", endedPayload)
+	}
+}
+
+func TestEqualSpacingMinInterBeatAfterSlowOnBeat(t *testing.T) {
+	// When OnBeat overruns the absolute ladder slot, the next beat must still
+	// wait MinInterBeat=BeatSpacing from lastFinished (not fire immediately).
+	clock := NewVirtualClock(time.Date(2026, 7, 20, 18, 0, 0, 0, time.UTC))
+	spacing := 2 * time.Second
+	beats := []contracts.ScheduledBeat{
+		{BeatID: "a", Order: 1, RawEventID: "r1", Delay: 0},
+		{BeatID: "b", Order: 2, RawEventID: "r2", Delay: 0},
+		{BeatID: "c", Order: 3, RawEventID: "r3", Delay: 0},
+	}
+	var fireAt []time.Time
+	var mu sync.Mutex
+	ctrl := newTestController(t, beats, func(cfg *Config) {
+		cfg.Clock = clock.Now
+		cfg.After = clock.After
+		cfg.BeatSpacing = spacing
+		cfg.NewSessionID = func() string { return "slow-onbeat-session" }
+		cfg.OnBeat = func(_ context.Context, beat contracts.ScheduledBeat) error {
+			mu.Lock()
+			fireAt = append(fireAt, clock.Now())
+			mu.Unlock()
+			if beat.BeatID == "a" {
+				// Overrun absolute ladder: beat b's ladder slot is start+2s,
+				// but OnBeat alone costs 5s → next earliest is lastFinished+2s.
+				clock.Advance(5 * time.Second)
+			}
+			return nil
+		}
+	})
+	sub := ctrl.Subscribe()
+	t.Cleanup(sub.Cancel)
+
+	if _, err := ctrl.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	// First beat fires immediately (index 0).
+	_ = collectUntil(t, sub, 3, time.Second) // clear, status, beat a SSE
+
+	// After slow OnBeat, clock is at start+5s. Absolute ladder for b is start+2s
+	// (already past). MinInterBeat requires wait until start+5s+2s = start+7s.
+	// Advancing only 1s must not emit beat b.
+	clock.Advance(spacing - time.Second)
+	select {
+	case ev := <-sub.Events():
+		if ev.Type == contracts.StreamEventBeat {
+			t.Fatalf("beat b fired too early after slow OnBeat: %#v", ev)
+		}
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	clock.Advance(time.Second) // reach lastFinished+spacing
+	second := collectUntil(t, sub, 1, time.Second)
+	if second[0].Type != contracts.StreamEventBeat {
+		t.Fatalf("expected beat b, got %v", second[0].Type)
+	}
+	if second[0].Payload.(map[string]any)["beat_id"] != "b" {
+		t.Fatalf("second beat = %#v, want b", second[0].Payload)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(fireAt) < 2 {
+		t.Fatalf("OnBeat fires = %d, want ≥2", len(fireAt))
+	}
+	// b should fire at least spacing after a finished (a finished at start+5s).
+	gap := fireAt[1].Sub(fireAt[0])
+	// fireAt[0] is start of OnBeat a (t0); OnBeat advances +5s before return.
+	// fireAt[1] is start of OnBeat b; earliest is lastFinished(+5 from t0)+spacing.
+	// So fireAt[1] - fireAt[0] >= 5s+spacing.
+	if gap < 5*time.Second+spacing {
+		t.Fatalf("OnBeat gap a→b = %v, want ≥ %v (slow work + MinInterBeat)", gap, 5*time.Second+spacing)
 	}
 }
 

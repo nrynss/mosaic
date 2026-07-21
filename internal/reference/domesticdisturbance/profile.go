@@ -227,12 +227,14 @@ type runtime struct {
 	active            contracts.ActiveSessionSource
 	sessionAdvisories simulator.SessionAdvisoryRecorder
 
-	// Progressive path: accumulate timeline snapshots so advisory stages can
-	// reuse historical rev-7/rev-9 COPs without re-running bulk seed.
-	// Best-effort only — ContinueProgressive recovers from the durable store
-	// when this slice is empty after a process restart.
-	mu       sync.Mutex
-	timeline []simulator.TimelineEntry
+	// Progressive path: accumulate session-local timeline snapshots so advisory
+	// stages see progressive rev-7/rev-9 COPs. Cleared when Active session id
+	// changes (new Start/Reset epoch) so a second Play does not reuse the prior
+	// session's beat ladder or full-store Recover snapshots.
+	mu                sync.Mutex
+	timelineSessionID string
+	sessionBeatIDs    []string
+	timeline          []simulator.TimelineEntry
 }
 
 var _ profile.Runtime = (*runtime)(nil)
@@ -257,39 +259,102 @@ func (r *runtime) Run(ctx context.Context) error {
 	return nil
 }
 
-// ProcessBeat ingests one scheduled beat through the real P05 pipeline, recovers
-// the COP, and runs progressive advisory stages when revisions 7 and/or 9 first
-// become available. Idempotent via P05 source identity and durable advisory
-// stage classification. This is the sync consumer for the interactive EventLog
-// path (composition Appends first, then calls ProcessBeat).
+// ProcessBeat ingests one scheduled beat through the real P05 pipeline, materialises
+// a session-progressive COP (not full-store Recover), and runs progressive advisory
+// stages when session revisions 7 and/or 9 first become available. Idempotent via
+// P05 source identity and durable advisory stage classification. This is the sync
+// consumer for the interactive EventLog path (composition Appends first, then
+// calls ProcessBeat).
+//
+// Progressive honesty on a second Play: raw events may be P05 duplicates and the
+// durable log already holds all canonical events. Session board revision still
+// advances beat-by-beat by replaying only the canonical events for beats
+// processed in this session epoch.
 func (r *runtime) ProcessBeat(ctx context.Context, beatID string) error {
 	if r == nil || r.scenario == nil || r.advisory == nil {
 		return errors.New("domain runtime is not configured")
 	}
-	entry, err := r.scenario.IngestBeat(ctx, beatID)
+	r.beginSessionIfChanged()
+
+	// P05 deliver only — do not full-Recover (that jumps session materialisation
+	// to final rev when the durable store is already complete).
+	entry, err := r.scenario.DeliverBeat(ctx, beatID)
 	if err != nil {
 		return err
 	}
+
+	r.mu.Lock()
+	r.sessionBeatIDs = append(r.sessionBeatIDs, beatID)
+	beatIDs := append([]string(nil), r.sessionBeatIDs...)
+	r.mu.Unlock()
+
+	projected, err := r.scenario.ProgressiveCOPFromBeatIDs(ctx, beatIDs)
+	if err != nil {
+		return fmt.Errorf("progressive COP after beat %q: %w", beatID, err)
+	}
+	entry.StateRevision = projected.StateRevision
+	entry.COP = projected.COP
+
 	r.mu.Lock()
 	r.timeline = append(r.timeline, entry)
 	timeline := append([]simulator.TimelineEntry(nil), r.timeline...)
 	r.mu.Unlock()
+
 	result, err := r.advisory.ContinueProgressive(ctx, timeline)
 	if err != nil {
 		return err
 	}
-	r.recordProgressiveSessionAdvisories(result)
+	r.recordProgressiveSessionAdvisories(result, projected.StateRevision)
 	return nil
+}
+
+// BeginSession clears the progressive session timeline. Composition may call
+// this on Start; ProcessBeat also clears automatically when Active session id
+// changes so a second Play cannot reuse the prior epoch's beat ladder.
+func (r *runtime) BeginSession() {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.timeline = nil
+	r.sessionBeatIDs = nil
+	r.timelineSessionID = ""
+	if r.active != nil {
+		if sid, ok := r.active.ActiveSessionID(); ok {
+			r.timelineSessionID = sid
+		}
+	}
+}
+
+// beginSessionIfChanged clears the progressive timeline when the active session
+// epoch changes (Start/Reset set a new id). No-op when Active is unset.
+func (r *runtime) beginSessionIfChanged() {
+	if r == nil || r.active == nil {
+		return
+	}
+	sid, ok := r.active.ActiveSessionID()
+	if !ok || sid == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.timelineSessionID == sid {
+		return
+	}
+	r.timelineSessionID = sid
+	r.timeline = nil
+	r.sessionBeatIDs = nil
 }
 
 // recordProgressiveSessionAdvisories indexes fixture artifacts written during
 // this beat against the active simulation session (C3 session-scoped board).
 //
-// StagesRun covers newly executed stages. StagesSkipped covers durable stages
-// already intact (including IntactRestart on a second Play). Both must be
-// indexed so GET /advisories still surfaces fixture advisories for the new
-// session_id when ContinueProgressive skips re-running intact continuum work.
-func (r *runtime) recordProgressiveSessionAdvisories(result simulator.AdvisoryReplayResult) {
+// StagesRun covers newly executed stages and is always indexed. StagesSkipped
+// covers durable stages already intact (including IntactRestart on a second
+// Play) and is gated by progressive session StateRevision so rev7 stages are
+// not re-indexed until the progressive board reaches ≥7, and rev9 until ≥9.
+func (r *runtime) recordProgressiveSessionAdvisories(result simulator.AdvisoryReplayResult, progressiveRev int64) {
 	if r == nil || r.advisory == nil || r.sessionAdvisories == nil || r.active == nil {
 		return
 	}
@@ -299,8 +364,25 @@ func (r *runtime) recordProgressiveSessionAdvisories(result simulator.AdvisoryRe
 	}
 	stages := make([]string, 0, len(result.StagesRun)+len(result.StagesSkipped))
 	stages = append(stages, result.StagesRun...)
-	stages = append(stages, result.StagesSkipped...)
+	for _, stage := range result.StagesSkipped {
+		if progressiveStageReached(stage, progressiveRev) {
+			stages = append(stages, stage)
+		}
+	}
 	r.advisory.RecordSessionStages(r.sessionAdvisories, sessionID, stages)
+}
+
+// progressiveStageReached reports whether a fixture advisory stage should be
+// visible on the session board given the progressive COP revision.
+func progressiveStageReached(stage string, progressiveRev int64) bool {
+	switch stage {
+	case "terra_active_rev7", "briefing_requested", "sol_recommendation_rev7":
+		return progressiveRev >= 7
+	case "terra_obsolete_rev9", "recommendation_acknowledged":
+		return progressiveRev >= 9
+	default:
+		return false
+	}
 }
 
 // RawEventPayload returns fixture raw-event JSON for EventLog.Append.

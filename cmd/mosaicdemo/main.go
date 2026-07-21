@@ -375,12 +375,8 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 			if err != nil {
 				return err
 			}
-			if err := beatLog.Append(beatCtx, eventlog.EventEnvelope{
-				PartitionKey:   partitionKey,
-				IdempotencyKey: beat.RawEventID,
-				Type:           simulation.EventTypeRawEvent,
-				Payload:        payload,
-			}); err != nil {
+			// Shared envelope shape with BeatExecutor (partition, type, idempotency).
+			if err := beatLog.Append(beatCtx, simulation.RawEventEnvelope(partitionKey, beat.RawEventID, payload)); err != nil {
 				return fmt.Errorf("event log append beat %q: %w", beat.BeatID, err)
 			}
 			if err := progressive.ProcessBeat(beatCtx, beat.BeatID); err != nil {

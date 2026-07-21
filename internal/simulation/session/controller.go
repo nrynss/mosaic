@@ -27,8 +27,11 @@
 //   - Default (BeatSpacing == 0): each ScheduledBeat.Delay is relative to
 //     session start (historical C1 behaviour). A beat with Delay=2s fires two
 //     seconds after start regardless of earlier beats. Tests rely on this.
-//   - Equal spacing (BeatSpacing > 0): beat at sorted index i fires after
-//     i*BeatSpacing from session start; ScheduledBeat.Delay is ignored.
+//   - Equal spacing (BeatSpacing > 0): beat at sorted index i fires at
+//     max(start+i*BeatSpacing, previousBeatFinishedAt+BeatSpacing) so the
+//     absolute ladder holds when OnBeat is fast, and a slow OnBeat does not
+//     bunch the remaining SSE emissions (MinInterBeat = BeatSpacing).
+//     Index 0 is immediate after start. ScheduledBeat.Delay is ignored.
 //     Composition should set BeatSpacing from MOSAIC_SIM_BEAT_SPACING
 //     (default 2.5s) so the demo is not flooded by fixture delay_ms≈100.
 //
@@ -420,9 +423,14 @@ func (c *Controller) runBeats(
 	})
 
 	completed := true
+	var onBeatErr error
+	var failedBeat contracts.ScheduledBeat
+	// lastFinished tracks when the previous beat's OnBeat(+emit) completed so
+	// equal-spacing mode can enforce MinInterBeat = BeatSpacing after slow work.
+	lastFinished := startTime
 	for i, beat := range ordered {
-		delay := c.delayFor(i, beat)
-		if err := c.waitUntil(ctx, startTime, delay); err != nil {
+		target := c.earliestFireTime(i, beat, startTime, lastFinished)
+		if err := c.waitUntilTime(ctx, target); err != nil {
 			completed = false
 			break
 		}
@@ -432,6 +440,8 @@ func (c *Controller) runBeats(
 		if c.onBeat != nil {
 			if err := c.onBeat(ctx, beat); err != nil {
 				completed = false
+				onBeatErr = err
+				failedBeat = beat
 				break
 			}
 		}
@@ -439,6 +449,7 @@ func (c *Controller) runBeats(
 			completed = false
 			break
 		}
+		lastFinished = c.clock().UTC()
 	}
 
 	// Natural completion and OnBeat/cancel failure both end the session cleanly.
@@ -452,10 +463,40 @@ func (c *Controller) runBeats(
 	}
 	c.session.Status = contracts.SessionEnded
 	c.runCancel = nil
-	c.publishLocked(contracts.StreamEventStatusChange, map[string]any{
+	payload := map[string]any{
 		"status": string(contracts.SessionEnded),
-	})
+	}
+	if onBeatErr != nil {
+		// P2: signal OnBeat failure so clients can distinguish clean end vs error.
+		// Keep R1: no beat SSE was emitted for the failed beat.
+		payload["reason"] = "on_beat_error"
+		payload["beat_id"] = failedBeat.BeatID
+		payload["error"] = truncateError(onBeatErr.Error(), 200)
+	}
+	c.publishLocked(contracts.StreamEventStatusChange, payload)
 	_ = completed // retained for readability of the loop above
+}
+
+// earliestFireTime is the earliest wall time at which beat index i may fire.
+// Absolute ladder: start + delayFor(i). When BeatSpacing > 0 and i > 0, also
+// enforce lastFinished+BeatSpacing so a slow OnBeat does not collapse the
+// remaining schedule into a zero-wait bunch.
+func (c *Controller) earliestFireTime(index int, beat contracts.ScheduledBeat, startTime, lastFinished time.Time) time.Time {
+	target := startTime.Add(c.delayFor(index, beat))
+	if index > 0 && c.beatSpacing > 0 {
+		minFromPrev := lastFinished.Add(c.beatSpacing)
+		if minFromPrev.After(target) {
+			target = minFromPrev
+		}
+	}
+	return target
+}
+
+func truncateError(msg string, max int) string {
+	if max <= 0 || len(msg) <= max {
+		return msg
+	}
+	return msg[:max]
 }
 
 // delayFor returns the wait from session start for the beat at sorted index i.
@@ -478,21 +519,26 @@ func (c *Controller) delayFor(index int, beat contracts.ScheduledBeat) time.Dura
 
 // waitUntil blocks until clock reaches startTime+delay or ctx is cancelled.
 // Delay is relative to session start (either equal-spacing or schedule Delay).
+func (c *Controller) waitUntil(ctx context.Context, startTime time.Time, delay time.Duration) error {
+	if delay < 0 {
+		delay = 0
+	}
+	return c.waitUntilTime(ctx, startTime.Add(delay))
+}
+
+// waitUntilTime blocks until clock reaches target or ctx is cancelled.
 //
 // Waiting is driven by the injectable After. When After fires without the
 // clock advancing (valid for some test fakes), the wait completes so a frozen
 // Clock cannot spin forever. When the clock does advance (VirtualClock), the
 // remaining delay is re-checked so partial advances keep waiting.
-func (c *Controller) waitUntil(ctx context.Context, startTime time.Time, delay time.Duration) error {
-	if delay < 0 {
-		delay = 0
-	}
+func (c *Controller) waitUntilTime(ctx context.Context, target time.Time) error {
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		now := c.clock().UTC()
-		remaining := delay - now.Sub(startTime)
+		remaining := target.Sub(now)
 		if remaining <= 0 {
 			return nil
 		}

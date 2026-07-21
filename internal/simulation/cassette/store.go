@@ -110,7 +110,8 @@ func NewFileStore(dir string) (*FileStore, error) {
 	return &FileStore{Dir: dir}, nil
 }
 
-// Get loads the JSON recording for key from disk.
+// Get loads the JSON recording for key from disk. Holds the same mutex as
+// Put/List so concurrent readers do not observe partial renames.
 func (s *FileStore) Get(_ context.Context, key string) (*Recording, error) {
 	if s == nil || strings.TrimSpace(s.Dir) == "" {
 		return nil, ErrStoreRequired
@@ -119,6 +120,10 @@ func (s *FileStore) Get(_ context.Context, key string) (*Recording, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {

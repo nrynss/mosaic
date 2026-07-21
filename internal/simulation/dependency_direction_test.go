@@ -15,6 +15,13 @@ import (
 // internal/ are scanned deny-by-default so new packages (e.g. eventlog) are
 // covered without maintaining a stale allowlist.
 //
+// Scanner rules:
+//   - Walks every non-test .go file under internal/ except the simulation/
+//     subtree itself (which may import its own subpackages).
+//   - *_test.go files are exempt so framework tests can wire the real controller.
+//   - Forbidden paths: mosaic.local/mosaic/internal/simulation and any
+//     subpackage, plus the retired internal/simsession path.
+//
 // Tests (*_test.go) under framework packages may import simulation for wiring
 // the real controller; only non-test production sources are restricted.
 
