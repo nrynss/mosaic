@@ -29,7 +29,11 @@ services:
     # fixture at runtime. Billing balance is unrelated to mode selection.
     environment:
       MOSAIC_LISTEN_ADDR: ":8080"
-      MOSAIC_DB_PATH: "postgres://mosaic:mosaic@db:5432/mosaic?sslmode=disable"
+      # Default: the local `db` container. Override with a Supabase DSN in .env
+      # (MOSAIC_DB_PATH=postgres://…@db.<ref>.supabase.co:5432/postgres?sslmode=require)
+      # to share ONE database with the Cloud Run demo — data generated locally
+      # then shows up in the deployed app, and vice versa.
+      MOSAIC_DB_PATH: "${MOSAIC_DB_PATH:-postgres://mosaic:mosaic@db:5432/mosaic?sslmode=disable}"
       MOSAIC_UI_DIR: "/srv/mosaic/ui"
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
       MOSAIC_LUNA_PROVIDER: "${MOSAIC_LUNA_PROVIDER:-live}"

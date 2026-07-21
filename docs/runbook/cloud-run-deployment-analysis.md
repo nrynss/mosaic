@@ -1,14 +1,40 @@
 # Google Cloud Run Deployment Analysis (Durable Design — Proposed)
 
 This document evaluates deploying the Mosaic interactive operator demo on
-Google Cloud Run under GCP free-tier-ish limits, including a **proposed**
-durable single-writer backup-and-restore architecture.
+Google Cloud Run, and records the **chosen durable demo path**: Cloud Run for
+the app + **Supabase** (managed Postgres) for the store.
 
-> **Status (hackathon live deploy):** The service that is live today follows
-> path **1 (Ephemeral)** only — `MOSAIC_DB_PATH=/tmp/mosaic.db`, no Litestream
-> binary/config in the shipped `Dockerfile`, no GCS replica, no Cloud SQL.
-> Path **2 (Durable)** remains a future parcel. Do not read this runbook as
-> “currently deployed.”
+> **Status:** As of v0.4, the store is a pluggable event spine and the same
+> image speaks Postgres when `MOSAIC_DB_PATH` is a `postgres://` DSN
+> ([main.go](../../cmd/mosaicdemo/main.go) routes on the DSN prefix). The
+> **chosen durable demo topology is Cloud Run + Supabase** (see §0 and §6).
+> The old SQLite-under-`/tmp` ephemeral path (§5) and the Litestream/GCS
+> single-writer parcel (§3–§5) are retained below as **superseded
+> SQLite-only alternatives** — they predate the v0.4 Postgres spine and are
+> not the deployment we run for the demo.
+
+---
+
+## 0. Deployment Models (the store is pluggable)
+
+Mosaic's architecture deliberately **supports multiple deployment models** from
+a single application image. The event spine and durable store are selected at
+runtime by `MOSAIC_DB_PATH`; nothing in the app changes between topologies.
+
+| Model | Store | `MOSAIC_DB_PATH` | Durability | Use |
+|---|---|---|---|---|
+| Local dev | SQLite file (or in-memory) | `./mosaic.db` | Local disk | Tests, quick runs |
+| Docker Compose | Postgres container + volume | `postgres://…@db:5432/…` | Named volume | Full local end-to-end |
+| **Cloud Run + Supabase** | Managed Postgres (Supabase) | `postgres://…@…supabase.co:5432/…?sslmode=require` | **Managed, durable** | **Chosen demo** |
+| Cloud Run + Cloud SQL | Managed Postgres (GCP-native) | Cloud SQL DSN via connector | Managed, durable | Enterprise GCP path |
+| VM / GKE | Literal `docker compose up` / StatefulSet | Postgres in-cluster | Volume | "Local Docker in the cloud" |
+
+The Go E2E suite ([tests/e2e](../../tests/e2e)) is independent of all of these —
+it starts the binary in-process against a SQLite temp file, so it runs anywhere
+(including CI) without Postgres or Docker.
+
+**For the demo we use GCR (Cloud Run) + Supabase.** Same image as Compose, real
+durability, `$0` free tier. See §6 for the exact steps.
 
 ---
 
@@ -136,3 +162,73 @@ gcloud run deploy mosaic-demo \
 
 Leave `MOSAIC_LISTEN_ADDR` unset so the process binds `0.0.0.0:${PORT}` via
 `parseConfig` (the image no longer bakes `MOSAIC_LISTEN_ADDR`).
+
+---
+
+## 6. Chosen Demo Path — Cloud Run + Supabase (durable, $0)
+
+Same image as Docker Compose; only the store moves off the ephemeral disk onto
+managed Postgres. The app runs its own embedded migrations on startup
+([pgstore/migrations.go](../../internal/pgstore/migrations.go)), so no schema
+step is needed here.
+
+### Step 1 — Get the Supabase Postgres DSN (via the CLI)
+
+```bash
+supabase login                          # one-time, opens browser
+supabase projects list                  # find/confirm the project ref
+
+# Retrieve the DIRECT connection string (NOT the transaction pooler).
+# Dashboard equivalent: Project Settings → Database → Connection string → URI.
+# It looks like:
+#   postgres://postgres:[PASSWORD]@db.<project-ref>.supabase.co:5432/postgres
+```
+
+> **Two gotchas that will bite otherwise:**
+> - Use the **direct** connection (port `5432`) or the **session** pooler —
+>   **not** the transaction pooler (port `6543`). `pgx` prepared statements and
+>   the startup migration DDL break under PgBouncer transaction pooling.
+> - Append **`?sslmode=require`** to the DSN. (Compose uses `sslmode=disable`
+>   against the in-network container; Supabase needs TLS.)
+
+Final value: `postgres://postgres:PASSWORD@db.<ref>.supabase.co:5432/postgres?sslmode=require`
+
+### Step 2 — Store the DSN as a Cloud Run secret
+
+```bash
+printf '%s' 'postgres://postgres:PASSWORD@db.<ref>.supabase.co:5432/postgres?sslmode=require' \
+  | gcloud secrets create mosaic-db-dsn --data-file=-
+# rotate later with: gcloud secrets versions add mosaic-db-dsn --data-file=-
+```
+
+### Step 3 — Deploy the same image, pointed at Supabase
+
+```bash
+gcloud run deploy mosaic-demo \
+  --image=us-central1-docker.pkg.dev/PROJECT_ID/mosaic-repo/mosaic-demo:latest \
+  --max-instances=1 \
+  --concurrency=8 \
+  --set-env-vars="MOSAIC_LUNA_PROVIDER=live,MOSAIC_TERRA_PROVIDER=live,MOSAIC_SOL_PROVIDER=live,MOSAIC_SIM_MODE=live,MOSAIC_CASSETTE_DIR=/tmp/mosaic-recordings" \
+  --set-secrets="MOSAIC_DB_PATH=mosaic-db-dsn:latest,OPENAI_API_KEY=openai-api-key:latest" \
+  --allow-unauthenticated \
+  --region=us-central1
+```
+
+Notes:
+- `--max-instances=1` / `--concurrency=8` still apply: process-local SSE/sim
+  streams want a single writer even though Postgres itself is multi-writer safe.
+- `MOSAIC_DB_PATH` now comes from the secret — do **not** also set it under
+  `--set-env-vars` (last one wins / conflicts).
+- `/tmp` remains writable on Cloud Run for cassette recordings; the rest of the
+  filesystem is read-only, matching the Compose `read_only` + `tmpfs:/tmp`.
+
+### Step 4 — Verify durability
+
+Hit the deployed URL, run a Play, then force a new revision
+(`gcloud run services update mosaic-demo --region=us-central1 --update-labels=redeploy=$(date +%s)`)
+and confirm audit/model history survives the restart — the whole point of moving
+off `/tmp`.
+
+> **Supabase free-tier note:** projects pause after **7 consecutive days of
+> inactivity** (data is retained; un-pause from the dashboard). An actively-used
+> demo week stays live. Storage cap is 500 MB — far above this demo's footprint.
