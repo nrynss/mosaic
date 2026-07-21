@@ -24,5 +24,7 @@ ui/playwright/.cache/
 ui/.e2e-bin/
 # Archived demo recordings — kept on local disk, too large for git (publish via YouTube).
 ui/recordings/
+# Locked public YouTube cut (local only; large binary; do not commit)
+ui/recordings/mosaic-demo-youtube.mp4
 mosaicdemo
 mosaicdemo.exe

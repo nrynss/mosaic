@@ -3,12 +3,18 @@
 Production plan for the **public YouTube submission** (under 3 minutes).
 
 This document is the source of truth for **what we show**, **what we say**, and
-**how the cut is structured**. It is not a fal prompt pack. Visual language is
-derived from the checked-in synthetic scenario
-(`datasets/domestic-disturbance-v4` / same story as the live demo pack).
+**how the cut is structured**. Visual language is derived from the checked-in
+synthetic scenario (`datasets/domestic-disturbance-v4` / same story as the live
+demo pack).
 
 Related: presenter walkthrough detail lives in [`demo-script.md`](demo-script.md).
-This file owns the **edited video**, timing budget, and required VO about tooling.
+This file owns the **edited video**, timing budget, tooling VO, **freeze/zoom
+plates**, and the **fal generation + composite** pipeline.
+
+**Important:** the Playwright capture is **not** the finished YouTube file by
+itself. It is **product A-roll / plate source**. The public cut is a **composite**:
+real UI proof + freeze/zoom treatment + **fal-generated** cold-open / world B-roll
++ VO.
 
 ---
 
@@ -252,6 +258,130 @@ constrained; note supersession after reopen if timing allows.
 > revision, what the human recorded. Like version control for operational
 > decisions.
 
+### C7 — Developer console (optional close beat)
+
+**Do:** Expand **Developer console & status** if the locked take already does
+(ledger, model-run counts, estimated OpenAI usage).
+
+**On-screen honesty for the locked take:** the usage panel may show
+**Est. spend $0.00**. Frame it as **light token use**, not cassette mechanics.
+
+**Say:**
+
+> Notice the cost is effectively **zero dollars**. Token use is so light the
+> API spend barely moves — real model output without a bill that flinches.
+
+---
+
+## Locked product capture (keep — plate source)
+
+| Field | Value |
+|-------|--------|
+| **File** | [`ui/recordings/demo-walkthrough-live-2026-07-21_14-45-40.webm`](../ui/recordings/demo-walkthrough-live-2026-07-21_14-45-40.webm) |
+| **Resolution / length** | 1920×1080 · ~2:08 |
+| **Mode on screen** | Live / record · `openai · gpt-5.6` on model cards |
+| **Status** | **Keep** — product truth + freeze/zoom plate source for the **fal composite** |
+
+This file is **input**, not the finished upload. Re-record only if product
+chrome or the narrative loop regresses; do not re-shoot just because the usage
+footer shows **$0**.
+
+**$0 VO (if the usage footer is visible in the cut):**
+
+> Cost is effectively **zero dollars** — token use so light the API bill barely
+> moves.
+
+**Locked YouTube cut (local only, gitignored):**  
+`ui/recordings/mosaic-demo-youtube.mp4`
+
+---
+
+## Production pipeline (the big plan)
+
+Three layers. Do not collapse them into “just upload the Playwright webm.”
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. PRODUCT CAPTURE (done — keep)                                │
+│    Playwright 1920×1080 webm · real COP / models / handoffs     │
+│    → ui/recordings/demo-walkthrough-live-….webm                 │
+└────────────────────────────┬────────────────────────────────────┘
+                             │ extract stills + short holds
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 2. FREEZE / ZOOM PLATES                                         │
+│    ffmpeg stills at beat moments; Ken Burns / CSS-style push-in │
+│    on COP rows, model cards (gpt-5.6), quarantine, executed:false│
+│    Optional: hold-frame freezes under VO so eyes land on truth  │
+└────────────────────────────┬────────────────────────────────────┘
+                             │ plates + text prompts
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 3. FAL GENERATION                                               │
+│    Cold open + world B-roll (weather, flooded bridge, EMS,      │
+│    house @ 14 Cedar — synthetic, no PII/police procedural)      │
+│    Image→video / text→video as needed; FAL_KEY in root .env     │
+│    (never commit). Intercut with product A-roll; never replace  │
+│    the working-system proof with pure generative footage.       │
+└────────────────────────────┬────────────────────────────────────┘
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 4. COMPOSITE EDIT (public YouTube ≤2:50)                        │
+│    VO: thesis, Codex, GPT-5.6, projector boundary, $0 caching   │
+│    End card: multi-domain + mosaic.nryn.dev + Narayan SS        │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Freeze / zoom targets (from the locked take)
+
+| Beat | Approx time in webm | Freeze / zoom on | Why |
+|------|---------------------|------------------|-----|
+| Empty board | ~0:00–0:08 | Play + Connected + AI LIVE | Cold product intro |
+| Progressive COP | ~0:10–0:55 | Left rail + picture updates | Real system motion |
+| Final COP | ~0:55–1:05 | Brook OPEN · bridge BLOCKED · EMS UNAVAILABLE | Story facts |
+| Sol result | ~1:04 | Model card · `gpt-5.6` · executed:false | Models propose |
+| Luna quarantine | ~1:20–1:35 | Quarantine reason · board unchanged | Safety |
+| Operator decision | ~1:35–1:50 | Decision note + Agree | Human gate |
+| Handoffs | ~1:50–2:00 | Saved only · not sent | No external delivery |
+| History + console | ~2:00–2:08 | Ledger + **$0 + caching VO** | Audit close |
+
+Extract with ffmpeg (example):
+
+```powershell
+$vid = 'ui/recordings/demo-walkthrough-live-2026-07-21_14-45-40.webm'
+$out = 'ui/recordings/fal-plates'
+New-Item -ItemType Directory -Force -Path $out | Out-Null
+# See freeze table for timestamps; one still per plate
+ffmpeg -y -ss 00:01:04 -i $vid -frames:v 1 -q:v 2 "$out/sol-gpt56-executed-false.jpg"
+```
+
+### fal generation (role)
+
+| Asset | Role in cut | Notes |
+|-------|-------------|--------|
+| Cold open world | Segment A (≤18s) | Weather, place, stakes — **not** bodycam / real agency |
+| Beat B-roll | Intercut Segment C | Flooded bridge, debris, EMS, house — match [C2 table](#c2--beat-linked-story-what-appears-vs-what-we-cut-to) |
+| Optional motion on plates | Push-ins if NLE Ken Burns is not enough | Prefer short loops; keep product UI legible |
+| End-card motion | Segment D | Multi-domain list + URL |
+
+**Rules**
+
+1. **Product proof is non-negotiable** — fal never replaces Play → COP → advice → handoffs → history.  
+2. **Synthetic only** — no real PII, logos, or 911 audio.  
+3. **Spend deliberately** — `FAL_KEY` is local; batch prompts; keep plates in
+   `ui/recordings/fal-plates/` (gitignored under `ui/recordings/`).  
+4. **Prompt pack** — concrete fal prompts live beside the plates (or a short
+   private pack); this doc owns **shot list + rules**, not every model parameter.
+
+### Composite edit order
+
+1. Lock product webm (done).  
+2. Extract freeze plates + mark zoom keyframes.  
+3. Generate fal cold open + beat B-roll from the visual register.  
+4. Cut composite: A (fal) → B (product + tooling VO) → C (product + freezes/zooms + B-roll) → D (end card).  
+5. VO pass: Codex, GPT-5.6, projector, **$0 caching** if footer visible.  
+6. Export H.264 ≤2:50; checklist once.
+
 ---
 
 ## Segment D — Close + CTA (≈25–30s)
@@ -367,6 +497,7 @@ shows real model runs in Decision history.
 - [ ] **Decision history** (or equivalent audit trail)  
 - [ ] Spoken **Codex**  
 - [ ] Spoken **GPT-5.6**  
+- [ ] If usage shows **$0**: spoken **light token spend** (not silent)  
 - [ ] CTA: **Play scenario** + mosaic.nryn.dev  
 - [ ] Total runtime **&lt; 3:00**
 
@@ -390,28 +521,20 @@ Safety line if needed:
 
 | Item | Guidance |
 |------|----------|
-| **Capture** | 1920×1080; browser zoom readable; hide personal bookmarks/OS noise |
-| **Environment** | Prefer local Docker for retries; one clean take against https://mosaic.nryn.dev optional |
-| **Pacing** | Pause simulation or use natural holds after major board updates for VO |
-| **B-roll** | Optional; spend time on first ~18s if used; product proof is non-negotiable |
+| **Product capture** | 1920×1080 Playwright webm — keep locked take under `ui/recordings/` |
+| **Freezes / zooms** | Extract stills + push-ins on COP / model cards / quarantine / handoffs (see pipeline) |
+| **fal** | Generate cold open + world B-roll; composite with product A-roll — **not** a pure AI reel |
+| **Environment** | Product: local Docker / mosaicdemo. fal: `FAL_KEY` in root `.env` only |
+| **Pacing** | Freezes under VO; trim dead “Running…” waits; intercut B-roll 1.5–2.5s |
+| **B-roll** | fal-generated; spend time on first ~18s; product proof remains non-negotiable |
 | **Audio** | Single clear VO track; light bed OK if speech stays intelligible |
-| **Captions** | Burn-in or YouTube captions for Codex / GPT-5.6 / projector lines |
-| **Export** | H.264 MP4; upload public (or unlisted if rules allow and link is shareable) |
+| **Captions** | Burn-in or YouTube captions for Codex / GPT-5.6 / projector / cost lines |
+| **$0 on console** | Mention **light token spend** in VO when that footer is in the cut |
+| **Locked cut** | `ui/recordings/mosaic-demo-youtube.mp4` (gitignored; local only) |
+| **Export** | H.264 MP4 composite; upload public (or unlisted if rules allow and link is shareable) |
 | **Title idea** | `Mosaic — Safe AI next to deterministic systems (DevWeek)` |
 | **Description** | One-line pitch + live URL + “Built with Codex; agents on GPT-5.6” + credit **Narayan SS** |
 | **On-screen credit** | End card: **Narayan SS** under URL (see Segment D) |
-
----
-
-## Edit order (practical)
-
-1. Record product walkthrough with VO gaps (or record VO after).  
-2. Lay cold open (even if temporary: cards on black).  
-3. Drop Segment B tooling lines so Codex / GPT-5.6 land early.  
-4. Trim walkthrough to essential board motion; intercut EMS / road / weather only where it clarifies.  
-5. Add projector reject graphic if time allows.  
-6. End card + CTA.  
-7. Watch full cut once for the checklist; cut to **≤2:50**.
 
 ---
 
@@ -420,8 +543,8 @@ Safety line if needed:
 | Doc | Role |
 |-----|------|
 | [`demo-script.md`](demo-script.md) | Live presenter / long-form pitch and step-by-step UI actions |
-| **This file** | YouTube cut structure, &lt;3 min budget, tooling VO, beat→visual map |
-| [`HANDOFF.md`](../HANDOFF.md) | Planned Playwright capture is optional later; this video can be manual |
+| **This file** | YouTube cut, freezes/zooms, **fal composite pipeline**, tooling VO, beat→visual map |
+| [`HANDOFF.md`](../HANDOFF.md) | Product capture status; durable deployment notes |
 
 When the final URL is live, add it to the project description and optionally to
 `README.md` / `HANDOFF.md` under demo preparation.
