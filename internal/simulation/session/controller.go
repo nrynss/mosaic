@@ -1,11 +1,47 @@
-// Package simsession implements a domain-agnostic interactive simulation
+// Package session implements a domain-agnostic interactive simulation
 // controller. It owns session lifecycle (start/status/end/reset) and emits
 // schedule-driven beats on a session-scoped stream.
 //
-// Delay model: each ScheduledBeat.Delay is relative to session start time
-// (not cumulative between beats). A beat with Delay=2s fires two seconds after
-// the session starts, regardless of earlier beats. Emission order follows the
-// Order field (ascending), not the schedule slice order.
+// # Session epochs (C3)
+//
+// A simulation session is a durable epoch identified by SessionID. Optional
+// Config.Active (*ActiveSession) is the in-process pointer composition shares
+// with API read ports: Start/Reset set it, explicit End clears it (empty board).
+// Natural beat completion leaves Active set so the final COP remains visible.
+//
+// This package lives under internal/simulation. Framework packages
+// (ingestion, store, terra, sol, luna, ontology, contracts, stream, api
+// production code, projectors, …) must never import it — simulation imports
+// framework packages and orchestrates over time. All pacing/timing lives under
+// the simulation tree; the framework has no notion of beat delay beyond the
+// schedule types already defined in contracts.
+//
+// # Pacing ownership
+//
+// BeatExecutor (package simulation) is the owner of Append-path pacing for the
+// real EventLog path (equal spacing / burst). This session controller owns only
+// SSE beat emission timing for the interactive lifecycle stream.
+//
+// Delay model (SSE presentation):
+//
+//   - Default (BeatSpacing == 0): each ScheduledBeat.Delay is relative to
+//     session start (historical C1 behaviour). A beat with Delay=2s fires two
+//     seconds after start regardless of earlier beats. Tests rely on this.
+//   - Equal spacing (BeatSpacing > 0): beat at sorted index i fires at
+//     max(start+i*BeatSpacing, previousBeatFinishedAt+BeatSpacing) so the
+//     absolute ladder holds when OnBeat is fast, and a slow OnBeat does not
+//     bunch the remaining SSE emissions (MinInterBeat = BeatSpacing).
+//     Index 0 is immediate after start. ScheduledBeat.Delay is ignored.
+//     Composition should set BeatSpacing from MOSAIC_SIM_BEAT_SPACING
+//     (default 2.5s) so the demo is not flooded by fixture delay_ms≈100.
+//
+// Emission order always follows the Order field (ascending), not the schedule
+// slice order.
+//
+// Progressive processing order (R1): for each beat, wait for spacing, then
+// OnBeat (EventLog.Append + ProcessBeat) when set, then emitBeat SSE only on
+// success. Clients that reload COP on beat SSE therefore never flash a stale
+// revision. Nil OnBeat keeps emit-only behaviour (seed overlay / pure SSE).
 //
 // Stream backpressure: each subscriber has a bounded buffer (default 64). When
 // the buffer is full the oldest pending event is dropped so a slow consumer
@@ -14,7 +50,7 @@
 // The controller holds no durable immutable event store. Reset creates a new
 // SessionID and a fresh stream sequence; it never rewrites or truncates prior
 // session history because none is retained here.
-package simsession
+package session
 
 import (
 	"context"
@@ -31,12 +67,33 @@ import (
 
 const defaultSubscriberBuffer = 64
 
+// Compile-time seam checks: concrete types satisfy contracts/adapters without
+// those packages importing session. Keep sessionControllerSurface aligned with
+// api.SimulationController (composition wires *Controller there).
+var (
+	_ contracts.SimulationStreamSubscription = (*Subscription)(nil)
+	_ sessionControllerSurface               = (*Controller)(nil)
+)
+
+// sessionControllerSurface is the method set HTTP adapters and composition
+// require. Defined here (not in contracts) so contracts stay free of a
+// controller interface while still catching signature drift at compile time.
+type sessionControllerSurface interface {
+	Start(ctx context.Context) (contracts.SimulationSession, error)
+	Status() contracts.SimulationSession
+	End(ctx context.Context) (contracts.SimulationSession, error)
+	Reset(ctx context.Context) (contracts.SimulationSession, error)
+	Subscribe() contracts.SimulationStreamSubscription
+}
+
 var (
 	// ErrNilSchedule means Config.Schedule was not provided.
 	ErrNilSchedule = errors.New("simulation schedule is required")
 	// ErrAlreadyRunning means Start was called while a session is running.
-	// Use Reset to end the current session and begin a new one.
-	ErrAlreadyRunning = errors.New("simulation session already running")
+	// Use Reset to end the current session and begin a new one. Alias of the
+	// shared contracts sentinel so HTTP adapters can map it without importing
+	// this package.
+	ErrAlreadyRunning = contracts.ErrSimulationAlreadyRunning
 )
 
 // Config wires a controller. Schedule is required; clock and timers are
@@ -60,6 +117,29 @@ type Config struct {
 	// SubscriberBuffer is the per-subscriber channel capacity. Zero selects
 	// the package default. Values less than 1 are treated as 1.
 	SubscriberBuffer int
+
+	// BeatSpacing enables equal-spacing SSE pacing when > 0: the beat at
+	// sorted index i fires after i*BeatSpacing from session start, ignoring
+	// each ScheduledBeat.Delay. Zero (default) keeps relative-to-start Delay
+	// so existing tests and callers remain unchanged. Composition should set
+	// this from simulation.BeatSpacingFromEnv() for the interactive demo.
+	BeatSpacing time.Duration
+
+	// Active is the optional in-process session epoch holder shared with API
+	// read ports (C3). When set, Start/Reset call Active.Set(sessionID) and
+	// End calls Active.Clear so "no active session" yields an empty board.
+	// Natural beat completion leaves Active set so the final COP remains visible.
+	Active *ActiveSession
+
+	// OnBeat is invoked after spacing wait and before SSE beat emission (mutex
+	// released). Composition uses it for the progressive EventLog path: Append
+	// the raw event, then synchronously ingest+project (+ advisory continuum).
+	// Only on success does the controller emitBeat so clients reload COP after
+	// the projection advanced (avoids a stale-revision flash). A non-nil error
+	// skips emit for that beat, stops further beats, and ends the session
+	// cleanly (Active left set so partial progress remains visible). Nil means
+	// SSE-only emission (seed overlay / tests without progressive processing).
+	OnBeat func(ctx context.Context, beat contracts.ScheduledBeat) error
 }
 
 // Controller is a session-scoped simulation lifecycle engine. Start/End/Reset
@@ -70,6 +150,9 @@ type Controller struct {
 	after            func(d time.Duration) <-chan time.Time
 	newSessionID     func() string
 	subscriberBuffer int
+	beatSpacing      time.Duration
+	active           *ActiveSession
+	onBeat           func(ctx context.Context, beat contracts.ScheduledBeat) error
 
 	mu        sync.RWMutex
 	session   contracts.SimulationSession
@@ -83,11 +166,20 @@ type Controller struct {
 
 // Subscription is a caller-owned registration on the session-scoped stream.
 // Call Cancel when finished; it is safe to call more than once.
+// It implements contracts.SimulationStreamSubscription.
 type Subscription struct {
-	Events <-chan contracts.SimulationStreamEvent
+	events <-chan contracts.SimulationStreamEvent
 
 	once   sync.Once
 	cancel func()
+}
+
+// Events returns the receive-only channel of session-scoped stream events.
+func (s *Subscription) Events() <-chan contracts.SimulationStreamEvent {
+	if s == nil || s.events == nil {
+		return closedEvents()
+	}
+	return s.events
 }
 
 // New constructs a controller in pending status with a copy of the schedule
@@ -123,6 +215,9 @@ func New(config Config) (*Controller, error) {
 		after:            after,
 		newSessionID:     newID,
 		subscriberBuffer: buf,
+		beatSpacing:      config.BeatSpacing,
+		active:           config.Active,
+		onBeat:           config.OnBeat,
 		session: contracts.SimulationSession{
 			Status: contracts.SessionPending,
 			Beats:  beats,
@@ -185,6 +280,10 @@ func (c *Controller) End(ctx context.Context) (contracts.SimulationSession, erro
 			"status": string(contracts.SessionEnded),
 		})
 	}
+	// Explicit End clears the active epoch so API read ports return an empty board.
+	if c.active != nil {
+		c.active.Clear()
+	}
 	return c.snapshotLocked(), nil
 }
 
@@ -221,9 +320,11 @@ func (c *Controller) Reset(ctx context.Context) (contracts.SimulationSession, er
 
 // Subscribe registers a bounded local subscriber. Events carry the active
 // session's SessionID. The caller must Cancel the subscription.
-func (c *Controller) Subscribe() *Subscription {
+// The return type is the contracts seam so composition can wire *Controller into
+// framework adapters without those adapters importing this package.
+func (c *Controller) Subscribe() contracts.SimulationStreamSubscription {
 	if c == nil {
-		return &Subscription{Events: closedEvents()}
+		return &Subscription{events: closedEvents()}
 	}
 
 	c.mu.Lock()
@@ -234,7 +335,7 @@ func (c *Controller) Subscribe() *Subscription {
 	c.mu.Unlock()
 
 	return &Subscription{
-		Events: ch,
+		events: ch,
 		cancel: func() {
 			c.mu.Lock()
 			if existing, ok := c.subs[id]; ok {
@@ -272,6 +373,12 @@ func (c *Controller) startLocked() (contracts.SimulationSession, error) {
 		Beats:     beats,
 	}
 	c.sequence = 0
+
+	// Publish the new epoch before beat emission so concurrent COP/advisory
+	// reads resolve the correct materialization key immediately.
+	if c.active != nil {
+		c.active.Set(sessionID)
+	}
 
 	runCtx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -316,21 +423,39 @@ func (c *Controller) runBeats(
 	})
 
 	completed := true
-	for _, beat := range ordered {
-		if err := c.waitUntil(ctx, startTime, beat.Delay); err != nil {
+	var onBeatErr error
+	var failedBeat contracts.ScheduledBeat
+	// lastFinished tracks when the previous beat's OnBeat(+emit) completed so
+	// equal-spacing mode can enforce MinInterBeat = BeatSpacing after slow work.
+	lastFinished := startTime
+	for i, beat := range ordered {
+		target := c.earliestFireTime(i, beat, startTime, lastFinished)
+		if err := c.waitUntilTime(ctx, target); err != nil {
 			completed = false
 			break
+		}
+		// OnBeat first (mutex released) so domain work advances COP before SSE.
+		// emitBeat only after success — clients that reload on beat events must
+		// not flash a stale revision (R1). Nil OnBeat keeps emit-only behaviour.
+		if c.onBeat != nil {
+			if err := c.onBeat(ctx, beat); err != nil {
+				completed = false
+				onBeatErr = err
+				failedBeat = beat
+				break
+			}
 		}
 		if !c.emitBeat(sessionID, beat) {
 			completed = false
 			break
 		}
+		lastFinished = c.clock().UTC()
 	}
 
-	if !completed {
-		return
-	}
-
+	// Natural completion and OnBeat/cancel failure both end the session cleanly.
+	// Active is left set (when present) so partial or final COP remains visible;
+	// only explicit End clears the epoch. When End/Reset already transitioned
+	// status, the SessionRunning guard is a no-op.
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.session.SessionID != sessionID || c.session.Status != contracts.SessionRunning {
@@ -338,28 +463,82 @@ func (c *Controller) runBeats(
 	}
 	c.session.Status = contracts.SessionEnded
 	c.runCancel = nil
-	c.publishLocked(contracts.StreamEventStatusChange, map[string]any{
+	payload := map[string]any{
 		"status": string(contracts.SessionEnded),
-	})
+	}
+	if onBeatErr != nil {
+		// P2: signal OnBeat failure so clients can distinguish clean end vs error.
+		// Keep R1: no beat SSE was emitted for the failed beat.
+		payload["reason"] = "on_beat_error"
+		payload["beat_id"] = failedBeat.BeatID
+		payload["error"] = truncateError(onBeatErr.Error(), 200)
+	}
+	c.publishLocked(contracts.StreamEventStatusChange, payload)
+	_ = completed // retained for readability of the loop above
+}
+
+// earliestFireTime is the earliest wall time at which beat index i may fire.
+// Absolute ladder: start + delayFor(i). When BeatSpacing > 0 and i > 0, also
+// enforce lastFinished+BeatSpacing so a slow OnBeat does not collapse the
+// remaining schedule into a zero-wait bunch.
+func (c *Controller) earliestFireTime(index int, beat contracts.ScheduledBeat, startTime, lastFinished time.Time) time.Time {
+	target := startTime.Add(c.delayFor(index, beat))
+	if index > 0 && c.beatSpacing > 0 {
+		minFromPrev := lastFinished.Add(c.beatSpacing)
+		if minFromPrev.After(target) {
+			target = minFromPrev
+		}
+	}
+	return target
+}
+
+func truncateError(msg string, max int) string {
+	if max <= 0 || len(msg) <= max {
+		return msg
+	}
+	return msg[:max]
+}
+
+// delayFor returns the wait from session start for the beat at sorted index i.
+// When BeatSpacing > 0, equal spacing is used (i * BeatSpacing). Otherwise the
+// beat's own Delay (relative to start) is used. Formula matches
+// simulation.EqualSpacingDelay without importing the parent package (avoids
+// pulling executor deps into session tests).
+func (c *Controller) delayFor(index int, beat contracts.ScheduledBeat) time.Duration {
+	if c.beatSpacing > 0 {
+		if index <= 0 || c.beatSpacing <= 0 {
+			return 0
+		}
+		return time.Duration(index) * c.beatSpacing
+	}
+	if beat.Delay < 0 {
+		return 0
+	}
+	return beat.Delay
 }
 
 // waitUntil blocks until clock reaches startTime+delay or ctx is cancelled.
-// Delay is relative to session start.
+// Delay is relative to session start (either equal-spacing or schedule Delay).
+func (c *Controller) waitUntil(ctx context.Context, startTime time.Time, delay time.Duration) error {
+	if delay < 0 {
+		delay = 0
+	}
+	return c.waitUntilTime(ctx, startTime.Add(delay))
+}
+
+// waitUntilTime blocks until clock reaches target or ctx is cancelled.
 //
 // Waiting is driven by the injectable After. When After fires without the
 // clock advancing (valid for some test fakes), the wait completes so a frozen
 // Clock cannot spin forever. When the clock does advance (VirtualClock), the
 // remaining delay is re-checked so partial advances keep waiting.
-func (c *Controller) waitUntil(ctx context.Context, startTime time.Time, delay time.Duration) error {
-	if delay < 0 {
-		delay = 0
-	}
+func (c *Controller) waitUntilTime(ctx context.Context, target time.Time) error {
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		now := c.clock().UTC()
-		remaining := delay - now.Sub(startTime)
+		remaining := target.Sub(now)
 		if remaining <= 0 {
 			return nil
 		}
@@ -448,8 +627,14 @@ func randomSessionID() string {
 	return "sim-" + hex.EncodeToString(bytes)
 }
 
-func closedEvents() <-chan contracts.SimulationStreamEvent {
+// closedEventsChan is a permanently closed channel shared by nil-safe
+// Subscription.Events and Subscribe on a nil controller.
+var closedEventsChan = func() <-chan contracts.SimulationStreamEvent {
 	ch := make(chan contracts.SimulationStreamEvent)
 	close(ch)
 	return ch
+}()
+
+func closedEvents() <-chan contracts.SimulationStreamEvent {
+	return closedEventsChan
 }

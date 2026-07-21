@@ -25,12 +25,24 @@ import (
 
 	"mosaic.local/mosaic/internal/api"
 	"mosaic.local/mosaic/internal/contracts"
+	"mosaic.local/mosaic/internal/eventlog"
+	"mosaic.local/mosaic/internal/eventlog/memory"
+	"mosaic.local/mosaic/internal/pgstore"
 	"mosaic.local/mosaic/internal/recurrence"
+	"mosaic.local/mosaic/internal/reference/domesticdisturbance"
 	"mosaic.local/mosaic/internal/reference/registry"
-	"mosaic.local/mosaic/internal/simsession"
+	"mosaic.local/mosaic/internal/simulation"
+	"mosaic.local/mosaic/internal/simulation/session"
 	"mosaic.local/mosaic/internal/store"
 	"mosaic.local/mosaic/internal/stream"
 )
+
+// progressiveDomain is the optional interactive beat processor exposed by the
+// domestic-disturbance runtime. Composition type-asserts profile.Runtime to it.
+type progressiveDomain interface {
+	ProcessBeat(ctx context.Context, beatID string) error
+	RawEventPayload(rawEventID string) ([]byte, error)
+}
 
 const (
 	defaultListenAddress    = "127.0.0.1:8080"
@@ -55,6 +67,14 @@ type config struct {
 	// compute an "estimated remaining" figure on /api/v1/model-usage. Unset
 	// or invalid values leave this nil, which omits budget fields entirely.
 	DemoBudgetUSD *float64
+	// SeedOnStart bulk-runs the fixture at boot (legacy). Default false: the
+	// board stays empty until Play drives progressive EventLog beats.
+	// Env: MOSAIC_SEED_ON_START=1|true|yes|on
+	SeedOnStart bool
+	// BeatSpacing is equal inter-beat SSE pacing for the interactive controller.
+	// Zero means use simulation.DefaultBeatSpacing via BeatSpacingFromEnv path;
+	// composition always sets a positive spacing from env/defaults.
+	BeatSpacing time.Duration
 }
 
 type application struct {
@@ -63,7 +83,7 @@ type application struct {
 
 	// Composed surfaces exposed for package tests (not HTTP).
 	modelProviders contracts.AgentProviderSelection
-	simulation     *simsession.Controller
+	simulation     *session.Controller
 	recurrence     *recurrence.Detector
 }
 
@@ -82,7 +102,7 @@ func parseConfig(args []string, getenv func(string) string) (config, error) {
 		}
 	}
 	listen := flags.String("listen-addr", listenPort, "HTTP listen address")
-	database := flags.String("db", valueOrDefault(getenv("MOSAIC_DB_PATH"), defaultDatabasePath()), "SQLite database path or DSN")
+	database := flags.String("db", valueOrDefault(getenv("MOSAIC_DB_PATH"), defaultDatabasePath()), "SQLite database path or postgres:// DSN")
 	ui := flags.String("ui-dir", valueOrDefault(getenv("MOSAIC_UI_DIR"), defaultUIDirectory), "prebuilt dashboard directory")
 	assets := flags.String("asset-root", valueOrDefault(getenv("MOSAIC_ASSET_ROOT"), defaultAssetRoot), "directory containing ontology and datasets")
 	if err := flags.Parse(args); err != nil {
@@ -111,7 +131,19 @@ func parseConfig(args []string, getenv func(string) string) (config, error) {
 		RecurrenceArea:   area,
 		RecurrenceWindow: window,
 		DemoBudgetUSD:    parseDemoBudgetUSD(getenv("MOSAIC_DEMO_BUDGET_USD")),
+		SeedOnStart:      parseSeedOnStart(getenv("MOSAIC_SEED_ON_START")),
+		BeatSpacing:      simulation.ParseBeatSpacing(getenv(simulation.EnvBeatSpacing)),
 	})
+}
+
+// parseSeedOnStart interprets MOSAIC_SEED_ON_START. Default is false (progressive).
+func parseSeedOnStart(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 // parseDemoBudgetUSD parses the optional MOSAIC_DEMO_BUDGET_USD env var as a
@@ -212,24 +244,101 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 		return nil, err
 	}
 
-	database, err := store.Open(ctx, configuration.DatabasePath)
-	if err != nil {
-		return nil, fmt.Errorf("open SQLite database %q: %w", configuration.DatabasePath, err)
+	var (
+		records         contracts.ImmutableRecordRepository
+		advisoryHistory contracts.AdvisoryHistoryReader
+		closeDatabase   func() error
+		operations      api.OperationsReader
+		// domainStore is the single durable backend used for seed, recovery,
+		// models, records, and advisories. SQLite file path and Postgres DSN
+		// never split across two stores.
+		domainStore composeStore
+		// preferMaterialized: Postgres durable COP table, or progressive SQLite
+		// in-memory MemoryCOP session board cache (D1h R2).
+		preferMaterialized contracts.COPReadModelRepository
+	)
+
+	isPostgres := strings.HasPrefix(configuration.DatabasePath, "postgres://") || strings.HasPrefix(configuration.DatabasePath, "postgresql://")
+
+	if isPostgres {
+		pg, err := pgstore.Open(ctx, configuration.DatabasePath)
+		if err != nil {
+			return nil, fmt.Errorf("open Postgres database: %w", err)
+		}
+		records = pg
+		advisoryHistory = pg
+		domainStore = pg
+		preferMaterialized = pg
+		closeDatabase = func() error { return pg.Close() }
+
+		operations, err = api.NewPostgresOperationsReader(pg.Pool())
+		if err != nil {
+			_ = closeDatabase()
+			return nil, fmt.Errorf("compose Postgres operations reader: %w", err)
+		}
+	} else {
+		db, err := store.Open(ctx, configuration.DatabasePath)
+		if err != nil {
+			return nil, fmt.Errorf("open SQLite database %q: %w", configuration.DatabasePath, err)
+		}
+		records = db
+		advisoryHistory = db
+		domainStore = db
+		closeDatabase = func() error { return db.Close() }
+
+		operations, err = api.NewSQLiteOperationsReader(db)
+		if err != nil {
+			_ = closeDatabase()
+			return nil, fmt.Errorf("compose SQLite operations reader: %w", err)
+		}
+		// Progressive SQLite: session board cache (D1h R2). Durable store keeps
+		// append-only history; PreferMaterializedRecovery + Active scopes the
+		// operator COP view so Reset / a second session does not flash prior Play.
+		if !configuration.SeedOnStart {
+			preferMaterialized = store.NewMemoryCOP()
+		}
 	}
-	closeDatabase := func() error { return database.Close() }
+
+	// Active session epoch (C3): empty board until Play; natural end leaves
+	// Active set so the final progressive COP remains visible.
+	activeSession := session.NewActiveSession()
+	// Session-scoped advisory id index (C3): progressive path records fixture
+	// and operator artifact ids so GET /advisories filters to the active epoch.
+	// Seed-on-start leaves this nil (unscoped legacy board at boot).
+	var sessionAdvisories *api.SessionAdvisoryView
+	if !configuration.SeedOnStart {
+		sessionAdvisories = api.NewSessionAdvisoryView()
+	}
 
 	// Compose builds the profile's deterministic scenario, fixture advisory
-	// replay, and evidence resolver over the shared store. Run then seeds them:
-	// P05's durable source idempotency means a later start verifies and recovers
-	// the original history without appending duplicate events or advisory records.
-	domainRuntime, err := selected.Compose(ctx, database, configuration.AssetRoot)
+	// continuum, and evidence resolver over the single durable store. Active is
+	// passed so materialization writes session-scoped COP keys (Postgres durable
+	// table; progressive SQLite in-memory MemoryCOP). SessionAdvisories lets
+	// progressive ProcessBeat Record fixture stage ids.
+	composeCtx := domesticdisturbance.WithActiveSession(ctx, activeSession)
+	if sessionAdvisories != nil {
+		composeCtx = domesticdisturbance.WithSessionAdvisories(composeCtx, sessionAdvisories)
+	}
+	// Share MemoryCOP with domain MaterializingProjector (SQLite progressive).
+	// Postgres ignores this context value and uses its own store table.
+	if preferMaterialized != nil && !isPostgres && !configuration.SeedOnStart {
+		composeCtx = domesticdisturbance.WithCOPMaterialization(composeCtx, preferMaterialized)
+	}
+	domainRuntime, err := selected.Compose(composeCtx, records, configuration.AssetRoot)
 	if err != nil {
 		_ = closeDatabase()
 		return nil, fmt.Errorf("compose domain profile %q: %w", selected.ID(), err)
 	}
-	if err := domainRuntime.Run(ctx); err != nil {
-		_ = closeDatabase()
-		return nil, fmt.Errorf("seed domain profile %q: %w", selected.ID(), err)
+
+	// Default: no bulk seed — board empty until Play. Optional MOSAIC_SEED_ON_START
+	// restores bulk Run for non-progressive proofs (and skips ActiveSession
+	// isolation so the seeded board is visible at boot).
+	seedOnStart := configuration.SeedOnStart
+	if seedOnStart {
+		if err := domainRuntime.Run(ctx); err != nil {
+			_ = closeDatabase()
+			return nil, fmt.Errorf("seed domain profile %q: %w", selected.ID(), err)
+		}
 	}
 
 	schedule, ok := domainRuntime.(contracts.SimulationSchedule)
@@ -237,7 +346,62 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 		_ = closeDatabase()
 		return nil, fmt.Errorf("domain profile %q does not expose a simulation beat schedule", selected.ID())
 	}
-	simController, err := simsession.New(simsession.Config{Schedule: schedule})
+
+	// EventLog transport: Postgres store implements Append; SQLite demos use an
+	// in-memory log. Domain data always stays on the single durable store (E1).
+	var beatLog eventlog.EventLog
+	if isPostgres {
+		if pg, ok := domainStore.(*pgstore.Store); ok {
+			beatLog = pg
+		}
+	}
+	if beatLog == nil {
+		beatLog = memory.New()
+	}
+
+	// Progressive OnBeat: EventLog.Append then sync domain ProcessBeat
+	// (ingest+project+advisory continuum). Documented: EventLog is the append
+	// seam; the sync handler is the interactive consumer (not multi-worker Run).
+	var onBeat func(context.Context, contracts.ScheduledBeat) error
+	if !seedOnStart {
+		progressive, ok := domainRuntime.(progressiveDomain)
+		if !ok {
+			_ = closeDatabase()
+			return nil, fmt.Errorf("domain profile %q does not support progressive ProcessBeat (required unless MOSAIC_SEED_ON_START)", selected.ID())
+		}
+		partitionKey := selected.ID()
+		onBeat = func(beatCtx context.Context, beat contracts.ScheduledBeat) error {
+			payload, err := progressive.RawEventPayload(beat.RawEventID)
+			if err != nil {
+				return err
+			}
+			// Shared envelope shape with BeatExecutor (partition, type, idempotency).
+			if err := beatLog.Append(beatCtx, simulation.RawEventEnvelope(partitionKey, beat.RawEventID, payload)); err != nil {
+				return fmt.Errorf("event log append beat %q: %w", beat.BeatID, err)
+			}
+			if err := progressive.ProcessBeat(beatCtx, beat.BeatID); err != nil {
+				return fmt.Errorf("process beat %q: %w", beat.BeatID, err)
+			}
+			return nil
+		}
+	}
+
+	beatSpacing := configuration.BeatSpacing
+	if beatSpacing <= 0 {
+		beatSpacing = simulation.DefaultBeatSpacing
+	}
+	// Seed-on-start legacy path keeps relative schedule delays (no equal spacing
+	// flood control required — board is already final). Progressive uses spacing.
+	sessionCfg := session.Config{
+		Schedule: schedule,
+	}
+	if !seedOnStart {
+		sessionCfg.BeatSpacing = beatSpacing
+		sessionCfg.Active = activeSession
+		sessionCfg.OnBeat = onBeat
+	}
+	// else: Active nil + OnBeat nil so GET /cop shows the seeded board without Play.
+	simController, err := session.New(sessionCfg)
 	if err != nil {
 		_ = closeDatabase()
 		return nil, fmt.Errorf("compose simulation controller: %w", err)
@@ -246,7 +410,7 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 	schemaDir := filepath.Join(configuration.AssetRoot, "ontology")
 	fixtureDir := filepath.Join(configuration.AssetRoot, "datasets", selected.ID())
 	identities := selected.Identities()
-	models, err := composeModels(ctx, database, configuration.AssetRoot, fixtureDir, schemaDir, identities.Supervisor, configuration.ModelEnv)
+	models, err := composeModels(ctx, domainStore, configuration.AssetRoot, fixtureDir, schemaDir, identities.Supervisor, configuration.ModelEnv)
 	if err != nil {
 		_ = closeDatabase()
 		return nil, fmt.Errorf("compose model adapters: %w", err)
@@ -264,17 +428,35 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 	}
 	detector := recurrence.NewDetector(area, window, time.Now)
 
-	operations, err := api.NewSQLiteOperationsReader(database)
-	if err != nil {
-		_ = closeDatabase()
-		return nil, fmt.Errorf("compose SQLite operations reader: %w", err)
+	// Recovery: progressive path scopes on ActiveSession (empty until Play).
+	// Both Postgres (durable) and progressive SQLite (MemoryCOP) prefer
+	// session-scoped materialization — never full-store Recover while Active
+	// is set, so a second session / Reset cannot flash prior Play COP (D1h R2).
+	recovery := api.RecoveryReader(domainRuntime)
+	var apiActive contracts.ActiveSessionSource
+	if !seedOnStart {
+		apiActive = activeSession
+		if preferMaterialized != nil {
+			scoped := pgstore.NewSessionScopedCOP(preferMaterialized, activeSession)
+			recovery = api.PreferMaterializedRecovery{
+				Materialized: scoped,
+				Active:       activeSession,
+				// No unscoped Fallback when Active is set (PreferMaterializedRecovery).
+			}
+		}
+	} else if preferMaterialized != nil {
+		recovery = api.PreferMaterializedRecovery{
+			Materialized: preferMaterialized,
+			Fallback:     domainRuntime,
+		}
 	}
+
 	apiServer, err := api.New(api.Config{
-		Recovery:          domainRuntime,
-		Records:           database,
+		Recovery:          recovery,
+		Records:           records,
 		Evidence:          domainRuntime,
 		Operations:        operations,
-		AdvisoryHistory:   database,
+		AdvisoryHistory:   advisoryHistory,
 		AdvisoryMode:      "fixture_composed",
 		Stream:            stream.NewBroker(),
 		Actors:            api.PublicActorResolver{ViewerIdentity: identities.Viewer, SupervisorIdentity: identities.Supervisor},
@@ -287,6 +469,11 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 		BriefingRequester: models.BriefingRequester,
 		APIKeyConfigured:  strings.TrimSpace(configuration.ModelEnv.APIKey) != "",
 		DemoBudgetUSD:     configuration.DemoBudgetUSD,
+		ActiveSession:     apiActive,
+		SessionAdvisories: sessionAdvisories,
+		CassetteMode:      models.CassetteMode,
+		CassetteDir:       models.CassetteDir,
+		DemoAssetRoot:     configuration.AssetRoot,
 	})
 	if err != nil {
 		_ = closeDatabase()
@@ -319,7 +506,7 @@ func normalizeConfig(configuration config) (config, error) {
 		return config{}, errors.New("listen address is required")
 	}
 	if configuration.DatabasePath == "" {
-		return config{}, errors.New("SQLite database path is required")
+		return config{}, errors.New("database path or DSN is required")
 	}
 	if configuration.UIDirectory == "" {
 		return config{}, errors.New("prebuilt UI directory is required")

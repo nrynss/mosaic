@@ -164,6 +164,18 @@ func (s *Server) handleOperatorBrief(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Clients only send insight_id refs. Hydrate full Insight records from
+	// advisory history (the durable store) so Sol can validate required fields.
+	// The COP revision bounds which insight versions are visible.
+	insights, hydrateErr := s.hydrateOperatorInsights(r.Context(), request.Insights, result.StateRevision)
+	if hydrateErr != nil {
+		writeJSON(w, http.StatusBadRequest, nil, apiError{
+			Code:    "invalid_insights",
+			Message: hydrateErr.Error(),
+		})
+		return
+	}
+
 	requestedBy := strings.TrimSpace(s.briefingRequester)
 	if requestedBy == "" {
 		if mode := strings.TrimSpace(caller.Labels["demo_mode"]); mode != "" {
@@ -176,7 +188,7 @@ func (s *Server) handleOperatorBrief(w http.ResponseWriter, r *http.Request) {
 	input := contracts.SolInput{
 		StateRevision: result.StateRevision,
 		COP:           result.COP,
-		Insights:      mapOperatorInsights(request.Insights),
+		Insights:      insights,
 		Evidence:      mapOperatorEvidence(request.Evidence),
 		RequestedBy:   requestedBy,
 	}
@@ -506,31 +518,48 @@ func mapOperatorEvidence(refs []operatorEvidenceRef) []gen.Evidence {
 	return out
 }
 
-func mapOperatorInsights(refs []operatorInsightRef) []gen.Insight {
+// hydrateOperatorInsights resolves operator-supplied insight_id refs to full
+// Insight records from advisory history. Partial request bodies never carry
+// assertions/evidence/confidence; Sol requires the complete schema-valid
+// records. stateRevision is the recovered COP revision — only insights at or
+// before that revision are eligible.
+func (s *Server) hydrateOperatorInsights(ctx context.Context, refs []operatorInsightRef, stateRevision int64) ([]gen.Insight, error) {
 	if len(refs) == 0 {
-		return nil
+		return nil, nil
+	}
+	history, err := s.advisoryHistory.ReadAdvisoryHistory(ctx)
+	if err != nil {
+		return nil, errors.New("advisory history is unavailable for insight hydration")
+	}
+	// Prefer the newest version of each insight_id that is not future to the COP.
+	byID := make(map[string]gen.Insight, len(history.Insights))
+	for _, insight := range history.Insights {
+		if insight.StateRevision > stateRevision {
+			continue
+		}
+		existing, ok := byID[insight.InsightID]
+		if !ok || insight.StateRevision >= existing.StateRevision {
+			byID[insight.InsightID] = insight
+		}
 	}
 	out := make([]gen.Insight, 0, len(refs))
+	seen := make(map[string]struct{}, len(refs))
 	for _, ref := range refs {
 		id := strings.TrimSpace(ref.InsightID)
 		if id == "" {
 			continue
 		}
-		insight := gen.Insight{
-			SchemaVersion:   ref.SchemaVersion,
-			InsightID:       id,
-			StateRevision:   ref.StateRevision,
-			LifecycleStatus: ref.LifecycleStatus,
+		if _, dup := seen[id]; dup {
+			return nil, errors.New("duplicate insight_id " + id)
 		}
-		if insight.SchemaVersion == "" {
-			insight.SchemaVersion = schemaVersion
-		}
-		if insight.LifecycleStatus == "" {
-			insight.LifecycleStatus = "active"
+		seen[id] = struct{}{}
+		insight, ok := byID[id]
+		if !ok {
+			return nil, errors.New("insight " + id + " not found at current COP revision")
 		}
 		out = append(out, insight)
 	}
-	return out
+	return out, nil
 }
 
 // modelOutcomeStatus maps adapter errors + ModelRun validation into a stable

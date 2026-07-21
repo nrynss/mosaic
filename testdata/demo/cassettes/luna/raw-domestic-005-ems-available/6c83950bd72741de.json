@@ -1,0 +1,71 @@
+{
+  "schema_version": "1.0.0",
+  "key": "luna/raw-domestic-005-ems-available/6c83950bd72741de",
+  "agent": "luna",
+  "state_revision": 0,
+  "request_fingerprint": "6c83950bd72741de96502654f6f2f4a88da0bc4daf255d09b48aeed649e988f7",
+  "prompt_version": "v1.0.0",
+  "prompt_hash": "3f943e46d22b34c339ec0dc59293500b8f29eef097ec8816e05781a2f90fe3c4",
+  "response_id": "resp_0e22b7efbf6f7994016a5f5b49c35881918289c4edb461fd60",
+  "result_json": {
+    "canonical_event_id": "canonical-live-raw-domestic-005-ems-available",
+    "created_at": "2026-07-18T10:03:15Z",
+    "evidence": [
+      {
+        "explanation": "Structured attributes directly identify a resource status change for resource-ems-004, set availability to available, and associate incident-domestic-001.",
+        "json_pointer": "/attributes",
+        "target_id": "raw-domestic-005-ems-available",
+        "target_kind": "raw_event"
+      },
+      {
+        "explanation": "The encoded text payload decodes to a statement that EMS-4 is available, corroborating the structured availability value.",
+        "json_pointer": "/payload_bytes_b64",
+        "target_id": "raw-domestic-005-ems-available",
+        "target_kind": "raw_event"
+      }
+    ],
+    "luna_result_id": "luna-live-raw-domestic-005-ems-available",
+    "raw_event_id": "raw-domestic-005-ems-available",
+    "schema_version": "1.0.0",
+    "status": "accepted"
+  },
+  "canonical_event_json": {
+    "canonical_event_id": "canonical-live-raw-domestic-005-ems-available",
+    "canonical_seq": 207,
+    "confidence": {
+      "basis": "Structured attributes directly supply the event type, resource identifier, availability, and incident identifier; decoded payload text corroborates resource availability.",
+      "reasoning_support": "high",
+      "source_quality": "high",
+      "transformation_certainty": "high"
+    },
+    "entity_refs": [
+      {
+        "id": "resource-ems-004",
+        "kind": "resource"
+      },
+      {
+        "id": "incident-domestic-001",
+        "kind": "incident"
+      }
+    ],
+    "event_type": "resource_status_changed",
+    "incident_refs": [
+      "incident-domestic-001"
+    ],
+    "occurred_at": "2026-07-18T10:03:00Z",
+    "payload": {
+      "availability": "available",
+      "incident_id": "incident-domestic-001",
+      "resource_id": "resource-ems-004"
+    },
+    "provenance": {
+      "model_run_id": "modelrun-live-luna-raw-domestic-005-ems-available",
+      "normalizer": "openai-luna",
+      "raw_event_id": "raw-domestic-005-ems-available"
+    },
+    "raw_event_id": "raw-domestic-005-ems-available",
+    "received_at": "2026-07-18T10:03:15Z",
+    "schema_version": "1.0.0"
+  },
+  "recorded_at": "2026-07-21T11:43:17.7807943Z"
+}

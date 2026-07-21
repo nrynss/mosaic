@@ -318,6 +318,180 @@ func TestFixtureAdvisoryReplayRequiresTimelineSnapshots(t *testing.T) {
 	}
 }
 
+func TestContinueProgressiveLandsAdvisoriesAtRev7AndRev9(t *testing.T) {
+	ctx := context.Background()
+	service, database := newTestService(t, ctx)
+	replay := mustAdvisoryReplay(t, database)
+	beats := service.Beats()
+	var timeline []TimelineEntry
+
+	// No COP yet → no-op
+	if result, err := replay.ContinueProgressive(ctx, nil); err != nil || len(result.StagesRun) != 0 {
+		t.Fatalf("empty progressive = %#v err=%v", result, err)
+	}
+
+	for _, beat := range beats {
+		entry, err := service.IngestBeat(ctx, beat.BeatID)
+		if err != nil {
+			t.Fatalf("IngestBeat %s: %v", beat.BeatID, err)
+		}
+		timeline = append(timeline, entry)
+		result, err := replay.ContinueProgressive(ctx, timeline)
+		if err != nil {
+			t.Fatalf("ContinueProgressive after %s: %v", beat.BeatID, err)
+		}
+		switch {
+		case entry.StateRevision == 7 && entry.LifecycleStatus != "quarantined":
+			// First time we hit rev 7 (repaired road beat): terra+briefing+sol
+			if len(result.StagesRun) == 0 && len(result.StagesSkipped) < 3 {
+				// May be first landing — stages should run or already skipped
+				history, _ := database.ReadAdvisoryHistory(ctx)
+				if len(history.Insights) == 0 {
+					t.Fatalf("expected rev7 advisories after beat %s: stages=%#v", beat.BeatID, result)
+				}
+			}
+		case entry.StateRevision == 9:
+			history, err := database.ReadAdvisoryHistory(ctx)
+			if err != nil {
+				t.Fatalf("history: %v", err)
+			}
+			assertFixtureAdvisoryHistory(t, history)
+		}
+	}
+	// Final: all five stages present
+	history, err := database.ReadAdvisoryHistory(ctx)
+	if err != nil {
+		t.Fatalf("final history: %v", err)
+	}
+	assertFixtureAdvisoryHistory(t, history)
+	// Idempotent second pass
+	result, err := replay.ContinueProgressive(ctx, timeline)
+	if err != nil {
+		t.Fatalf("second progressive: %v", err)
+	}
+	if !result.IntactRestart {
+		t.Fatalf("expected intact restart, got %#v", result)
+	}
+}
+
+func TestContinueProgressiveIntactWithoutTimeline(t *testing.T) {
+	ctx := context.Background()
+	service, database := newTestService(t, ctx)
+	run, err := service.Run(ctx)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	replay := mustAdvisoryReplay(t, database)
+	if _, err := replay.Replay(ctx, run.Timeline); err != nil {
+		t.Fatalf("seed advisories: %v", err)
+	}
+	// Lost in-memory timeline after process restart: intact stages need no COP.
+	result, err := replay.ContinueProgressive(ctx, nil)
+	if err != nil {
+		t.Fatalf("ContinueProgressive nil timeline: %v", err)
+	}
+	if !result.IntactRestart {
+		t.Fatalf("want IntactRestart, got %#v", result)
+	}
+	if len(result.StagesRun) != 0 {
+		t.Fatalf("stages run = %#v, want none", result.StagesRun)
+	}
+}
+
+func TestContinueProgressiveRecoversCOPWhenTimelineMissing(t *testing.T) {
+	ctx := context.Background()
+	service, database := newTestService(t, ctx)
+	// Project to rev 9 without running advisories; lose the timeline.
+	for _, beat := range service.Beats() {
+		if _, err := service.IngestBeat(ctx, beat.BeatID); err != nil {
+			t.Fatalf("IngestBeat %s: %v", beat.BeatID, err)
+		}
+	}
+	replay, err := NewAdvisoryReplay(AdvisoryReplayConfig{
+		Store:      database,
+		SchemaDir:  filepath.Join("..", "..", "..", "..", "ontology"),
+		FixtureDir: filepath.Join("..", "..", "..", "..", "datasets", DomesticDisturbance),
+		RecoverCOP: service.Recover,
+	})
+	if err != nil {
+		t.Fatalf("NewAdvisoryReplay: %v", err)
+	}
+	// Empty timeline + RecoverCOP should land all five stages from store rev 9.
+	result, err := replay.ContinueProgressive(ctx, nil)
+	if err != nil {
+		t.Fatalf("ContinueProgressive recover: %v", err)
+	}
+	if result.IntactRestart || len(result.StagesRun) != 5 {
+		t.Fatalf("want 5 stages run via recover, got %#v", result)
+	}
+	history, err := database.ReadAdvisoryHistory(ctx)
+	if err != nil {
+		t.Fatalf("history: %v", err)
+	}
+	assertFixtureAdvisoryHistory(t, history)
+
+	// Second pass with nil timeline is intact (no re-append).
+	second, err := replay.ContinueProgressive(ctx, nil)
+	if err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	if !second.IntactRestart {
+		t.Fatalf("want intact second pass, got %#v", second)
+	}
+}
+
+func TestRecordSessionStagesIndexesFixtureIDs(t *testing.T) {
+	ctx := context.Background()
+	_, database := newTestService(t, ctx)
+	replay := mustAdvisoryReplay(t, database)
+	rec := &captureRecorder{}
+	replay.RecordSessionStages(rec, "sim-1", []string{
+		"terra_active_rev7",
+		"briefing_requested",
+		"sol_recommendation_rev7",
+		"terra_obsolete_rev9",
+		"recommendation_acknowledged",
+	})
+	if len(rec.entries) != 8 {
+		t.Fatalf("recorded entries = %d (%#v), want 8", len(rec.entries), rec.entries)
+	}
+	kinds := map[string]int{}
+	for _, e := range rec.entries {
+		if e.session != "sim-1" || e.id == "" {
+			t.Fatalf("bad entry %#v", e)
+		}
+		kinds[e.kind]++
+	}
+	if kinds["insight"] != 2 || kinds["recommendation"] != 1 || kinds["model_run"] != 3 || kinds["audit_record"] != 2 {
+		t.Fatalf("kind counts = %#v", kinds)
+	}
+	// Spot-check known fixture identities.
+	seen := map[string]bool{}
+	for _, e := range rec.entries {
+		seen[e.kind+":"+e.id] = true
+	}
+	for _, key := range []string{
+		"insight:insight-domestic-access-001",
+		"insight:insight-domestic-access-001-obsolete",
+		"recommendation:recommendation-domestic-001",
+		"model_run:" + fixtureTerraActiveRunID,
+		"model_run:" + fixtureSolRunID,
+		"model_run:" + fixtureTerraObsoleteRunID,
+	} {
+		if !seen[key] {
+			t.Fatalf("missing recorded id %q in %#v", key, seen)
+		}
+	}
+}
+
+type captureRecorder struct {
+	entries []struct{ session, kind, id string }
+}
+
+func (c *captureRecorder) Record(sessionID, kind, recordID string) {
+	c.entries = append(c.entries, struct{ session, kind, id string }{sessionID, kind, recordID})
+}
+
 func TestFixtureAdvisoryReplayRollsBackInsightPairOnWriteFailure(t *testing.T) {
 	ctx := context.Background()
 	service, database := newTestService(t, ctx)

@@ -17,12 +17,22 @@
 
   let collapsed = $state(true);
 
+  // Expanding the console should show current status, not the boot snapshot.
+  // The operations receipt only refreshes on non-snapshot stream events, so the
+  // progressive (cop.snapshot) path leaves it stale — re-fetch on open.
+  function setCollapsed(next) {
+    collapsed = next;
+    if (!next && typeof loadOperations === 'function') {
+      loadOperations();
+    }
+  }
+
   function toggle(event) {
     // Only toggle if clicking the header itself or the title, not the buttons/inputs inside
     if (event.target.closest('button') || event.target.closest('input')) {
       return;
     }
-    collapsed = !collapsed;
+    setCollapsed(!collapsed);
   }
 
   function formatTimestamp(value) {
@@ -75,7 +85,12 @@
   let modelUsageHasBudget = $derived(modelUsage?.budget_usd !== undefined && modelUsage?.budget_usd !== null);
 </script>
 
-<div class="developer-status-drawer" class:collapsed={collapsed}>
+<div
+  class="developer-status-drawer"
+  class:collapsed={collapsed}
+  data-testid="developer-console"
+  data-collapsed={collapsed}
+>
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="drawer-header" onclick={toggle}>
@@ -90,7 +105,11 @@
       <span class="pill-status" data-state={operationsPresentation?.state}>Ops: {operationsPresentation?.label || '—'}</span>
     </div>
 
-    <button class="toggle-drawer-button" onclick={() => collapsed = !collapsed}>
+    <button
+      class="toggle-drawer-button"
+      data-testid="developer-console-toggle"
+      onclick={() => setCollapsed(!collapsed)}
+    >
       {#if collapsed}
         Expand ▲
       {:else}
@@ -100,7 +119,7 @@
   </div>
 
   {#if !collapsed}
-    <div class="drawer-content">
+    <div class="drawer-content" data-testid="developer-console-content">
       <div class="drawer-grid">
         <!-- Connection and configuration -->
         <section class="drawer-section connection-config">
@@ -144,7 +163,7 @@
         <!-- Ledger counts -->
         <section class="drawer-section ledger-tally">
           <h3>Durable Ledger</h3>
-          <dl class="counts-list">
+          <dl class="counts-list" data-testid="ledger-counts">
             <div><dt>Raw Events</dt><dd>{formatNumber(operations?.counts?.raw_events)}</dd></div>
             <div><dt>Canonical</dt><dd>{formatNumber(operations?.counts?.canonical_events)}</dd></div>
             <div><dt>Projected</dt><dd>{formatNumber(operations?.counts?.projected_events)}</dd></div>

@@ -761,3 +761,91 @@ func TestOperationsCapabilitiesWithAdvisoryMode(t *testing.T) {
 	assertCapability(t, capabilities, "terra_assessment", "fixture_composed", "available")
 	assertCapability(t, capabilities, "sol_advisory", "fixture_composed", "available")
 }
+
+// TestCassetteModeSurfacing proves process-level cassette mode is additive on
+// public version + advisories payloads (D2 mode/status surface). Mode is set
+// only at composition; empty defaults to passthrough.
+func TestCassetteModeSurfacing(t *testing.T) {
+	fixture := newFixture(t)
+
+	// Default composition → passthrough on /version
+	defaultVersion := request(t, fixture.handler, http.MethodGet, "/api/v1/version", "", "")
+	if defaultVersion.Code != http.StatusOK {
+		t.Fatalf("default version status = %d", defaultVersion.Code)
+	}
+	defaultData := responseData(t, defaultVersion)
+	if got, _ := defaultData["cassette_mode"].(string); got != "passthrough" {
+		t.Fatalf("default cassette_mode = %q, want passthrough", got)
+	}
+	if _, hasDir := defaultData["cassette_dir"]; hasDir {
+		t.Fatalf("default version must omit cassette_dir when unset, got %#v", defaultData["cassette_dir"])
+	}
+
+	// Explicit replay + dir on version and advisories
+	server, err := New(Config{
+		Recovery: stubRecovery{
+			result: contracts.ProjectionResult{StateRevision: 7, COP: map[string]any{}},
+		},
+		Records:         fixture.store,
+		Evidence:        fixture.server.evidence,
+		AdvisoryHistory: stubAdvisoryHistoryReader{history: contracts.AdvisoryHistory{}},
+		AdvisoryMode:    "fixture-composed",
+		CassetteMode:    "replay",
+		CassetteDir:     "/tmp/mosaic-recordings",
+		ProviderSelection: contracts.AgentProviderSelection{
+			"terra": contracts.ProviderFixture,
+			"sol":   contracts.ProviderFixture,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	handler := server.Handler()
+
+	versionResp := request(t, handler, http.MethodGet, "/api/v1/version", "", "")
+	if versionResp.Code != http.StatusOK {
+		t.Fatalf("version status = %d body=%s", versionResp.Code, versionResp.Body.String())
+	}
+	versionData := responseData(t, versionResp)
+	if got, _ := versionData["cassette_mode"].(string); got != "replay" {
+		t.Fatalf("version cassette_mode = %q, want replay", got)
+	}
+	if got, _ := versionData["cassette_dir"].(string); got != "/tmp/mosaic-recordings" {
+		t.Fatalf("version cassette_dir = %q, want /tmp/mosaic-recordings", got)
+	}
+
+	advResp := request(t, handler, http.MethodGet, "/api/v1/advisories", "", "")
+	if advResp.Code != http.StatusOK {
+		t.Fatalf("advisories status = %d body=%s", advResp.Code, advResp.Body.String())
+	}
+	advData := responseData(t, advResp)
+	if got, _ := advData["cassette_mode"].(string); got != "replay" {
+		t.Fatalf("advisories cassette_mode = %q, want replay", got)
+	}
+	providers, _ := advData["providers"].(map[string]any)
+	if providers["terra"] != "fixture" {
+		t.Fatalf("advisories providers = %#v", providers)
+	}
+
+	// Empty-session advisories also carry cassette_mode
+	active := &stubActiveSession{active: false}
+	emptyServer, err := New(Config{
+		Recovery:        stubRecovery{result: contracts.ProjectionResult{StateRevision: 0}},
+		Records:         fixture.store,
+		Evidence:        fixture.server.evidence,
+		AdvisoryHistory: fixedAdvisoryHistory{},
+		ActiveSession:   active,
+		CassetteMode:    "record",
+	})
+	if err != nil {
+		t.Fatalf("new empty-session server: %v", err)
+	}
+	emptyResp := request(t, emptyServer.Handler(), http.MethodGet, "/api/v1/advisories", "", "")
+	if emptyResp.Code != http.StatusOK {
+		t.Fatalf("empty advisories status = %d", emptyResp.Code)
+	}
+	emptyData := responseData(t, emptyResp)
+	if got, _ := emptyData["cassette_mode"].(string); got != "record" {
+		t.Fatalf("empty advisories cassette_mode = %q, want record", got)
+	}
+}

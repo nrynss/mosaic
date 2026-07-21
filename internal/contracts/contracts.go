@@ -1,9 +1,12 @@
 // Package contracts contains stable seams between Mosaic parcels. Implementations
-// belong to later packages; types here deliberately carry no runtime behaviour.
+// belong to later packages; types here deliberately carry no runtime behaviour
+// beyond shared sentinel errors that form part of a cross-package seam.
 package contracts
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"time"
 
 	"mosaic.local/mosaic/internal/ontology/gen"
@@ -75,6 +78,53 @@ type ProjectionResult struct {
 	ProjectedAt   time.Time
 	COP           map[string]any
 	Checkpoint    gen.Checkpoint
+}
+
+// DefaultCOPReadModelKey is the legacy single-row materialization key used when
+// session isolation is not composed. Prefer SessionCOPReadModelKey when an
+// active simulation session is the recovery scope.
+const DefaultCOPReadModelKey = "default"
+
+// SessionCOPReadModelKey returns the materialization key for a simulation
+// session epoch. Empty sessionID maps to DefaultCOPReadModelKey so callers can
+// pass through without inventing a second empty-key convention.
+func SessionCOPReadModelKey(sessionID string) string {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return DefaultCOPReadModelKey
+	}
+	return sessionID
+}
+
+// COPReadModelRepository is the mutable system-of-record COP snapshot used for
+// cheap GET /cop. It is separate from append-only checkpoints (recovery) and
+// from the event log (transport). Implementations UPSERT one row per key;
+// missing rows are reported as (zero, false, nil), not an error.
+//
+// The default Load/Save pair uses DefaultCOPReadModelKey. Session isolation
+// (C3) uses LoadCOPReadModelKey / SaveCOPReadModelKey with
+// SessionCOPReadModelKey(sessionID) so concurrent sessions never clobber each
+// other's materialization.
+//
+// Save is expected to join an ambient WithinTransaction when one is present so
+// project+position+materialize can commit atomically on the Postgres consumer
+// path. See pgstore.MaterializingProjector.
+type COPReadModelRepository interface {
+	LoadCOPReadModel(ctx context.Context) (ProjectionResult, bool, error)
+	SaveCOPReadModel(ctx context.Context, result ProjectionResult) error
+	LoadCOPReadModelKey(ctx context.Context, key string) (ProjectionResult, bool, error)
+	SaveCOPReadModelKey(ctx context.Context, key string, result ProjectionResult) error
+}
+
+// ActiveSessionSource resolves the simulation session epoch the API should
+// show. Composition shares one holder between the simulation lifecycle
+// (Start/Reset/End) and read ports (COP, advisories, recovery).
+//
+// When active is false (or the source is not composed), session-scoped read
+// ports return an empty board rather than a global/default materialization.
+type ActiveSessionSource interface {
+	// ActiveSessionID returns the active session id and whether one is set.
+	ActiveSessionID() (sessionID string, active bool)
 }
 
 // ProjectorDispatcher schedules a committed canonical event for its deterministic projector.
@@ -188,4 +238,20 @@ type SimulationStreamEvent struct {
 	Timestamp time.Time       `json:"timestamp"`
 	Type      StreamEventType `json:"type"`
 	Payload   any             `json:"payload,omitempty"`
+}
+
+// ErrSimulationAlreadyRunning means Start was called while a session is already
+// running. Framework adapters (e.g. the HTTP API) map this sentinel without
+// importing the simulation package. Use Reset to begin a new session.
+var ErrSimulationAlreadyRunning = errors.New("simulation session already running")
+
+// SimulationStreamSubscription is a cancelable registration on a session-scoped
+// stream. Implementations live under internal/simulation; consumers (including
+// the HTTP adapter) depend only on this interface so framework packages never
+// import simulation.
+type SimulationStreamSubscription interface {
+	// Events returns the receive-only channel of session stream events.
+	Events() <-chan SimulationStreamEvent
+	// Cancel unregisters the subscriber. Safe to call more than once.
+	Cancel()
 }

@@ -6,9 +6,21 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "check": "svelte-check --tsconfig ./jsconfig.json --config ./svelte.config.js"
+    "check": "svelte-check --tsconfig ./jsconfig.json --config ./svelte.config.js",
+    "e2e:prepare": "node e2e/prepare-bin.mjs",
+    "e2e:prepare:force": "node e2e/prepare-bin.mjs --force",
+    "test:e2e": "npm run build && npm run e2e:prepare:force && npm run test:e2e:run",
+    "test:e2e:run": "npm run e2e:prepare && playwright test",
+    "test:e2e:headed": "npm run build && npm run e2e:prepare:force && playwright test --headed",
+    "test:e2e:ui": "npm run build && npm run e2e:prepare:force && playwright test --ui",
+    "test:e2e:walkthrough": "npm run build && npm run e2e:prepare:force && playwright test --project=walkthrough",
+    "test:e2e:fixture": "npm run build && npm run e2e:prepare:force && playwright test --project=fixture",
+    "test:e2e:replay": "npm run build && npm run e2e:prepare:force && playwright test --project=replay",
+    "test:e2e:record": "npm run build && npm run e2e:prepare:force && node e2e/record.mjs",
+    "test:e2e:record:live": "npm run build && npm run e2e:prepare:force && node e2e/record.mjs --live"
   },
   "devDependencies": {
+    "@playwright/test": "^1.54.2",
     "@sveltejs/vite-plugin-svelte": "^7.2.0",
     "svelte": "^5.0.0",
     "svelte-check": "^4.0.0",

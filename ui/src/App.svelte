@@ -130,6 +130,7 @@
       : { state: 'error', detail: versionResult.reason.message };
     if (versionResult.status === 'fulfilled') {
       openaiConfigured = !!versionResult.value?.openai_configured;
+
     }
     if (modelUsageResult.status === 'fulfilled') {
       modelUsage = modelUsageResult.value;
@@ -173,6 +174,7 @@
     advisoriesError = '';
     try {
       advisories = await readEnvelope('advisories');
+
       if (advisories?.status === 'unavailable') {
         advisoriesState = 'unavailable';
       } else {
@@ -657,11 +659,22 @@
     >
       How this works
     </button>
-    <div class="connection-pill" data-state={openaiConfigured ? 'live' : 'idle'} aria-live="polite" style="margin-right: 0.5rem;">
+    <div
+      class="connection-pill"
+      data-testid="ai-mode-pill"
+      data-state={openaiConfigured ? 'live' : 'idle'}
+      aria-live="polite"
+      style="margin-right: 0.5rem;"
+    >
       <span aria-hidden="true"></span>
       {openaiConfigured ? 'AI: Live' : 'AI: Demo pack'}
     </div>
-    <div class="connection-pill" data-state={streamState} aria-live="polite">
+    <div
+      class="connection-pill"
+      data-testid="connection-pill"
+      data-state={streamState}
+      aria-live="polite"
+    >
       <span aria-hidden="true"></span>
       {streamState === 'live' ? 'Connected' : streamState === 'reconnecting' ? 'Reconnecting' : 'Checking'}
     </div>
@@ -678,8 +691,8 @@
         <HelpTip text="Live roster from the incident board: units, roads, resources, and weather. Fills in as the scenario plays." label="About the status board" />
       </p>
 
-      <div class="rail-block" aria-label="Units">
-        <p class="rail-block-title">Units <span class="count">{railUnits.length}</span></p>
+      <div class="rail-block" data-testid="rail-units" aria-label="Units">
+        <p class="rail-block-title">Units <span class="count" data-testid="rail-units-count">{railUnits.length}</span></p>
         {#if railUnits.length === 0}
           <p class="rail-empty">No units on board</p>
         {:else}
@@ -694,8 +707,8 @@
         {/if}
       </div>
 
-      <div class="rail-block" aria-label="Roads">
-        <p class="rail-block-title">Roads <span class="count">{railRoads.length}</span></p>
+      <div class="rail-block" data-testid="rail-roads" aria-label="Roads">
+        <p class="rail-block-title">Roads <span class="count" data-testid="rail-roads-count">{railRoads.length}</span></p>
         {#if railRoads.length === 0}
           <p class="rail-empty">No road reports</p>
         {:else}
@@ -710,8 +723,8 @@
         {/if}
       </div>
 
-      <div class="rail-block" aria-label="Resources">
-        <p class="rail-block-title">Resources <span class="count">{railResources.length}</span></p>
+      <div class="rail-block" data-testid="rail-resources" aria-label="Resources">
+        <p class="rail-block-title">Resources <span class="count" data-testid="rail-resources-count">{railResources.length}</span></p>
         {#if railResources.length === 0}
           <p class="rail-empty">No resources on board</p>
         {:else}
@@ -726,8 +739,8 @@
         {/if}
       </div>
 
-      <div class="rail-block" aria-label="Weather">
-        <p class="rail-block-title">Weather <span class="count">{railWeather.length}</span></p>
+      <div class="rail-block" data-testid="rail-weather" aria-label="Weather">
+        <p class="rail-block-title">Weather <span class="count" data-testid="rail-weather-count">{railWeather.length}</span></p>
         {#if railWeather.length === 0}
           <p class="rail-empty">No active alerts</p>
         {:else}
@@ -770,11 +783,23 @@
 
     <!-- Tab switcher navigation -->
     <div class="workspace-tabs-nav">
-      <button class="tab-nav-btn" class:active={activeTab === 'workspace'} onclick={() => activeTab = 'workspace'}>
+      <button
+        class="tab-nav-btn"
+        class:active={activeTab === 'workspace'}
+        data-testid="tab-workspace"
+        data-active={activeTab === 'workspace' ? 'true' : 'false'}
+        onclick={() => activeTab = 'workspace'}
+      >
         Live incident board
         <HelpTip text="Main demo screen: play the scenario, see the current picture, and review advice." label="About live incident board" direction="bottom" />
       </button>
-      <button class="tab-nav-btn" class:active={activeTab === 'provenance'} onclick={() => activeTab = 'provenance'}>
+      <button
+        class="tab-nav-btn"
+        class:active={activeTab === 'provenance'}
+        data-testid="tab-decision-history"
+        data-active={activeTab === 'provenance' ? 'true' : 'false'}
+        onclick={() => activeTab = 'provenance'}
+      >
         Decision history
         <HelpTip text="Everything you and the demo models recorded: notes, handoffs, and analysis runs — for review only." label="About decision history" direction="bottom" />
       </button>
@@ -793,6 +818,7 @@
         {loadAdvisories}
         {selectEvidence}
         {modelUsage}
+        {readEnvelope}
         bind:auditTargetID
         bind:auditTargetKind
         onPrefillMaintenance={prefillMaintenance}

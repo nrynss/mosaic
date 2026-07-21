@@ -23,7 +23,7 @@
   }
 </script>
 
-<div class="provenance-container">
+<div class="provenance-container" data-testid="decision-history">
   <div class="provenance-header">
     <h2>Decision history</h2>
     <div class="boundary-badge">
@@ -39,19 +39,25 @@
 
   <div class="provenance-grid">
     <!-- Chronological Audit & Decision Trail -->
-    <section class="provenance-section" aria-labelledby="decisions-title">
+    <section class="provenance-section" data-testid="audit-records-section" aria-labelledby="decisions-title">
       <h3 id="decisions-title">What you recorded</h3>
       {#if auditRecords.length === 0}
-        <div class="empty-trace">No operator notes yet — save a handoff or decision on the live board.</div>
+        <div class="empty-trace" data-testid="audit-records-empty">No operator notes yet — save a handoff or decision on the live board.</div>
       {:else}
-        <ol class="timeline" aria-label="Operator actions timeline">
+        <ol class="timeline" data-testid="audit-records-list" aria-label="Operator actions timeline">
           {#each auditRecords as record (record.audit_record_id)}
-            <li class="timeline-item">
+            <li
+              class="timeline-item"
+              data-testid="audit-record-row"
+              data-audit-id={record.audit_record_id}
+              data-action={record.action}
+              data-note={record.note || ''}
+            >
               <div class="timeline-badge action-badge" data-action={record.action}></div>
               <div class="timeline-time">{formatTimestamp(record.created_at)}</div>
               <div class="timeline-content">
                 <div class="timeline-top">
-                  <strong>{record.action.replaceAll('_', ' ')}</strong>
+                  <strong data-testid="audit-record-action">{record.action.replaceAll('_', ' ')}</strong>
                   <span class="actor-tag">{record.actor_role} ({record.actor_id})</span>
                 </div>
                 <p class="record-note">{record.note}</p>
@@ -71,14 +77,19 @@
     </section>
 
     <!-- AI Model Executions -->
-    <section class="provenance-section" aria-labelledby="models-title">
+    <section class="provenance-section" data-testid="model-runs-section" aria-labelledby="models-title">
       <h3 id="models-title">Analysis runs (Terra / Sol / Luna)</h3>
       {#if modelRuns.length === 0}
-        <div class="empty-trace">No analysis runs yet for this view.</div>
+        <div class="empty-trace" data-testid="model-runs-empty">No analysis runs yet for this view.</div>
       {:else}
-        <ol class="timeline" aria-label="Model runs timeline">
+        <ol class="timeline" data-testid="model-runs-list" aria-label="Model runs timeline">
           {#each modelRuns as run (run.model_run_id)}
-            <li class="timeline-item">
+            <li
+              class="timeline-item"
+              data-testid="model-run-row"
+              data-model-run-id={run.model_run_id}
+              data-agent={run.agent}
+            >
               <div class="timeline-badge model-badge" data-agent={run.agent}></div>
               <div class="timeline-time">{formatTimestamp(run.started_at)}</div>
               <div class="timeline-content">
@@ -121,14 +132,14 @@
     </section>
 
     <!-- Simulation Beats -->
-    <section class="provenance-section" aria-labelledby="beats-title">
+    <section class="provenance-section" data-testid="scenario-beats-section" aria-labelledby="beats-title">
       <h3 id="beats-title">Scenario steps this run</h3>
       {#if beats.length === 0}
-        <div class="empty-trace">No scenario steps yet. Press <strong>Play scenario</strong> on the live board.</div>
+        <div class="empty-trace" data-testid="scenario-beats-empty">No scenario steps yet. Press <strong>Play scenario</strong> on the live board.</div>
       {:else}
-        <ol class="timeline" aria-label="Scenario steps timeline">
+        <ol class="timeline" data-testid="scenario-beats-list" aria-label="Scenario steps timeline">
           {#each beats as beat (beat.beat_id)}
-            <li class="timeline-item">
+            <li class="timeline-item" data-testid="scenario-beat-row" data-beat-id={beat.beat_id}>
               <div class="timeline-badge beat-badge"></div>
               <div class="timeline-content">
                 <div class="timeline-top">

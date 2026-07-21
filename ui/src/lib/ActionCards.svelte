@@ -131,7 +131,7 @@
   }
 </script>
 
-<div class="action-cards-panel">
+<div class="action-cards-panel" data-testid="action-cards">
   <!-- Header -->
   <div class="panel-section-header">
     <span class="eyebrow">
@@ -146,7 +146,7 @@
   </div>
 
   <!-- Dispatch Card -->
-  <div class="action-card dispatch-card">
+  <div class="action-card dispatch-card" data-testid="dispatch-card">
     <div class="card-header">
       <span class="badge recipient-badge">For: Dispatch desk</span>
       <span class="badge status-badge safety-badge">
@@ -172,29 +172,37 @@
       <label for="dispatch-observations">Your note to Dispatch</label>
       <textarea
         id="dispatch-observations"
+        data-testid="dispatch-note"
         bind:value={dispatchObservations}
         rows="3"
         placeholder="e.g. Unit on scene; Brook Lane access may be constrained by weather…"
       ></textarea>
-      <button class="action-btn" type="submit" disabled={actionState === 'loading'}>
+      <button class="action-btn" type="submit" data-testid="dispatch-save" disabled={actionState === 'loading'}>
         Save Dispatch note
       </button>
     </form>
 
     {#if dispatchResult}
-      <div class="result-box success">
+      <div
+        class="result-box success"
+        data-testid="dispatch-result"
+        data-executed={dispatchResult.executed === true ? 'true' : 'false'}
+        data-delivered={dispatchResult.delivered === true ? 'true' : 'false'}
+      >
         <p class="res-msg">Saved to the demo log. Nothing was sent.</p>
+        <p class="res-msg" data-testid="dispatch-executed">executed:{dispatchResult.executed === true ? 'true' : 'false'}</p>
+        <p class="res-msg" data-testid="dispatch-delivered">delivered:{dispatchResult.delivered === true ? 'true' : 'false'}</p>
       </div>
     {/if}
     {#if dispatchError}
-      <div class="result-box failure">
+      <div class="result-box failure" data-testid="dispatch-error">
         <p class="res-msg problem">{dispatchError}</p>
       </div>
     {/if}
   </div>
 
   <!-- Maintenance Card -->
-  <div class="action-card maintenance-card">
+  <div class="action-card maintenance-card" data-testid="maintenance-card">
     <div class="card-header">
       <span class="badge recipient-badge">For: Road / maintenance</span>
       <span class="badge status-badge safety-badge">saved only · not sent</span>
@@ -223,29 +231,37 @@
       <label for="maintenance-note">Your note about roads / access</label>
       <textarea
         id="maintenance-note"
+        data-testid="maintenance-note"
         bind:value={maintenanceNote}
         rows="3"
         placeholder="e.g. Brook Lane closed during heavy rain; flag for maintenance review…"
       ></textarea>
-      <button class="action-btn" type="submit" disabled={actionState === 'loading'}>
+      <button class="action-btn" type="submit" data-testid="maintenance-save" disabled={actionState === 'loading'}>
         Save maintenance note
       </button>
     </form>
 
     {#if maintenanceResult}
-      <div class="result-box success">
+      <div
+        class="result-box success"
+        data-testid="maintenance-result"
+        data-executed={maintenanceResult.executed === true ? 'true' : 'false'}
+        data-delivered={maintenanceResult.delivered === true ? 'true' : 'false'}
+      >
         <p class="res-msg">Saved to the demo log. Nothing was sent.</p>
+        <p class="res-msg" data-testid="maintenance-executed">executed:{maintenanceResult.executed === true ? 'true' : 'false'}</p>
+        <p class="res-msg" data-testid="maintenance-delivered">delivered:{maintenanceResult.delivered === true ? 'true' : 'false'}</p>
       </div>
     {/if}
     {#if maintenanceError}
-      <div class="result-box failure">
+      <div class="result-box failure" data-testid="maintenance-error">
         <p class="res-msg problem">{maintenanceError}</p>
       </div>
     {/if}
   </div>
 
   <!-- Decision Controls Panel -->
-  <div class="decision-panel">
+  <div class="decision-panel" data-testid="decision-panel">
     <div class="panel-section-header">
       <span class="eyebrow">
         Your call as operator
@@ -262,7 +278,7 @@
       <div class="input-grid">
         <div>
           <label for="decision-kind">What are you reviewing?</label>
-          <select id="decision-kind" bind:value={auditTargetKind}>
+          <select id="decision-kind" data-testid="decision-kind" bind:value={auditTargetKind}>
             <option value="recommendation">Recommendation</option>
             <option value="insight">Assessment</option>
             <option value="briefing">Briefing</option>
@@ -273,6 +289,7 @@
           <label for="decision-target">Which record? (id)</label>
           <input
             id="decision-target"
+            data-testid="decision-target"
             bind:value={auditTargetID}
             placeholder="e.g. recommendation-domestic-001"
             required
@@ -283,6 +300,7 @@
       <label for="decision-note">Your note</label>
       <textarea
         id="decision-note"
+        data-testid="decision-note"
         bind:value={decisionNote}
         rows="3"
         placeholder="e.g. Agree access risk is outdated after road reopened…"
@@ -292,6 +310,7 @@
         <button
           class="decision-btn approve-btn"
           type="button"
+          data-testid="decision-approve"
           onclick={() => handleDecision('approve')}
           disabled={actionState === 'loading'}
         >
@@ -300,6 +319,7 @@
         <button
           class="decision-btn annotate-btn"
           type="button"
+          data-testid="decision-annotate"
           onclick={() => handleDecision('annotate')}
           disabled={actionState === 'loading'}
         >
@@ -309,14 +329,20 @@
     </div>
 
     {#if decisionResult}
-      <div class="result-box success">
+      <div
+        class="result-box success"
+        data-testid="decision-result"
+        data-executed={decisionResult.executed === true ? 'true' : 'false'}
+        data-action={decisionResult.action}
+      >
         <div class="res-row"><strong>What you did:</strong> <span class="capitalize">{decisionResult.action}</span></div>
         <p class="res-msg">Saved to the demo log. Nothing was sent.</p>
-        <div class="res-row"><strong>History id:</strong> <code>{decisionResult.audit_record_id}</code></div>
+        <p class="res-msg" data-testid="decision-executed">executed:{decisionResult.executed === true ? 'true' : 'false'}</p>
+        <div class="res-row"><strong>History id:</strong> <code data-testid="decision-audit-id">{decisionResult.audit_record_id}</code></div>
       </div>
     {/if}
     {#if decisionError}
-      <div class="result-box failure">
+      <div class="result-box failure" data-testid="decision-error">
         <p class="res-msg problem">{decisionError}</p>
       </div>
     {/if}

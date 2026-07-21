@@ -249,6 +249,26 @@ func TestOperatorAnalyzeRefusalAndFailure(t *testing.T) {
 
 func TestOperatorBriefSuccessWithSupervisor(t *testing.T) {
 	base := newFixture(t)
+	// Seed a full Insight so brief hydrates from advisory history by id only.
+	seedInsight := gen.Insight{
+		SchemaVersion:   "1.0.0",
+		InsightID:       "insight-1",
+		StateRevision:   1,
+		LifecycleStatus: "active",
+		Assertions:      []any{"Access may be constrained."},
+		Evidence: []any{
+			map[string]any{
+				"target_kind": "canonical_event",
+				"target_id":   "canonical-1",
+				"explanation": "Cited synthetic event.",
+			},
+		},
+		Confidence: []byte(`{"source_quality":"medium","transformation_certainty":"medium","reasoning_support":"high","basis":"Fixture assessment."}`),
+		CreatedAt:  "2026-07-18T12:01:30Z",
+	}
+	if err := base.store.AppendInsight(context.Background(), seedInsight); err != nil {
+		t.Fatalf("seed insight: %v", err)
+	}
 	solStub := &stubSol{
 		output: contracts.SolOutput{
 			Recommendation: gen.Recommendation{
@@ -264,12 +284,16 @@ func TestOperatorBriefSuccessWithSupervisor(t *testing.T) {
 	server := newOperatorServer(t, base, Config{
 		Sol:               solStub,
 		BriefingRequester: "supervisor-token",
+		// Store implements AdvisoryHistoryReader — brief hydrates insights from it.
+		AdvisoryHistory: base.store,
 		ProviderSelection: contracts.AgentProviderSelection{
 			"sol": contracts.ProviderLive,
 		},
 	})
 
-	body := `{"insights":[{"insight_id":"insight-1","state_revision":1}],"evidence":[{"kind":"canonical_event","id":"canonical-1"}],"note":"deep brief"}`
+	// Client only supplies insight_id (and optional evidence refs). Full fields
+	// come from the store, not the request body.
+	body := `{"insights":[{"insight_id":"insight-1"}],"evidence":[{"kind":"canonical_event","id":"canonical-1"}],"note":"deep brief"}`
 	resp := request(t, server.Handler(), http.MethodPost, "/api/v1/operator/brief", "supervisor-token", body)
 	if resp.Code != http.StatusOK {
 		t.Fatalf("brief status = %d, body = %s", resp.Code, resp.Body.String())
@@ -296,6 +320,29 @@ func TestOperatorBriefSuccessWithSupervisor(t *testing.T) {
 	}
 	if solStub.calls != 1 || solStub.last.RequestedBy != "supervisor-token" {
 		t.Fatalf("sol call = %#v", solStub)
+	}
+	// Hydration must pass the full store insight, not a stub id-only record.
+	if len(solStub.last.Insights) != 1 || solStub.last.Insights[0].InsightID != "insight-1" {
+		t.Fatalf("hydrated insights = %#v", solStub.last.Insights)
+	}
+	if len(solStub.last.Insights[0].Assertions) == 0 || solStub.last.Insights[0].CreatedAt == "" {
+		t.Fatalf("insight was not fully hydrated: %#v", solStub.last.Insights[0])
+	}
+}
+
+func TestOperatorBriefHydrateMissingInsight(t *testing.T) {
+	base := newFixture(t)
+	server := newOperatorServer(t, base, Config{
+		Sol:             &stubSol{},
+		AdvisoryHistory: base.store,
+	})
+	body := `{"insights":[{"insight_id":"insight-missing"}],"evidence":[{"kind":"canonical_event","id":"canonical-1"}]}`
+	resp := request(t, server.Handler(), http.MethodPost, "/api/v1/operator/brief", "supervisor-token", body)
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body = %s", resp.Code, resp.Body.String())
+	}
+	if responseErrorCode(t, resp) != "invalid_insights" {
+		t.Fatalf("error = %q", responseErrorCode(t, resp))
 	}
 }
 

@@ -433,6 +433,129 @@ func (mr *MockProjectorMockRecorder) Replay(arg0, arg1, arg2 any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Replay", reflect.TypeOf((*MockProjector)(nil).Replay), arg0, arg1, arg2)
 }
 
+// MockCOPReadModelRepository is a mock of COPReadModelRepository interface.
+type MockCOPReadModelRepository struct {
+	ctrl     *gomock.Controller
+	recorder *MockCOPReadModelRepositoryMockRecorder
+	isgomock struct{}
+}
+
+// MockCOPReadModelRepositoryMockRecorder is the mock recorder for MockCOPReadModelRepository.
+type MockCOPReadModelRepositoryMockRecorder struct {
+	mock *MockCOPReadModelRepository
+}
+
+// NewMockCOPReadModelRepository creates a new mock instance.
+func NewMockCOPReadModelRepository(ctrl *gomock.Controller) *MockCOPReadModelRepository {
+	mock := &MockCOPReadModelRepository{ctrl: ctrl}
+	mock.recorder = &MockCOPReadModelRepositoryMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockCOPReadModelRepository) EXPECT() *MockCOPReadModelRepositoryMockRecorder {
+	return m.recorder
+}
+
+// LoadCOPReadModel mocks base method.
+func (m *MockCOPReadModelRepository) LoadCOPReadModel(ctx context.Context) (contracts.ProjectionResult, bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LoadCOPReadModel", ctx)
+	ret0, _ := ret[0].(contracts.ProjectionResult)
+	ret1, _ := ret[1].(bool)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// LoadCOPReadModel indicates an expected call of LoadCOPReadModel.
+func (mr *MockCOPReadModelRepositoryMockRecorder) LoadCOPReadModel(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LoadCOPReadModel", reflect.TypeOf((*MockCOPReadModelRepository)(nil).LoadCOPReadModel), ctx)
+}
+
+// SaveCOPReadModel mocks base method.
+func (m *MockCOPReadModelRepository) SaveCOPReadModel(ctx context.Context, result contracts.ProjectionResult) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SaveCOPReadModel", ctx, result)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SaveCOPReadModel indicates an expected call of SaveCOPReadModel.
+func (mr *MockCOPReadModelRepositoryMockRecorder) SaveCOPReadModel(ctx, result any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveCOPReadModel", reflect.TypeOf((*MockCOPReadModelRepository)(nil).SaveCOPReadModel), ctx, result)
+}
+
+// LoadCOPReadModelKey mocks base method.
+func (m *MockCOPReadModelRepository) LoadCOPReadModelKey(ctx context.Context, key string) (contracts.ProjectionResult, bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LoadCOPReadModelKey", ctx, key)
+	ret0, _ := ret[0].(contracts.ProjectionResult)
+	ret1, _ := ret[1].(bool)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// LoadCOPReadModelKey indicates an expected call of LoadCOPReadModelKey.
+func (mr *MockCOPReadModelRepositoryMockRecorder) LoadCOPReadModelKey(ctx, key any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LoadCOPReadModelKey", reflect.TypeOf((*MockCOPReadModelRepository)(nil).LoadCOPReadModelKey), ctx, key)
+}
+
+// SaveCOPReadModelKey mocks base method.
+func (m *MockCOPReadModelRepository) SaveCOPReadModelKey(ctx context.Context, key string, result contracts.ProjectionResult) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SaveCOPReadModelKey", ctx, key, result)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SaveCOPReadModelKey indicates an expected call of SaveCOPReadModelKey.
+func (mr *MockCOPReadModelRepositoryMockRecorder) SaveCOPReadModelKey(ctx, key, result any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveCOPReadModelKey", reflect.TypeOf((*MockCOPReadModelRepository)(nil).SaveCOPReadModelKey), ctx, key, result)
+}
+
+// MockActiveSessionSource is a mock of ActiveSessionSource interface.
+type MockActiveSessionSource struct {
+	ctrl     *gomock.Controller
+	recorder *MockActiveSessionSourceMockRecorder
+	isgomock struct{}
+}
+
+// MockActiveSessionSourceMockRecorder is the mock recorder for MockActiveSessionSource.
+type MockActiveSessionSourceMockRecorder struct {
+	mock *MockActiveSessionSource
+}
+
+// NewMockActiveSessionSource creates a new mock instance.
+func NewMockActiveSessionSource(ctrl *gomock.Controller) *MockActiveSessionSource {
+	mock := &MockActiveSessionSource{ctrl: ctrl}
+	mock.recorder = &MockActiveSessionSourceMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockActiveSessionSource) EXPECT() *MockActiveSessionSourceMockRecorder {
+	return m.recorder
+}
+
+// ActiveSessionID mocks base method.
+func (m *MockActiveSessionSource) ActiveSessionID() (string, bool) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ActiveSessionID")
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(bool)
+	return ret0, ret1
+}
+
+// ActiveSessionID indicates an expected call of ActiveSessionID.
+func (mr *MockActiveSessionSourceMockRecorder) ActiveSessionID() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ActiveSessionID", reflect.TypeOf((*MockActiveSessionSource)(nil).ActiveSessionID))
+}
+
 // MockProjectorDispatcher is a mock of ProjectorDispatcher interface.
 type MockProjectorDispatcher struct {
 	ctrl     *gomock.Controller
@@ -624,4 +747,54 @@ func (m *MockSimulationSchedule) Beats() []contracts.ScheduledBeat {
 func (mr *MockSimulationScheduleMockRecorder) Beats() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Beats", reflect.TypeOf((*MockSimulationSchedule)(nil).Beats))
+}
+
+// MockSimulationStreamSubscription is a mock of SimulationStreamSubscription interface.
+type MockSimulationStreamSubscription struct {
+	ctrl     *gomock.Controller
+	recorder *MockSimulationStreamSubscriptionMockRecorder
+	isgomock struct{}
+}
+
+// MockSimulationStreamSubscriptionMockRecorder is the mock recorder for MockSimulationStreamSubscription.
+type MockSimulationStreamSubscriptionMockRecorder struct {
+	mock *MockSimulationStreamSubscription
+}
+
+// NewMockSimulationStreamSubscription creates a new mock instance.
+func NewMockSimulationStreamSubscription(ctrl *gomock.Controller) *MockSimulationStreamSubscription {
+	mock := &MockSimulationStreamSubscription{ctrl: ctrl}
+	mock.recorder = &MockSimulationStreamSubscriptionMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockSimulationStreamSubscription) EXPECT() *MockSimulationStreamSubscriptionMockRecorder {
+	return m.recorder
+}
+
+// Cancel mocks base method.
+func (m *MockSimulationStreamSubscription) Cancel() {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "Cancel")
+}
+
+// Cancel indicates an expected call of Cancel.
+func (mr *MockSimulationStreamSubscriptionMockRecorder) Cancel() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Cancel", reflect.TypeOf((*MockSimulationStreamSubscription)(nil).Cancel))
+}
+
+// Events mocks base method.
+func (m *MockSimulationStreamSubscription) Events() <-chan contracts.SimulationStreamEvent {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Events")
+	ret0, _ := ret[0].(<-chan contracts.SimulationStreamEvent)
+	return ret0
+}
+
+// Events indicates an expected call of Events.
+func (mr *MockSimulationStreamSubscriptionMockRecorder) Events() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Events", reflect.TypeOf((*MockSimulationStreamSubscription)(nil).Events))
 }

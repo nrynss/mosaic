@@ -2,15 +2,82 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"mosaic.local/mosaic/internal/contracts"
+	"mosaic.local/mosaic/internal/ontology/gen"
 	"mosaic.local/mosaic/internal/openaimodel"
 	"mosaic.local/mosaic/internal/reference/domesticdisturbance/simulator"
+	"mosaic.local/mosaic/internal/simulation/cassette"
+	"mosaic.local/mosaic/internal/sol"
 	"mosaic.local/mosaic/internal/store"
+	"mosaic.local/mosaic/internal/terra"
 )
 
+func TestLoadVersionedPromptUsesArtifactContentAndHash(t *testing.T) {
+	root := repositoryRoot(t)
+	prompt, err := loadVersionedPrompt(root, openaimodel.AgentTerra, "v1.0.0")
+	if err != nil {
+		t.Fatalf("load prompt: %v", err)
+	}
+	contents, err := os.ReadFile(filepath.Join(root, "prompts", "terra", "v1.0.0.md"))
+	if err != nil {
+		t.Fatalf("read prompt fixture: %v", err)
+	}
+	if prompt.Instructions != strings.TrimSpace(string(contents)) {
+		t.Fatal("loaded instructions do not match the versioned prompt artifact")
+	}
+	sum := sha256.Sum256(contents)
+	want := "v1.0.0+sha256:" + hex.EncodeToString(sum[:])
+	if prompt.Provenance != want {
+		t.Fatalf("prompt provenance = %q, want %q", prompt.Provenance, want)
+	}
+}
+
+func TestLoadVersionedLunaPromptUsesArtifactContentAndHash(t *testing.T) {
+	root := repositoryRoot(t)
+	prompt, err := loadVersionedPrompt(root, openaimodel.AgentLuna, "v1.0.0")
+	if err != nil {
+		t.Fatalf("load Luna prompt: %v", err)
+	}
+	contents, err := os.ReadFile(filepath.Join(root, "prompts", "luna", "v1.0.0.md"))
+	if err != nil {
+		t.Fatalf("read Luna prompt fixture: %v", err)
+	}
+	if prompt.Instructions != strings.TrimSpace(string(contents)) {
+		t.Fatal("loaded Luna instructions do not match the versioned prompt artifact")
+	}
+	sum := sha256.Sum256(contents)
+	want := "v1.0.0+sha256:" + hex.EncodeToString(sum[:])
+	if prompt.Provenance != want {
+		t.Fatalf("Luna prompt provenance = %q, want %q", prompt.Provenance, want)
+	}
+}
+
+func TestLoadVersionedPromptRejectsMissingAndEmptyArtifacts(t *testing.T) {
+	root := t.TempDir()
+	if _, err := loadVersionedPrompt(root, openaimodel.AgentTerra, "v1.0.0"); err == nil {
+		t.Fatal("missing prompt did not fail")
+	}
+	path := filepath.Join(root, "prompts", "terra")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("make prompt directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "v1.0.0.md"), []byte(" \n\t "), 0o600); err != nil {
+		t.Fatalf("write empty prompt: %v", err)
+	}
+	if _, err := loadVersionedPrompt(root, openaimodel.AgentTerra, "v1.0.0"); err == nil || !strings.Contains(err.Error(), "empty") {
+		t.Fatalf("empty prompt error = %v", err)
+	}
+}
 func TestEffectiveSelectionRequiresKeyForLive(t *testing.T) {
 	requested := contracts.AgentProviderSelection{
 		openaimodel.AgentLuna:  contracts.ProviderLive,
@@ -48,6 +115,20 @@ func TestParseModelEnvDefaultsToFixture(t *testing.T) {
 	if env.Luna != contracts.ProviderFixture || env.Terra != contracts.ProviderFixture || env.Sol != contracts.ProviderFixture {
 		t.Fatalf("default providers = %#v", env)
 	}
+	if env.CassetteModeRaw != "" {
+		t.Fatalf("default cassette mode raw = %q, want empty", env.CassetteModeRaw)
+	}
+	mode, err := parseCassetteMode(env)
+	if err != nil {
+		t.Fatalf("parse default cassette mode: %v", err)
+	}
+	if mode != cassette.ModePassthrough {
+		t.Fatalf("default cassette mode = %s, want passthrough", mode)
+	}
+	wantDir := filepath.Join(os.TempDir(), defaultCassetteDirName)
+	if resolveCassetteDir(env) != wantDir {
+		t.Fatalf("default cassette dir = %q, want %q", resolveCassetteDir(env), wantDir)
+	}
 }
 
 func TestParseModelEnvReadsServerOnlyKey(t *testing.T) {
@@ -70,6 +151,406 @@ func TestParseModelEnvReadsServerOnlyKey(t *testing.T) {
 	}
 	if env.Terra != contracts.ProviderLive || env.Luna != contracts.ProviderLive || env.Sol != contracts.ProviderFixture {
 		t.Fatalf("parsed providers = %#v", env)
+	}
+}
+
+func TestParseModelEnvCassetteModeAndDir(t *testing.T) {
+	t.Run("sim mode wins over cassette mode alias", func(t *testing.T) {
+		env := parseModelEnv(func(name string) string {
+			switch name {
+			case "MOSAIC_SIM_MODE":
+				return "REPLAY"
+			case "MOSAIC_CASSETTE_MODE":
+				return "live"
+			case "MOSAIC_CASSETTE_DIR":
+				return "  /tmp/bank  "
+			default:
+				return ""
+			}
+		})
+		if env.CassetteModeRaw != "replay" {
+			t.Fatalf("CassetteModeRaw = %q, want replay", env.CassetteModeRaw)
+		}
+		mode, err := parseCassetteMode(env)
+		if err != nil {
+			t.Fatalf("parse mode: %v", err)
+		}
+		if mode != cassette.ModeReplay {
+			t.Fatalf("mode = %s, want replay", mode)
+		}
+		if resolveCassetteDir(env) != "/tmp/bank" {
+			t.Fatalf("dir = %q", resolveCassetteDir(env))
+		}
+	})
+
+	t.Run("cassette mode alias when sim unset", func(t *testing.T) {
+		env := parseModelEnv(func(name string) string {
+			if name == "MOSAIC_CASSETTE_MODE" {
+				return "record"
+			}
+			return ""
+		})
+		mode, err := parseCassetteMode(env)
+		if err != nil {
+			t.Fatalf("parse mode: %v", err)
+		}
+		if mode != cassette.ModeRecord {
+			t.Fatalf("mode = %s, want record", mode)
+		}
+	})
+
+	t.Run("aliases map via ParseMode", func(t *testing.T) {
+		cases := map[string]cassette.Mode{
+			"fixture":     cassette.ModePassthrough,
+			"passthrough": cassette.ModePassthrough,
+			"off":         cassette.ModePassthrough,
+			"live":        cassette.ModeRecord,
+			"record":      cassette.ModeRecord,
+			"replay":      cassette.ModeReplay,
+			"recorded":    cassette.ModeReplay,
+		}
+		for raw, want := range cases {
+			mode, err := parseCassetteMode(modelEnv{CassetteModeRaw: raw})
+			if err != nil {
+				t.Fatalf("%q: %v", raw, err)
+			}
+			if mode != want {
+				t.Fatalf("%q → %s, want %s", raw, mode, want)
+			}
+		}
+	})
+
+	t.Run("unknown mode errors", func(t *testing.T) {
+		_, err := parseCassetteMode(modelEnv{CassetteModeRaw: "banana"})
+		if err == nil {
+			t.Fatal("expected error for unknown mode")
+		}
+	})
+}
+
+func TestSplitPromptProvenance(t *testing.T) {
+	v, h := splitPromptProvenance("v1.0.0+sha256:deadbeef")
+	if v != "v1.0.0" || h != "deadbeef" {
+		t.Fatalf("split = %q, %q", v, h)
+	}
+	v, h = splitPromptProvenance("plain")
+	if v != "plain" || h != "" {
+		t.Fatalf("plain split = %q, %q", v, h)
+	}
+}
+
+func TestApplyCassetteRecordBanksLoadedPromptProvenance(t *testing.T) {
+	// Prove ModeRecord banks non-empty prompt_version + prompt_hash from a real
+	// loadVersionedPrompt provenance string (not only manual field assignment).
+	ctx := context.Background()
+	root := repositoryRoot(t)
+	prompt, err := loadVersionedPrompt(root, openaimodel.AgentTerra, "v1.0.0")
+	if err != nil {
+		t.Fatalf("load terra prompt: %v", err)
+	}
+	wantVersion, wantHash := splitPromptProvenance(prompt.Provenance)
+	if wantVersion == "" || wantHash == "" {
+		t.Fatalf("loaded provenance must split to non-empty version+hash: %q", prompt.Provenance)
+	}
+
+	mem := cassette.NewMemoryStore()
+	inner := &countingTerraClient{
+		resp: terra.Response{
+			InsightJSON: json.RawMessage(`{"insight_id":"ins-bank"}`),
+			ResponseID:  "bank-resp",
+		},
+	}
+	construct := contracts.AgentProviderSelection{
+		openaimodel.AgentTerra: contracts.ProviderLive,
+	}
+	_, terraClient, _, mode, _, err := applyCassette(
+		cassette.ModeRecord,
+		modelEnv{CassetteStore: mem, CassetteDir: t.TempDir()},
+		nil, inner, nil, construct,
+		versionedPrompt{},
+		prompt,
+		versionedPrompt{},
+	)
+	if err != nil {
+		t.Fatalf("applyCassette: %v", err)
+	}
+	if mode != cassette.ModeRecord {
+		t.Fatalf("mode = %s", mode)
+	}
+
+	req := terra.Request{
+		StateRevision: 3,
+		SerializedCOP: json.RawMessage(`{"revision":3,"incidents":[]}`),
+	}
+	if _, err := terraClient.Assess(ctx, req); err != nil {
+		t.Fatalf("Assess: %v", err)
+	}
+
+	recs, err := mem.List(ctx)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("recordings = %d, want 1", len(recs))
+	}
+	rec := recs[0]
+	if rec.PromptVersion != wantVersion || rec.PromptHash != wantHash {
+		t.Fatalf("banked provenance = %q / %q, want %q / %q (from %q)",
+			rec.PromptVersion, rec.PromptHash, wantVersion, wantHash, prompt.Provenance)
+	}
+	if rec.PromptVersion == "" || rec.PromptHash == "" {
+		t.Fatal("ModeRecord must not omit prompt_version / prompt_hash when provenance is loaded")
+	}
+	if joined := cassette.JoinPromptProvenance(rec.PromptVersion, rec.PromptHash); joined != prompt.Provenance {
+		t.Fatalf("rejoined banked = %q, want full provenance %q", joined, prompt.Provenance)
+	}
+}
+
+func TestReplayPromptVersionsUsesBankedProvenance(t *testing.T) {
+	ctx := context.Background()
+	mem := cassette.NewMemoryStore()
+	if err := mem.Put(ctx, &cassette.Recording{
+		SchemaVersion: cassette.SchemaVersion,
+		Key:           "terra/rev1/deadbeefdeadbeef",
+		Agent:         cassette.AgentTerra,
+		StateRevision: 1,
+		PromptVersion: "v1.0.0",
+		PromptHash:    "abc123terra",
+		ResponseID:    "seed-t",
+	}); err != nil {
+		t.Fatalf("seed terra: %v", err)
+	}
+	if err := mem.Put(ctx, &cassette.Recording{
+		SchemaVersion: cassette.SchemaVersion,
+		Key:           "sol/rev1/cafebabecafebabe",
+		Agent:         cassette.AgentSol,
+		StateRevision: 1,
+		PromptVersion: "v1.0.0",
+		PromptHash:    "def456sol",
+		ResponseID:    "seed-s",
+	}); err != nil {
+		t.Fatalf("seed sol: %v", err)
+	}
+	if err := mem.Put(ctx, &cassette.Recording{
+		SchemaVersion: cassette.SchemaVersion,
+		Key:           "luna/raw-seed/aaaaaaaaaaaaaaaa",
+		Agent:         cassette.AgentLuna,
+		PromptVersion: "v1.0.0",
+		PromptHash:    "luna999hash",
+		ResponseID:    "seed-l",
+	}); err != nil {
+		t.Fatalf("seed luna: %v", err)
+	}
+
+	lunaPV, terraPV, solPV := replayPromptVersions(ctx, modelEnv{CassetteStore: mem, CassetteDir: t.TempDir()})
+	if want := "v1.0.0+sha256:luna999hash"; lunaPV != want {
+		t.Fatalf("luna PV = %q, want %q", lunaPV, want)
+	}
+	if want := "v1.0.0+sha256:abc123terra"; terraPV != want {
+		t.Fatalf("terra PV = %q, want %q", terraPV, want)
+	}
+	if want := "v1.0.0+sha256:def456sol"; solPV != want {
+		t.Fatalf("sol PV = %q, want %q", solPV, want)
+	}
+
+	// Empty bank falls back to the opaque replay id (legacy recordings).
+	empty := cassette.NewMemoryStore()
+	lunaPV, terraPV, solPV = replayPromptVersions(ctx, modelEnv{CassetteStore: empty, CassetteDir: t.TempDir()})
+	if lunaPV != cassetteReplayPromptVersion || terraPV != cassetteReplayPromptVersion || solPV != cassetteReplayPromptVersion {
+		t.Fatalf("empty bank fallback = %q / %q / %q, want %q", lunaPV, terraPV, solPV, cassetteReplayPromptVersion)
+	}
+}
+
+func TestComposeModelsReplayModelRunUsesBankedPromptProvenance(t *testing.T) {
+	// End-to-end compose: ModeReplay + matching banked keys → successful
+	// Assess/Brief ModelRuns carry rejoined version+hash, not only
+	// mosaic-cassette-replay-v1.
+	ctx := context.Background()
+	root := repositoryRoot(t)
+	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "models-replay-prov.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	terraPrompt, err := loadVersionedPrompt(root, openaimodel.AgentTerra, "v1.0.0")
+	if err != nil {
+		t.Fatalf("load terra prompt: %v", err)
+	}
+	solPrompt, err := loadVersionedPrompt(root, openaimodel.AgentSol, "v1.0.0")
+	if err != nil {
+		t.Fatalf("load sol prompt: %v", err)
+	}
+	terraVersion, terraHash := splitPromptProvenance(terraPrompt.Provenance)
+	solVersion, solHash := splitPromptProvenance(solPrompt.Provenance)
+
+	// Build request identity the services will send so cassette keys match.
+	terraEvidence := []gen.Evidence{{
+		SchemaVersion: "1.0.0",
+		EvidenceID:    "ev-replay-prov",
+		TargetKind:    "canonical_event",
+		TargetID:      "canonical-domestic-007-repaired-road",
+		Explanation:   "Repaired Brook Lane closure is effective.",
+		CreatedAt:     "2026-01-01T00:00:00Z",
+	}}
+	cop := map[string]any{
+		"state_revision":      int64(7),
+		"effective_event_ids": []any{"canonical-domestic-007-repaired-road"},
+		"roads":               []any{map[string]any{"road_id": "road-brook-lane", "status": "blocked"}},
+	}
+	copJSON, err := json.Marshal(cop)
+	if err != nil {
+		t.Fatalf("marshal cop: %v", err)
+	}
+	terraReq := terra.Request{
+		StateRevision: 7,
+		SerializedCOP: copJSON,
+		Evidence:      terraEvidence,
+	}
+	terraKey, terraFP, err := cassette.TerraKey(terraReq, cassette.KeyMeta{})
+	if err != nil {
+		t.Fatalf("terra key: %v", err)
+	}
+
+	insight := gen.Insight{
+		SchemaVersion:   "1.0.0",
+		InsightID:       "insight-replay-prov-001",
+		StateRevision:   7,
+		LifecycleStatus: "active",
+		Assertions:      []any{"Brook Lane access may be constrained."},
+		Evidence: []any{map[string]any{
+			"target_kind": "canonical_event",
+			"target_id":   "canonical-domestic-007-repaired-road",
+			"explanation": "Repaired Brook Lane closure is effective.",
+		}},
+		Confidence: json.RawMessage(`{"source_quality":"medium","transformation_certainty":"medium","reasoning_support":"high","basis":"permitted evidence"}`),
+		CreatedAt:  "2026-01-01T00:00:00Z",
+	}
+	insightJSON, err := json.Marshal(insight)
+	if err != nil {
+		t.Fatalf("marshal insight: %v", err)
+	}
+
+	solEvidence := []gen.Evidence{{
+		SchemaVersion: "1.0.0",
+		EvidenceID:    "ev-insight-replay",
+		TargetKind:    "insight",
+		TargetID:      insight.InsightID,
+		Explanation:   "Recommendation limited to the cited assessment.",
+		CreatedAt:     "2026-01-01T00:00:00Z",
+	}}
+	solReq := sol.Request{
+		StateRevision: 7,
+		SerializedCOP: copJSON,
+		Insights:      []gen.Insight{insight},
+		Evidence:      solEvidence,
+		RequestedBy:   "supervisor-demo",
+	}
+	solKey, solFP, err := cassette.SolKey(solReq, cassette.KeyMeta{})
+	if err != nil {
+		t.Fatalf("sol key: %v", err)
+	}
+	recJSON, err := json.Marshal(gen.Recommendation{
+		SchemaVersion:    "1.0.0",
+		RecommendationID: "rec-replay-prov-001",
+		StateRevision:    7,
+		Text:             "Consider reviewing the Brook Lane access constraint with the supervisor.",
+		Evidence: []any{map[string]any{
+			"target_kind": "insight",
+			"target_id":   insight.InsightID,
+			"explanation": "Recommendation limited to the cited assessment.",
+		}},
+		CreatedAt: "2026-01-01T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("marshal recommendation: %v", err)
+	}
+
+	mem := cassette.NewMemoryStore()
+	if err := mem.Put(ctx, &cassette.Recording{
+		SchemaVersion:      cassette.SchemaVersion,
+		Key:                terraKey,
+		Agent:              cassette.AgentTerra,
+		StateRevision:      7,
+		RequestFingerprint: terraFP,
+		PromptVersion:      terraVersion,
+		PromptHash:         terraHash,
+		ResponseID:         "replay-terra-hit",
+		InsightJSON:        insightJSON,
+		RecordedAt:         "2026-06-01T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("seed terra: %v", err)
+	}
+	if err := mem.Put(ctx, &cassette.Recording{
+		SchemaVersion:      cassette.SchemaVersion,
+		Key:                solKey,
+		Agent:              cassette.AgentSol,
+		StateRevision:      7,
+		RequestFingerprint: solFP,
+		PromptVersion:      solVersion,
+		PromptHash:         solHash,
+		ResponseID:         "replay-sol-hit",
+		RecommendationJSON: recJSON,
+		RecordedAt:         "2026-06-01T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("seed sol: %v", err)
+	}
+
+	bundle, err := composeModels(ctx, database, root,
+		filepath.Join(root, "datasets", simulator.DomesticDisturbance),
+		filepath.Join(root, "ontology"),
+		"supervisor-demo",
+		modelEnv{
+			CassetteModeRaw: "replay",
+			CassetteStore:   mem,
+			CassetteDir:     t.TempDir(),
+		},
+	)
+	if err != nil {
+		t.Fatalf("compose: %v", err)
+	}
+	if bundle.CassetteMode != "replay" {
+		t.Fatalf("CassetteMode = %q", bundle.CassetteMode)
+	}
+
+	terraOut, err := bundle.Terra.Assess(ctx, contracts.TerraInput{
+		StateRevision: 7,
+		COP:           cop,
+		Evidence:      terraEvidence,
+	})
+	if err != nil {
+		t.Fatalf("successful banked Assess: %v", err)
+	}
+	if terraOut.ModelRun.ValidationStatus != "valid" {
+		t.Fatalf("terra ModelRun status = %q, want valid", terraOut.ModelRun.ValidationStatus)
+	}
+	if terraOut.ModelRun.PromptVersion != terraPrompt.Provenance {
+		t.Fatalf("terra ModelRun.PromptVersion = %q, want banked %q",
+			terraOut.ModelRun.PromptVersion, terraPrompt.Provenance)
+	}
+	if terraOut.ModelRun.PromptVersion == cassetteReplayPromptVersion {
+		t.Fatal("terra replay lost banked provenance")
+	}
+
+	solOut, err := bundle.Sol.Brief(ctx, contracts.SolInput{
+		StateRevision: 7,
+		COP:           cop,
+		Insights:      []gen.Insight{insight},
+		Evidence:      solEvidence,
+		RequestedBy:   "supervisor-demo",
+	})
+	if err != nil {
+		t.Fatalf("successful banked Brief: %v", err)
+	}
+	if solOut.ModelRun.ValidationStatus != "valid" {
+		t.Fatalf("sol ModelRun status = %q, want valid", solOut.ModelRun.ValidationStatus)
+	}
+	if solOut.ModelRun.PromptVersion != solPrompt.Provenance {
+		t.Fatalf("sol ModelRun.PromptVersion = %q, want banked %q",
+			solOut.ModelRun.PromptVersion, solPrompt.Provenance)
+	}
+	if solOut.ModelRun.PromptVersion == cassetteReplayPromptVersion {
+		t.Fatal("sol replay lost banked provenance")
 	}
 }
 
@@ -99,8 +580,422 @@ func TestComposeModelsFixturePath(t *testing.T) {
 			t.Fatalf("provider %s = %s, want fixture", agent, bundle.ProviderSelection[agent])
 		}
 	}
+	if bundle.CassetteMode != cassette.ModePassthrough.String() {
+		t.Fatalf("CassetteMode = %q, want passthrough", bundle.CassetteMode)
+	}
 }
 
+func TestComposeModelsFixtureModeDoesNotRequireKey(t *testing.T) {
+	ctx := context.Background()
+	root := repositoryRoot(t)
+	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "models-fixture-mode.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	bundle, err := composeModels(ctx, database, root,
+		filepath.Join(root, "datasets", simulator.DomesticDisturbance),
+		filepath.Join(root, "ontology"),
+		"supervisor-demo",
+		modelEnv{CassetteModeRaw: "fixture"},
+	)
+	if err != nil {
+		t.Fatalf("compose fixture mode: %v", err)
+	}
+	if bundle.CassetteMode != "passthrough" {
+		t.Fatalf("CassetteMode = %q, want passthrough", bundle.CassetteMode)
+	}
+}
+
+func TestComposeModelsRecordWithoutKeyFallsBackToPassthrough(t *testing.T) {
+	ctx := context.Background()
+	root := repositoryRoot(t)
+	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "models-record-nokey.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	// live mode requested but no key → providers fixture → demote record to passthrough
+	bundle, err := composeModels(ctx, database, root,
+		filepath.Join(root, "datasets", simulator.DomesticDisturbance),
+		filepath.Join(root, "ontology"),
+		"supervisor-demo",
+		modelEnv{
+			CassetteModeRaw: "live",
+			Terra:           contracts.ProviderLive,
+			Sol:             contracts.ProviderLive,
+		},
+	)
+	if err != nil {
+		t.Fatalf("compose record without key: %v", err)
+	}
+	if bundle.CassetteMode != "passthrough" {
+		t.Fatalf("CassetteMode = %q, want passthrough demotion", bundle.CassetteMode)
+	}
+	if bundle.ProviderSelection[openaimodel.AgentTerra] != contracts.ProviderFixture {
+		t.Fatalf("terra provider = %s, want fixture", bundle.ProviderSelection[openaimodel.AgentTerra])
+	}
+}
+
+func TestComposeModelsRecordModeWrapsLivePath(t *testing.T) {
+	ctx := context.Background()
+	root := repositoryRoot(t)
+	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "models-record.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	mem := cassette.NewMemoryStore()
+	lunaStub := &countingLunaClient{resp: openaimodel.LunaResponse{
+		ResultJSON: json.RawMessage(`{"schema_version":"1.0.0","luna_result_id":"luna-record","raw_event_id":"raw-x","status":"quarantined","reason":"stub","created_at":"2026-01-01T00:00:00Z"}`),
+		ResponseID: "resp-record-luna",
+	}}
+	terraStub := &countingTerraClient{resp: terra.Response{
+		InsightJSON: json.RawMessage(`{"schema_version":"1.0.0","insight_id":"ins-record"}`),
+		ResponseID:  "resp-record-terra",
+	}}
+	solStub := &countingSolClient{resp: sol.Response{
+		RecommendationJSON: json.RawMessage(`{"schema_version":"1.0.0","recommendation_id":"rec-record"}`),
+		ResponseID:         "resp-record-sol",
+	}}
+
+	bundle, err := composeModels(ctx, database, root,
+		filepath.Join(root, "datasets", simulator.DomesticDisturbance),
+		filepath.Join(root, "ontology"),
+		"supervisor-demo",
+		modelEnv{
+			APIKey:          "test-key",
+			CassetteModeRaw: "record",
+			Luna:            contracts.ProviderLive,
+			Terra:           contracts.ProviderLive,
+			Sol:             contracts.ProviderLive,
+			CassetteStore:   mem,
+			CassetteDir:     t.TempDir(),
+			testLiveLuna:    lunaStub,
+			testLiveTerra:   terraStub,
+			testLiveSol:     solStub,
+		},
+	)
+	if err != nil {
+		t.Fatalf("compose record mode: %v", err)
+	}
+	if bundle.CassetteMode != "record" {
+		t.Fatalf("CassetteMode = %q, want record", bundle.CassetteMode)
+	}
+	if bundle.ProviderSelection[openaimodel.AgentTerra] != contracts.ProviderLive {
+		t.Fatalf("terra provider = %s, want live", bundle.ProviderSelection[openaimodel.AgentTerra])
+	}
+	if bundle.ProviderSelection[openaimodel.AgentLuna] != contracts.ProviderLive {
+		t.Fatalf("luna provider = %s, want live", bundle.ProviderSelection[openaimodel.AgentLuna])
+	}
+
+	// Drive the decorated StructuredClients via applyCassette unit path is
+	// covered separately; here verify wrap helper banks into MemoryStore.
+	construct := contracts.AgentProviderSelection{
+		openaimodel.AgentLuna:  contracts.ProviderLive,
+		openaimodel.AgentTerra: contracts.ProviderLive,
+		openaimodel.AgentSol:   contracts.ProviderLive,
+	}
+	lunaClient, terraClient, solClient, mode, _, err := applyCassette(
+		cassette.ModeRecord,
+		modelEnv{CassetteStore: mem, CassetteDir: t.TempDir()},
+		lunaStub, terraStub, solStub, construct,
+		versionedPrompt{Provenance: "v1.0.0+sha256:luna"},
+		versionedPrompt{Provenance: "v1.0.0+sha256:abc"},
+		versionedPrompt{Provenance: "v1.0.0+sha256:def"},
+	)
+	if err != nil {
+		t.Fatalf("applyCassette: %v", err)
+	}
+	if mode != cassette.ModeRecord {
+		t.Fatalf("mode = %s", mode)
+	}
+	if _, err := lunaClient.Normalize(ctx, openaimodel.LunaRequest{
+		RawEventJSON: json.RawMessage(`{"raw_event_id":"raw-x"}`),
+	}); err != nil {
+		t.Fatalf("record Normalize: %v", err)
+	}
+	if lunaStub.calls.Load() != 1 {
+		t.Fatalf("inner luna calls = %d, want 1", lunaStub.calls.Load())
+	}
+	req := terra.Request{
+		StateRevision: 7,
+		SerializedCOP: json.RawMessage(`{"revision":7}`),
+	}
+	if _, err := terraClient.Assess(ctx, req); err != nil {
+		t.Fatalf("record Assess: %v", err)
+	}
+	if terraStub.calls.Load() != 1 {
+		t.Fatalf("inner terra calls = %d, want 1", terraStub.calls.Load())
+	}
+	if mem.Len() < 2 {
+		t.Fatalf("expected at least two recordings after Luna+Assess, got %d", mem.Len())
+	}
+	_ = solClient
+	_ = bundle
+}
+
+func TestComposeModelsInjectsTestLiveLuna(t *testing.T) {
+	ctx := context.Background()
+	root := repositoryRoot(t)
+	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "models-luna-stub.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	lunaStub := &countingLunaClient{resp: openaimodel.LunaResponse{
+		ResultJSON: json.RawMessage(`{"schema_version":"1.0.0","luna_result_id":"luna-stub-1","raw_event_id":"raw-stub","status":"quarantined","reason":"offline stub","created_at":"2026-01-01T00:00:00Z"}`),
+		ResponseID: "resp-luna-stub",
+	}}
+	bundle, err := composeModels(ctx, database, root,
+		filepath.Join(root, "datasets", simulator.DomesticDisturbance),
+		filepath.Join(root, "ontology"),
+		"supervisor-demo",
+		modelEnv{
+			APIKey:       "test-key",
+			Luna:         contracts.ProviderLive,
+			testLiveLuna: lunaStub,
+			CassetteDir:  t.TempDir(),
+		},
+	)
+	if err != nil {
+		t.Fatalf("compose with testLiveLuna: %v", err)
+	}
+	out, err := bundle.Luna.Normalize(ctx, gen.RawEvent{
+		SchemaVersion: "1.0.0",
+		RawEventID:    "raw-stub",
+		ContentType:   "text/plain",
+		ReceivedAt:    "2026-01-01T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("Normalize via injected Luna: %v", err)
+	}
+	if lunaStub.calls.Load() != 1 {
+		t.Fatalf("luna stub calls = %d, want 1", lunaStub.calls.Load())
+	}
+	if out.Result.Status != "quarantined" {
+		t.Fatalf("result status = %q, want quarantined", out.Result.Status)
+	}
+	if out.ModelRun.ValidationStatus != "valid" {
+		t.Fatalf("model run status = %q, want valid", out.ModelRun.ValidationStatus)
+	}
+}
+
+func TestComposeModelsReplayModeDoesNotCallNetwork(t *testing.T) {
+	ctx := context.Background()
+	root := repositoryRoot(t)
+	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "models-replay.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	mem := cassette.NewMemoryStore()
+	// Pre-seed a Terra recording so Assess succeeds without an inner client.
+	seedReq := terra.Request{
+		StateRevision: 7,
+		SerializedCOP: json.RawMessage(`{"revision":7}`),
+	}
+	key, fp, err := cassette.TerraKey(seedReq, cassette.KeyMeta{})
+	if err != nil {
+		t.Fatalf("terra key: %v", err)
+	}
+	if err := mem.Put(ctx, &cassette.Recording{
+		SchemaVersion:      cassette.SchemaVersion,
+		Key:                key,
+		Agent:              "terra",
+		StateRevision:      7,
+		RequestFingerprint: fp,
+		ResponseID:         "replay-resp",
+		InsightJSON:        json.RawMessage(`{"schema_version":"1.0.0","insight_id":"ins-replay"}`),
+	}); err != nil {
+		t.Fatalf("seed recording: %v", err)
+	}
+
+	// No API key; providers may say live — replay must still compose.
+	bundle, err := composeModels(ctx, database, root,
+		filepath.Join(root, "datasets", simulator.DomesticDisturbance),
+		filepath.Join(root, "ontology"),
+		"supervisor-demo",
+		modelEnv{
+			CassetteModeRaw: "replay",
+			Terra:           contracts.ProviderLive,
+			Sol:             contracts.ProviderLive,
+			CassetteStore:   mem,
+			CassetteDir:     t.TempDir(),
+		},
+	)
+	if err != nil {
+		t.Fatalf("compose replay mode: %v", err)
+	}
+	if bundle.CassetteMode != "replay" {
+		t.Fatalf("CassetteMode = %q, want replay", bundle.CassetteMode)
+	}
+	if bundle.ProviderSelection[openaimodel.AgentTerra] != contracts.ProviderFixture {
+		t.Fatalf("reported terra provider = %s, want fixture under replay", bundle.ProviderSelection[openaimodel.AgentTerra])
+	}
+
+	// Direct ModeReplay path: no inner, pre-seeded store, no network.
+	lunaClient, terraClient, solClient, mode, _, err := applyCassette(
+		cassette.ModeReplay,
+		modelEnv{CassetteStore: mem, CassetteDir: t.TempDir()},
+		nil, nil, nil,
+		contracts.AgentProviderSelection{},
+		versionedPrompt{}, versionedPrompt{}, versionedPrompt{},
+	)
+	_ = lunaClient
+	if err != nil {
+		t.Fatalf("applyCassette replay: %v", err)
+	}
+	if mode != cassette.ModeReplay {
+		t.Fatalf("mode = %s", mode)
+	}
+	resp, err := terraClient.Assess(ctx, seedReq)
+	if err != nil {
+		t.Fatalf("replay Assess: %v", err)
+	}
+	if resp.ResponseID != "replay-resp" {
+		t.Fatalf("response id = %q", resp.ResponseID)
+	}
+	// Miss must not fall through to a network client.
+	_, err = terraClient.Assess(ctx, terra.Request{
+		StateRevision: 99,
+		SerializedCOP: json.RawMessage(`{"revision":99}`),
+	})
+	if err == nil || !errors.Is(err, cassette.ErrReplayMiss) {
+		t.Fatalf("miss error = %v, want ErrReplayMiss", err)
+	}
+	_, err = solClient.Brief(ctx, sol.Request{
+		StateRevision: 1,
+		SerializedCOP: json.RawMessage(`{}`),
+		RequestedBy:   "supervisor-demo",
+	})
+	if err == nil || !errors.Is(err, cassette.ErrReplayMiss) {
+		t.Fatalf("sol miss error = %v, want ErrReplayMiss", err)
+	}
+}
+
+func TestComposeModelsInvalidCassetteMode(t *testing.T) {
+	ctx := context.Background()
+	root := repositoryRoot(t)
+	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "models-bad-mode.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	_, err = composeModels(ctx, database, root,
+		filepath.Join(root, "datasets", simulator.DomesticDisturbance),
+		filepath.Join(root, "ontology"),
+		"supervisor-demo",
+		modelEnv{CassetteModeRaw: "not-a-mode"},
+	)
+	if err == nil || !strings.Contains(err.Error(), "parse cassette mode") {
+		t.Fatalf("error = %v, want parse cassette mode", err)
+	}
+}
+
+// countingLunaClient is a test double for live Luna StructuredClient injection.
+type countingLunaClient struct {
+	calls atomic.Int32
+	resp  openaimodel.LunaResponse
+	err   error
+}
+
+func (c *countingLunaClient) Normalize(_ context.Context, _ openaimodel.LunaRequest) (openaimodel.LunaResponse, error) {
+	c.calls.Add(1)
+	if c.err != nil {
+		return openaimodel.LunaResponse{}, c.err
+	}
+	return openaimodel.LunaResponse{
+		ResultJSON:         append(json.RawMessage(nil), c.resp.ResultJSON...),
+		CanonicalEventJSON: append(json.RawMessage(nil), c.resp.CanonicalEventJSON...),
+		ResponseID:         c.resp.ResponseID,
+		RefusalDetail:      c.resp.RefusalDetail,
+	}, nil
+}
+
+// countingTerraClient is a test double for live Terra StructuredClient injection.
+type countingTerraClient struct {
+	calls atomic.Int32
+	resp  terra.Response
+	err   error
+}
+
+func (c *countingTerraClient) Assess(_ context.Context, _ terra.Request) (terra.Response, error) {
+	c.calls.Add(1)
+	if c.err != nil {
+		return terra.Response{}, c.err
+	}
+	return terra.Response{
+		InsightJSON:   append(json.RawMessage(nil), c.resp.InsightJSON...),
+		ResponseID:    c.resp.ResponseID,
+		RefusalDetail: c.resp.RefusalDetail,
+	}, nil
+}
+
+// countingSolClient is a test double for live Sol StructuredClient injection.
+type countingSolClient struct {
+	calls atomic.Int32
+	resp  sol.Response
+	err   error
+}
+
+func (c *countingSolClient) Brief(_ context.Context, _ sol.Request) (sol.Response, error) {
+	c.calls.Add(1)
+	if c.err != nil {
+		return sol.Response{}, c.err
+	}
+	return sol.Response{
+		RecommendationJSON: append(json.RawMessage(nil), c.resp.RecommendationJSON...),
+		ResponseID:         c.resp.ResponseID,
+		RefusalDetail:      c.resp.RefusalDetail,
+	}, nil
+}
+
+func TestComposeModelsLiveTerraRequiresVersionedPrompt(t *testing.T) {
+	ctx := context.Background()
+	root := repositoryRoot(t)
+	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "models-live-missing-prompt.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	_, err = composeModels(ctx, database, t.TempDir(),
+		filepath.Join(root, "datasets", simulator.DomesticDisturbance),
+		filepath.Join(root, "ontology"),
+		"supervisor-demo",
+		modelEnv{APIKey: "test-key", Terra: contracts.ProviderLive},
+	)
+	if err == nil || !strings.Contains(err.Error(), "load live Terra prompt") {
+		t.Fatalf("compose live Terra without prompt error = %v", err)
+	}
+}
+
+func TestComposeModelsLiveLunaRequiresVersionedPrompt(t *testing.T) {
+	ctx := context.Background()
+	root := repositoryRoot(t)
+	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "models-live-luna-missing-prompt.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	_, err = composeModels(ctx, database, t.TempDir(),
+		filepath.Join(root, "datasets", simulator.DomesticDisturbance),
+		filepath.Join(root, "ontology"),
+		"supervisor-demo",
+		modelEnv{APIKey: "test-key", Luna: contracts.ProviderLive},
+	)
+	if err == nil || !strings.Contains(err.Error(), "load live Luna prompt") {
+		t.Fatalf("compose live Luna without prompt error = %v", err)
+	}
+}
 func TestComposeModelsLiveSelectionWithKey(t *testing.T) {
 	ctx := context.Background()
 	root := repositoryRoot(t)
@@ -110,6 +1005,7 @@ func TestComposeModelsLiveSelectionWithKey(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = database.Close() })
 
+	// Without MOSAIC_SIM_MODE, live providers still compose; cassette stays passthrough.
 	bundle, err := composeModels(ctx, database, root,
 		filepath.Join(root, "datasets", simulator.DomesticDisturbance),
 		filepath.Join(root, "ontology"),
@@ -128,6 +1024,9 @@ func TestComposeModelsLiveSelectionWithKey(t *testing.T) {
 		if bundle.ProviderSelection[agent] != contracts.ProviderLive {
 			t.Fatalf("provider %s = %s, want live", agent, bundle.ProviderSelection[agent])
 		}
+	}
+	if bundle.CassetteMode != "passthrough" {
+		t.Fatalf("CassetteMode = %q, want passthrough when sim mode unset", bundle.CassetteMode)
 	}
 }
 

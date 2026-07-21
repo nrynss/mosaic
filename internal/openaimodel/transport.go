@@ -41,10 +41,17 @@ func APIKeyFromEnv() string {
 // Endpoint is overridable for tests; the default is DefaultEndpoint.
 // HTTPClient is optional; when nil a client that refuses redirects is used.
 type Config struct {
-	APIKey     string
-	Endpoint   string
-	Model      string
-	HTTPClient *http.Client
+	APIKey   string
+	Endpoint string
+	Model    string
+	// SchemaDir contains the authored ontology JSON Schemas. It is supplied by
+	// composition from the configured asset root; live clients do not carry a
+	// divergent in-code schema copy.
+	SchemaDir string
+	// Instructions is the versioned prompt content supplied by composition.
+	// Every live agent requires its own versioned prompt artifact.
+	Instructions string
+	HTTPClient   *http.Client
 }
 
 type transport struct {
@@ -98,6 +105,7 @@ func normalizeEndpoint(endpoint string) (string, error) {
 type structuredCall struct {
 	Instructions string
 	SchemaName   string
+	Schema       json.RawMessage
 	UserInput    string
 }
 
@@ -127,11 +135,8 @@ func (t *transport) call(ctx context.Context, call structuredCall) (structuredRe
 			Format: textFormat{
 				Type:   "json_schema",
 				Name:   call.SchemaName,
-				Strict: false,
-				Schema: map[string]any{
-					"type":                 "object",
-					"additionalProperties": true,
-				},
+				Strict: true,
+				Schema: call.Schema,
 			},
 		},
 	}
@@ -158,6 +163,15 @@ func (t *transport) call(ctx context.Context, call structuredCall) (structuredRe
 		return structuredResult{}, fmt.Errorf("openai rate limited (retry-after %q); not retrying", response.Header.Get("Retry-After"))
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		// Surface a sanitized upstream error body so schema/auth failures are
+		// diagnosable. Never log the request, prompt, or API key.
+		errBody, _ := io.ReadAll(io.LimitReader(response.Body, 2048))
+		detail := sanitizedErrorMessage(extractOpenAIErrorMessage(errBody))
+		if detail != "" && detail != "unknown error" {
+			fmt.Fprintf(os.Stderr, "openai request failed: HTTP %d model=%s schema=%s detail=%s\n",
+				response.StatusCode, t.model, call.SchemaName, detail)
+			return structuredResult{}, fmt.Errorf("openai request failed with HTTP %d: %s", response.StatusCode, detail)
+		}
 		return structuredResult{}, fmt.Errorf("openai request failed with HTTP %d", response.StatusCode)
 	}
 
@@ -238,10 +252,10 @@ type textConfig struct {
 }
 
 type textFormat struct {
-	Type   string         `json:"type"`
-	Name   string         `json:"name,omitempty"`
-	Strict bool           `json:"strict,omitempty"`
-	Schema map[string]any `json:"schema,omitempty"`
+	Type   string          `json:"type"`
+	Name   string          `json:"name,omitempty"`
+	Strict bool            `json:"strict,omitempty"`
+	Schema json.RawMessage `json:"schema,omitempty"`
 }
 
 type responsesAPIResponse struct {
@@ -312,7 +326,38 @@ func sanitizedErrorMessage(message string) string {
 	if strings.Contains(strings.ToLower(message), keyPrefix) {
 		return "request rejected"
 	}
+	// Bound length so a noisy HTML/Cloudflare page cannot flood logs.
+	const maxDetail = 512
+	if len(message) > maxDetail {
+		message = message[:maxDetail] + "…"
+	}
 	return message
+}
+
+// extractOpenAIErrorMessage pulls the human-readable message from a Responses
+// API error JSON body, falling back to a trimmed raw snippet.
+func extractOpenAIErrorMessage(body []byte) string {
+	body = bytes.TrimSpace(body)
+	if len(body) == 0 {
+		return ""
+	}
+	var envelope struct {
+		Error *struct {
+			Message string `json:"message"`
+			Type    string `json:"type"`
+			Code    string `json:"code"`
+		} `json:"error"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(body, &envelope); err == nil {
+		if envelope.Error != nil && strings.TrimSpace(envelope.Error.Message) != "" {
+			return envelope.Error.Message
+		}
+		if strings.TrimSpace(envelope.Message) != "" {
+			return envelope.Message
+		}
+	}
+	return string(body)
 }
 
 func marshalInput(label string, value any) (string, error) {

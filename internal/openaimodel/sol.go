@@ -4,24 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"mosaic.local/mosaic/internal/ontology/gen"
 	"mosaic.local/mosaic/internal/sol"
 )
 
-const solInstructions = `You are Sol, Mosaic's structured briefing agent.
-Given a committed COP serialization, its state revision, active Insights,
-permitted evidence, and the fixed requester identity, return one Recommendation
-JSON object (schema_version 1.0.0). You inform operators only on explicit request;
-you never issue operational actions or mutate the projection. Respond with a
-single Recommendation JSON object only.`
-
 // SolClient implements sol.StructuredClient over the OpenAI Responses API.
 type SolClient struct {
-	transport *transport
+	transport    *transport
+	instructions string
+	schema       structuredOutputSchema
 }
 
-// NewSolClient constructs a live Sol client. APIKey is required.
+// NewSolClient constructs a live Sol client. APIKey and versioned prompt
+// content are required; composition loads the prompt from the asset root.
 func NewSolClient(cfg Config) (*SolClient, error) {
 	if cfg.Model == "" {
 		cfg.Model = DefaultSolModel
@@ -30,7 +27,15 @@ func NewSolClient(cfg Config) (*SolClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &SolClient{transport: t}, nil
+	instructions := strings.TrimSpace(cfg.Instructions)
+	if instructions == "" {
+		return nil, fmt.Errorf("sol instructions are required")
+	}
+	schema, err := loadStructuredOutputSchema(cfg.SchemaDir, recommendationSchemaRoute)
+	if err != nil {
+		return nil, fmt.Errorf("load Sol output schema: %w", err)
+	}
+	return &SolClient{transport: t, instructions: instructions, schema: schema}, nil
 }
 
 // Brief performs one Responses API call and maps structured Recommendation JSON or refusal.
@@ -43,16 +48,20 @@ func (c *SolClient) Brief(ctx context.Context, request sol.Request) (sol.Respons
 		StateRevision: request.StateRevision,
 		SerializedCOP: rawOrNull(request.SerializedCOP),
 		Insights:      request.Insights,
-		Evidence:      request.Evidence,
-		RequestedBy:   request.RequestedBy,
+		// Wire evidence_ref items only — full Evidence identity fields are not
+		// part of recommendation.schema.json and cause live-model invalid runs
+		// when echoed back into Recommendation.evidence.
+		Evidence:    evidenceToWireRefs(request.Evidence),
+		RequestedBy: request.RequestedBy,
 	})
 	if err != nil {
 		return sol.Response{}, err
 	}
 
 	result, err := c.transport.call(ctx, structuredCall{
-		Instructions: solInstructions,
-		SchemaName:   "recommendation",
+		Instructions: c.instructions,
+		SchemaName:   c.schema.name,
+		Schema:       c.schema.document,
 		UserInput:    input,
 	})
 	if err != nil {
@@ -61,18 +70,26 @@ func (c *SolClient) Brief(ctx context.Context, request sol.Request) (sol.Respons
 	if result.Refusal != "" {
 		return sol.Response{ResponseID: result.ResponseID, RefusalDetail: result.Refusal}, nil
 	}
+	recommendationJSON, err := withoutNullObjectProperties(result.JSON)
+	if err != nil {
+		return sol.Response{}, err
+	}
+	recommendationJSON, err = normalizeArtifactEvidenceRefs(recommendationJSON)
+	if err != nil {
+		return sol.Response{}, err
+	}
 	return sol.Response{
-		RecommendationJSON: result.JSON,
+		RecommendationJSON: recommendationJSON,
 		ResponseID:         result.ResponseID,
 	}, nil
 }
 
 type solWireInput struct {
-	StateRevision int64          `json:"state_revision"`
-	SerializedCOP any            `json:"serialized_cop"`
-	Insights      []gen.Insight  `json:"insights"`
-	Evidence      []gen.Evidence `json:"evidence"`
-	RequestedBy   string         `json:"requested_by"`
+	StateRevision int64             `json:"state_revision"`
+	SerializedCOP any               `json:"serialized_cop"`
+	Insights      []gen.Insight     `json:"insights"`
+	Evidence      []evidenceRefWire `json:"evidence"`
+	RequestedBy   string            `json:"requested_by"`
 }
 
 func rawOrNull(raw json.RawMessage) any {

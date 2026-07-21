@@ -11,7 +11,6 @@ import (
 	"mosaic.local/mosaic/internal/contracts"
 	"mosaic.local/mosaic/internal/ontology/gen"
 	"mosaic.local/mosaic/internal/sol"
-	"mosaic.local/mosaic/internal/store"
 	"mosaic.local/mosaic/internal/terra"
 )
 
@@ -38,15 +37,26 @@ var (
 	ErrAdvisoryTimeline = errors.New("fixture advisory timeline is incomplete")
 )
 
+// SessionAdvisoryRecorder indexes durable advisory artifact ids against a
+// simulation session epoch. Implemented by api.SessionAdvisoryView; defined
+// here so the reference simulator does not import the API package.
+type SessionAdvisoryRecorder interface {
+	Record(sessionID, kind, recordID string)
+}
+
 // AdvisoryReplayConfig wires the fixture-only Terra/Sol composition used by
 // the local demo. Optional client overrides exist only for focused tests of
 // refusal and invalid-response paths.
 type AdvisoryReplayConfig struct {
-	Store       *store.Store
+	Store       DomainStore
 	SchemaDir   string
 	FixtureDir  string
 	TerraClient terra.StructuredClient
 	SolClient   sol.StructuredClient
+	// RecoverCOP optionally rebuilds the current projected COP when the
+	// progressive path loses its in-memory timeline (process restart). Used
+	// only for stages that durable classification still marks absent.
+	RecoverCOP func(ctx context.Context) (contracts.ProjectionResult, error)
 }
 
 // AdvisoryReplayResult reports which fixture advisory stages executed.
@@ -61,13 +71,14 @@ type AdvisoryReplayResult struct {
 // already-projected scenario timeline. It is not a projector and cannot issue
 // an operational action or open a network/model transport.
 type AdvisoryReplay struct {
-	store       *store.Store
+	store       DomainStore
 	records     *advisoryRecords
 	fixture     *Fixture
 	schemaDir   string
 	terraClient terra.StructuredClient
 	solClient   sol.StructuredClient
 	resolver    *durableEvidenceResolver
+	recoverCOP  func(ctx context.Context) (contracts.ProjectionResult, error)
 }
 
 // NewAdvisoryReplay loads the P04 fixture and prepares the fixture-only
@@ -92,6 +103,7 @@ func NewAdvisoryReplay(config AdvisoryReplayConfig) (*AdvisoryReplay, error) {
 		terraClient: config.TerraClient,
 		solClient:   config.SolClient,
 		resolver:    &durableEvidenceResolver{store: config.Store},
+		recoverCOP:  config.RecoverCOP,
 	}, nil
 }
 
@@ -102,19 +114,136 @@ func (r *AdvisoryReplay) Replay(ctx context.Context, timeline []TimelineEntry) (
 	if r == nil || r.store == nil || r.fixture == nil {
 		return AdvisoryReplayResult{}, errors.New("advisory replay is not configured")
 	}
+	cop7, err := copAtRevision(timeline, 7)
+	if err != nil {
+		return AdvisoryReplayResult{}, err
+	}
+	cop9, err := copAtRevision(timeline, 9)
+	if err != nil {
+		return AdvisoryReplayResult{}, err
+	}
+	return r.replayWithCOPs(ctx, cop7, cop9, true)
+}
+
+// ContinueProgressive runs only the advisory stages whose COP revision is
+// available in timeline. Stages that depend on rev 7 run once the timeline has
+// a rev-7 snapshot; rev-9 stages wait until rev 9 is present. Durable stage
+// classification keeps restarts idempotent (intact stages are skipped).
+//
+// Restart safety: when the in-memory timeline is empty/lost but durable
+// stages are already intact, this is a no-op (no COP required). When stages
+// are still absent and the timeline lacks the needed revision, RecoverCOP
+// (when configured) supplies the current projected COP for any revision the
+// store has already reached so remaining stages can land idempotently.
+//
+// Used by the interactive progressive path so Terra@rev7 + Sol@rev7 land when
+// the COP first reaches revision 7, and Terra obsolete@rev9 when it reaches 9 —
+// not only after bulk Run.
+func (r *AdvisoryReplay) ContinueProgressive(ctx context.Context, timeline []TimelineEntry) (AdvisoryReplayResult, error) {
+	if r == nil || r.store == nil || r.fixture == nil {
+		return AdvisoryReplayResult{}, errors.New("advisory replay is not configured")
+	}
+
+	// Classify first so intact stages do not require an in-memory timeline.
+	history, err := r.store.ReadAdvisoryHistory(ctx)
+	if err != nil {
+		return AdvisoryReplayResult{}, fmt.Errorf("read advisory history: %w", err)
+	}
+	statuses, err := r.classifyStages(history)
+	if err != nil {
+		return AdvisoryReplayResult{}, err
+	}
+	if err := validateStagePrefix(statuses); err != nil {
+		return AdvisoryReplayResult{}, err
+	}
+	stageNames := []string{
+		"terra_active_rev7",
+		"briefing_requested",
+		"sol_recommendation_rev7",
+		"terra_obsolete_rev9",
+		"recommendation_acknowledged",
+	}
+	if allIntact(statuses) {
+		result := AdvisoryReplayResult{
+			ScenarioID:    r.fixture.ScenarioID,
+			StagesRun:     nil,
+			StagesSkipped: append([]string(nil), stageNames...),
+			IntactRestart: true,
+		}
+		return result, nil
+	}
+
+	var cop7, cop9 map[string]any
+	if c, err := copAtRevision(timeline, 7); err == nil {
+		cop7 = c
+	}
+	if c, err := copAtRevision(timeline, 9); err == nil {
+		cop9 = c
+	}
+
+	needRev7 := statuses[0] == stageAbsent || statuses[1] == stageAbsent || statuses[2] == stageAbsent
+	needRev9 := statuses[3] == stageAbsent || statuses[4] == stageAbsent
+	if r.recoverCOP != nil && ((needRev7 && cop7 == nil) || (needRev9 && cop9 == nil)) {
+		projected, recoverErr := r.recoverCOP(ctx)
+		if recoverErr != nil {
+			return AdvisoryReplayResult{}, fmt.Errorf("recover COP for progressive advisory: %w", recoverErr)
+		}
+		// Fixture clients ignore COP body content; current recovery is enough
+		// to land remaining stages once the store has reached the revision.
+		if needRev7 && cop7 == nil && projected.StateRevision >= 7 {
+			cop7 = cloneCOP(projected.COP)
+		}
+		if needRev9 && cop9 == nil && projected.StateRevision >= 9 {
+			cop9 = cloneCOP(projected.COP)
+		}
+	}
+
+	if cop7 == nil && cop9 == nil {
+		return AdvisoryReplayResult{ScenarioID: r.fixture.ScenarioID}, nil
+	}
+	requireBoth := cop7 != nil && cop9 != nil
+	return r.replayWithCOPs(ctx, cop7, cop9, requireBoth)
+}
+
+// RecordSessionStages indexes artifact ids for stages that just ran against
+// the active simulation session. kind values match SessionAdvisoryView.Record.
+func (r *AdvisoryReplay) RecordSessionStages(recorder SessionAdvisoryRecorder, sessionID string, stages []string) {
+	if r == nil || r.fixture == nil || recorder == nil || strings.TrimSpace(sessionID) == "" {
+		return
+	}
+	activeID := r.fixture.Expectation.TerraObsolescence.ActiveInsightID
+	obsoleteID := r.fixture.Expectation.TerraObsolescence.ObsoleteInsightID
+	recommendationID := r.fixture.Expectation.SolRequest.RecommendationID
+	briefingID := r.fixture.Expectation.SolRequest.AuditRecordID
+	ackID := r.fixture.Expectation.SupervisorAction.AuditRecordID
+
+	for _, stage := range stages {
+		switch stage {
+		case "terra_active_rev7":
+			recorder.Record(sessionID, "insight", activeID)
+			recorder.Record(sessionID, "model_run", fixtureTerraActiveRunID)
+		case "briefing_requested":
+			recorder.Record(sessionID, "audit_record", briefingID)
+		case "sol_recommendation_rev7":
+			recorder.Record(sessionID, "recommendation", recommendationID)
+			recorder.Record(sessionID, "model_run", fixtureSolRunID)
+		case "terra_obsolete_rev9":
+			recorder.Record(sessionID, "insight", obsoleteID)
+			recorder.Record(sessionID, "model_run", fixtureTerraObsoleteRunID)
+		case "recommendation_acknowledged":
+			recorder.Record(sessionID, "audit_record", ackID)
+		}
+	}
+}
+
+// replayWithCOPs is the shared stage runner. When requireBoth is true (bulk
+// Replay), missing COPs are already rejected by the caller. When false
+// (progressive), only stages whose COP is available are attempted.
+func (r *AdvisoryReplay) replayWithCOPs(ctx context.Context, cop7, cop9 map[string]any, requireBoth bool) (AdvisoryReplayResult, error) {
 	result := AdvisoryReplayResult{
 		ScenarioID:    r.fixture.ScenarioID,
 		StagesRun:     make([]string, 0, 5),
 		StagesSkipped: make([]string, 0, 5),
-	}
-
-	cop7, err := copAtRevision(timeline, 7)
-	if err != nil {
-		return result, err
-	}
-	cop9, err := copAtRevision(timeline, 9)
-	if err != nil {
-		return result, err
 	}
 
 	history, err := r.store.ReadAdvisoryHistory(ctx)
@@ -151,35 +280,46 @@ func (r *AdvisoryReplay) Replay(ctx context.Context, timeline []TimelineEntry) (
 		return result, nil
 	}
 
-	if statuses[0] == stageAbsent {
-		if err := r.runTerraActive(ctx, cop7, active); err != nil {
-			return result, err
+	// Rev-7 stages require a rev-7 COP (progressive may not have it yet).
+	if cop7 != nil {
+		if statuses[0] == stageAbsent {
+			if err := r.runTerraActive(ctx, cop7, active); err != nil {
+				return result, err
+			}
+			result.StagesRun = append(result.StagesRun, stageNames[0])
 		}
-		result.StagesRun = append(result.StagesRun, stageNames[0])
+		if statuses[1] == stageAbsent {
+			if err := r.appendAudit(ctx, briefingAudit); err != nil {
+				return result, err
+			}
+			result.StagesRun = append(result.StagesRun, stageNames[1])
+		}
+		if statuses[2] == stageAbsent {
+			if err := r.runSolRecommendation(ctx, cop7, active, recommendation); err != nil {
+				return result, err
+			}
+			result.StagesRun = append(result.StagesRun, stageNames[2])
+		}
+	} else if requireBoth {
+		return result, fmt.Errorf("%w: missing COP snapshot for revision 7", ErrAdvisoryTimeline)
 	}
-	if statuses[1] == stageAbsent {
-		if err := r.appendAudit(ctx, briefingAudit); err != nil {
-			return result, err
+
+	// Rev-9 stages require a rev-9 COP.
+	if cop9 != nil {
+		if statuses[3] == stageAbsent {
+			if err := r.runTerraObsolete(ctx, cop9, active, obsolete); err != nil {
+				return result, err
+			}
+			result.StagesRun = append(result.StagesRun, stageNames[3])
 		}
-		result.StagesRun = append(result.StagesRun, stageNames[1])
-	}
-	if statuses[2] == stageAbsent {
-		if err := r.runSolRecommendation(ctx, cop7, active, recommendation); err != nil {
-			return result, err
+		if statuses[4] == stageAbsent {
+			if err := r.appendAudit(ctx, ackAudit); err != nil {
+				return result, err
+			}
+			result.StagesRun = append(result.StagesRun, stageNames[4])
 		}
-		result.StagesRun = append(result.StagesRun, stageNames[2])
-	}
-	if statuses[3] == stageAbsent {
-		if err := r.runTerraObsolete(ctx, cop9, active, obsolete); err != nil {
-			return result, err
-		}
-		result.StagesRun = append(result.StagesRun, stageNames[3])
-	}
-	if statuses[4] == stageAbsent {
-		if err := r.appendAudit(ctx, ackAudit); err != nil {
-			return result, err
-		}
-		result.StagesRun = append(result.StagesRun, stageNames[4])
+	} else if requireBoth {
+		return result, fmt.Errorf("%w: missing COP snapshot for revision 9", ErrAdvisoryTimeline)
 	}
 	return result, nil
 }
@@ -466,7 +606,7 @@ func pairTransactionDecision(run gen.ModelRun, serviceErr error) error {
 // Focused tests can inject Insight/Recommendation write failures to prove
 // transactional rollback of the paired Model Run.
 type advisoryRecords struct {
-	store              *store.Store
+	store              contracts.ImmutableRecordRepository
 	failInsight        error
 	failRecommendation error
 }
@@ -542,11 +682,11 @@ func (c fixtureSolClient) Brief(_ context.Context, _ sol.Request) (sol.Response,
 }
 
 // durableEvidenceResolver confirms only that cited artifacts already exist in
-// the append-only store. It uses store methods so evidence reads join an open
-// Store.WithinTransaction and never take a second SQLite connection.
+// the append-only store. It uses repository methods so evidence reads join an
+// open WithinTransaction and never take a second connection.
 // It never reads raw payloads into the model path.
 type durableEvidenceResolver struct {
-	store *store.Store
+	store DomainStore
 }
 
 func (r *durableEvidenceResolver) ResolveEvidence(ctx context.Context, _ int64, evidence []gen.Evidence) error {
@@ -574,7 +714,7 @@ func (r *durableEvidenceResolver) requireArtifact(ctx context.Context, kind, id 
 	switch kind {
 	case "raw_event":
 		if _, err := r.store.FindRawEvent(ctx, id); err != nil {
-			if errors.Is(err, store.ErrNotFound) {
+			if isRecordNotFound(err) {
 				return fmt.Errorf("evidence %s/%s is not durable", kind, id)
 			}
 			return fmt.Errorf("resolve evidence %s/%s: %w", kind, id, err)
@@ -613,6 +753,15 @@ func (r *durableEvidenceResolver) requireArtifact(ctx context.Context, kind, id 
 	default:
 		return fmt.Errorf("unsupported evidence kind %q", kind)
 	}
+}
+
+// isRecordNotFound matches either SQLite or Postgres not-found sentinels
+// without importing both backend packages into the simulator.
+func isRecordNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "not found")
 }
 
 func copAtRevision(timeline []TimelineEntry, revision int64) (map[string]any, error) {

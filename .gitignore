@@ -7,3 +7,24 @@ dist/
 node_modules/
 .env
 .worktrees/
+
+# Local cassette recordings (banked live runs; do not commit secrets)
+/recordings/
+
+# Playwright (repo root and ui/)
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
+ui/test-results/
+ui/playwright-report/
+ui/blob-report/
+ui/playwright/.cache/
+ui/.e2e-bin/
+# Archived demo recordings — kept on local disk, too large for git (publish via YouTube).
+ui/recordings/
+# Locked public YouTube cut (local only; large binary; do not commit)
+ui/recordings/mosaic-demo-youtube.mp4
+mosaicdemo
+mosaicdemo.exe

@@ -10,7 +10,10 @@ All v0.3 parcels (P35–P47) have been merged and integrated into `main`. The im
 2. **Operator API & Key Safety**: Supports generative Analyze (Terra) and briefing (Sol) operator reviews under `executed: false` safety. Key is server-only.
 3. **Department Handoffs**: Captures noted intent to recipient mailboxes (Dispatch/Maintenance) as `executed: false` and `delivered: false` audits without external side effects.
 4. **Interactive UI Workspace**: Refactored to feature tabs for the incident timeline command panel, live elapsed counters, recurrence alerts, and detailed audit trails.
-5. **Local / Docker Persistence**: Model runs and operator audits persist in SQLite and are recovered upon process restarts **when the database file is on durable storage** (local `mosaic.db`, or the Compose named volume at `/var/lib/mosaic`). This does **not** apply to the live Cloud Run deployment, which uses ephemeral `/tmp` storage.
+5. **Local / Docker / Cloud Run Persistence**: v0.4 Compose and Cloud Run use
+   **Postgres**. Local and hosted demos share **Supabase** (`openai-devdays`)
+   when `MOSAIC_DB_PATH` is the session-pooler DSN. SQLite remains available for
+   zero-infra unit/e2e tests only.
 
 ### Verification Status & Quality Gate
 
@@ -31,23 +34,24 @@ The detailed parcel breakdowns and logs for completed increments are preserved i
 
 ---
 
-## Cloud Run Deployment (ephemeral hackathon demo)
+## Cloud Run + Supabase (durable demo)
 
-The live service is **up now** under single-instance constraints. It is an
-**ephemeral** demo deploy, not a durable production posture.
+The live service is **up now** on the chosen durable topology: **Cloud Run +
+Supabase Postgres** (project `openai-devdays`). Local Docker Compose uses the
+**same** Supabase database via root `.env` `MOSAIC_DB_PATH`.
 
 * **Public URL**: **[https://mosaic.nryn.dev](https://mosaic.nryn.dev)** (Cloudflare → Cloud Run)
 * **Cloud Run URL**: [https://mosaic-demo-358513274447.us-central1.run.app](https://mosaic-demo-358513274447.us-central1.run.app)
-* **Live now**: single Cloud Run service, `--max-instances=1`, fixture-safe.
-* **Ephemeral storage**: deployed with `MOSAIC_DB_PATH=/tmp/mosaic.db`. Audit
-  records, model runs, and simulation history are **lost after a Cloud Run
-  container restart or scale-to-zero**. The fixture reseeds on boot; prior
-  operator session state does not.
-* **Not deployed**: Litestream, GCS WAL replication, Cloud SQL, or any
-  single-writer durable backup path. Those remain a **future durable
-  deployment parcel**. The design notes live in:
-  **[Cloud Run Deployment Analysis Runbook](docs/runbook/cloud-run-deployment-analysis.md)**
-  (proposed durable design, not current reality).
+* **Live now**: single Cloud Run service, `--max-instances=1`, `--concurrency=8`.
+* **Durable store**: `MOSAIC_DB_PATH` from Secret Manager secret `mosaic-db-dsn`
+  (Supabase **session** pooler, port 5432). App migrations run on boot.
+* **Local parity**: set the same pooler DSN in gitignored `.env`; Compose
+  interpolates it so local and Cloud Run share one board/history.
+* **Still process-local**: SSE/sim streams keep `--max-instances=1`. Cassette
+  banks under `/tmp` remain ephemeral.
+* **Runbook**:
+  **[Cloud Run Deployment Analysis](docs/runbook/cloud-run-deployment-analysis.md)**
+  §6 (session pooler + secret wiring).
 
 ---
 
@@ -104,10 +108,8 @@ its own package with three modes — **Live / Replay (recorded, no API) / Fixtur
 ## Next Steps
 
 > [!NOTE]
-> **Hackathon Scope Complete**: Functional code for the hackathon demo is done.
-> Litestream / GCS WAL replication, Cloud SQL migration, and budget caps are
-> **future durable-deployment parcels**, not hackathon milestones. The live
-> Cloud Run service remains intentionally ephemeral.
+> **Durable demo path is live**: Cloud Run + Supabase (session pooler) with
+> shared local Compose DSN. Budget alerts on GCP still recommended.
 
 The actual project next steps are:
 * **End-to-End Run with Paid API Key**: Execute a full live model test run (with active credits) to verify generative Terra, Sol, and Luna responses and outputs.
@@ -115,4 +117,3 @@ The actual project next steps are:
 * **Demo Preparation**: Walkthrough + end VO are in [`docs/demo-script.md`](docs/demo-script.md); **YouTube &lt;3 min plan** (what we show, Codex + GPT-5.6 VO, beat map) is in [`docs/demo-video.md`](docs/demo-video.md). Record when UI is stable (manual or planned Playwright tool above).
 * **Playwright demo-recorder** (planned): Beat/SSE-aware automated capture — see section above; build only after UI freeze.
 * **Project Details Page**: Author and publish a dedicated project description page on the **nryn.dev** site detailing the architecture, constraints, and results.
-* **(Future) Durable Cloud Run parcel**: Litestream restore+replicate to GCS, or Cloud SQL, with Secret Manager for the API key and budget alerts — see the runbook.

@@ -1,7 +1,8 @@
-package simsession
+package session
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -50,13 +51,13 @@ func newTestController(t *testing.T, beats []contracts.ScheduledBeat, opts ...fu
 	return ctrl
 }
 
-func collectUntil(t *testing.T, sub *Subscription, n int, timeout time.Duration) []contracts.SimulationStreamEvent {
+func collectUntil(t *testing.T, sub contracts.SimulationStreamSubscription, n int, timeout time.Duration) []contracts.SimulationStreamEvent {
 	t.Helper()
 	out := make([]contracts.SimulationStreamEvent, 0, n)
 	deadline := time.After(timeout)
 	for len(out) < n {
 		select {
-		case ev, ok := <-sub.Events:
+		case ev, ok := <-sub.Events():
 			if !ok {
 				t.Fatalf("subscription closed after %d events, want %d", len(out), n)
 			}
@@ -222,7 +223,7 @@ func TestEndTransitionsToEndedAndStopsFurtherBeats(t *testing.T) {
 	deadline := time.After(200 * time.Millisecond)
 	for {
 		select {
-		case ev := <-sub.Events:
+		case ev := <-sub.Events():
 			if ev.Type == contracts.StreamEventBeat {
 				t.Fatalf("received beat after End: %#v", ev)
 			}
@@ -235,7 +236,7 @@ done:
 	// Advancing the clock must not deliver the late beat.
 	clock.Advance(10 * time.Second)
 	select {
-	case ev := <-sub.Events:
+	case ev := <-sub.Events():
 		if ev.Type == contracts.StreamEventBeat {
 			t.Fatalf("late beat emitted after End: %#v", ev)
 		}
@@ -353,7 +354,7 @@ func TestDeterministicTimingWithVirtualClock(t *testing.T) {
 	}
 
 	select {
-	case ev := <-sub.Events:
+	case ev := <-sub.Events():
 		t.Fatalf("unexpected event before Advance: %#v", ev)
 	case <-time.After(30 * time.Millisecond):
 	}
@@ -368,6 +369,62 @@ func TestDeterministicTimingWithVirtualClock(t *testing.T) {
 	}
 	if rest[1].Type != contracts.StreamEventStatusChange {
 		t.Fatalf("final event = %v, want status_change", rest[1].Type)
+	}
+	waitStatus(t, ctrl, contracts.SessionEnded, time.Second)
+}
+
+func TestEqualSpacingIgnoresFixtureDelay(t *testing.T) {
+	// BeatSpacing > 0: fire at i*spacing; fixture Delays (all 100ms) ignored.
+	clock := NewVirtualClock(time.Date(2026, 7, 20, 16, 0, 0, 0, time.UTC))
+	spacing := 2 * time.Second
+	beats := []contracts.ScheduledBeat{
+		{BeatID: "a", Order: 1, RawEventID: "r1", Delay: 100 * time.Millisecond},
+		{BeatID: "b", Order: 2, RawEventID: "r2", Delay: 100 * time.Millisecond},
+		{BeatID: "c", Order: 3, RawEventID: "r3", Delay: 100 * time.Millisecond},
+	}
+	ctrl := newTestController(t, beats, func(cfg *Config) {
+		cfg.Clock = clock.Now
+		cfg.After = clock.After
+		cfg.BeatSpacing = spacing
+		cfg.NewSessionID = func() string { return "spaced-session" }
+	})
+	sub := ctrl.Subscribe()
+	defer sub.Cancel()
+
+	if _, err := ctrl.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// clear, status, first beat (index 0 → delay 0)
+	events := collectUntil(t, sub, 3, time.Second)
+	if events[2].Payload.(map[string]any)["beat_id"] != "a" {
+		t.Fatalf("first beat = %#v", events[2].Payload)
+	}
+
+	// Relative-to-start fixture delays would fire b and c at ~100ms; equal
+	// spacing must still be waiting for 2s.
+	select {
+	case ev := <-sub.Events():
+		t.Fatalf("unexpected event before Advance (flood?): %#v", ev)
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	clock.Advance(spacing)
+	second := collectUntil(t, sub, 1, time.Second)
+	if second[0].Payload.(map[string]any)["beat_id"] != "b" {
+		t.Fatalf("second beat = %#v", second[0].Payload)
+	}
+
+	select {
+	case ev := <-sub.Events():
+		t.Fatalf("unexpected third beat before second Advance: %#v", ev)
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	clock.Advance(spacing)
+	rest := collectUntil(t, sub, 2, time.Second) // beat c + ended
+	if rest[0].Payload.(map[string]any)["beat_id"] != "c" {
+		t.Fatalf("third beat = %#v", rest[0].Payload)
 	}
 	waitStatus(t, ctrl, contracts.SessionEnded, time.Second)
 }
@@ -431,7 +488,7 @@ func TestConcurrentSubscribeReceivesActiveSessionOnly(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
-	collect := func(sub *Subscription) []contracts.SimulationStreamEvent {
+	collect := func(sub contracts.SimulationStreamSubscription) []contracts.SimulationStreamEvent {
 		defer wg.Done()
 		return collectUntil(t, sub, 6, time.Second)
 	}
@@ -499,7 +556,7 @@ func TestSlowSubscriberDoesNotBlockController(t *testing.T) {
 drain:
 	for {
 		select {
-		case <-sub.Events:
+		case <-sub.Events():
 			drained++
 		default:
 			break drain
@@ -521,6 +578,221 @@ func TestStatusCopyIsIndependent(t *testing.T) {
 	}
 	if again.Status != contracts.SessionPending {
 		t.Fatalf("Status mutated controller state: %q", again.Status)
+	}
+}
+
+func TestOnBeatInvokedInOrderBeforeEachEmission(t *testing.T) {
+	var mu sync.Mutex
+	var seen []string
+	var earlySSE []string
+	// Prove R1: OnBeat runs before emitBeat by checking that the matching
+	// beat SSE is not yet in the subscriber buffer when OnBeat executes.
+	// runBeats is single-threaded (wait → OnBeat → emit), so a non-blocking
+	// drain at the start of OnBeat must not already hold this beat's SSE.
+	var sub contracts.SimulationStreamSubscription
+	ctrl := newTestController(t, testBeats(), func(cfg *Config) {
+		cfg.OnBeat = func(_ context.Context, beat contracts.ScheduledBeat) error {
+			if sub != nil {
+				for {
+					select {
+					case ev := <-sub.Events():
+						if ev.Type != contracts.StreamEventBeat {
+							continue
+						}
+						payload, _ := ev.Payload.(map[string]any)
+						id, _ := payload["beat_id"].(string)
+						if id == beat.BeatID {
+							mu.Lock()
+							earlySSE = append(earlySSE, id)
+							mu.Unlock()
+						}
+					default:
+						goto recorded
+					}
+				}
+			}
+		recorded:
+			mu.Lock()
+			seen = append(seen, beat.BeatID)
+			mu.Unlock()
+			return nil
+		}
+	})
+	sub = ctrl.Subscribe()
+	t.Cleanup(sub.Cancel)
+
+	if _, err := ctrl.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	waitStatus(t, ctrl, contracts.SessionEnded, time.Second)
+	mu.Lock()
+	defer mu.Unlock()
+	// testBeats order fields: beat-a(1), beat-b(2), beat-c(3)
+	want := []string{"beat-a", "beat-b", "beat-c"}
+	if !equalStrings(seen, want) {
+		t.Fatalf("OnBeat order = %v, want %v", seen, want)
+	}
+	if len(earlySSE) != 0 {
+		t.Fatalf("SSE arrived before OnBeat for beats %v (R1 order violated)", earlySSE)
+	}
+}
+
+func TestOnBeatErrorStopsFurtherBeatsAndEndsSession(t *testing.T) {
+	var mu sync.Mutex
+	var seen []string
+	ctrl := newTestController(t, testBeats(), func(cfg *Config) {
+		cfg.OnBeat = func(_ context.Context, beat contracts.ScheduledBeat) error {
+			mu.Lock()
+			seen = append(seen, beat.BeatID)
+			mu.Unlock()
+			if beat.BeatID == "beat-a" {
+				return errors.New("inject onbeat failure for test")
+			}
+			return nil
+		}
+	})
+	sub := ctrl.Subscribe()
+	t.Cleanup(sub.Cancel)
+	if _, err := ctrl.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	waitStatus(t, ctrl, contracts.SessionEnded, time.Second)
+	// Collect buffered events: failed OnBeat must not emit that beat SSE.
+	events := collectUntilQuiet(t, sub, 100*time.Millisecond)
+	var beatEvents int
+	var endedPayload map[string]any
+	for _, ev := range events {
+		if ev.Type == contracts.StreamEventBeat {
+			beatEvents++
+		}
+		if ev.Type == contracts.StreamEventStatusChange {
+			if p, ok := ev.Payload.(map[string]any); ok {
+				if p["status"] == string(contracts.SessionEnded) {
+					endedPayload = p
+				}
+			}
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 1 || seen[0] != "beat-a" {
+		t.Fatalf("OnBeat seen = %v, want only beat-a", seen)
+	}
+	if beatEvents != 0 {
+		t.Fatalf("SSE beat emissions = %d, want 0 when OnBeat fails before emit", beatEvents)
+	}
+	// P2: status_change ended carries on_beat_error reason + beat_id + error.
+	if endedPayload == nil {
+		t.Fatal("missing status_change ended payload")
+	}
+	if endedPayload["reason"] != "on_beat_error" {
+		t.Fatalf("ended reason = %#v, want on_beat_error", endedPayload["reason"])
+	}
+	if endedPayload["beat_id"] != "beat-a" {
+		t.Fatalf("ended beat_id = %#v, want beat-a", endedPayload["beat_id"])
+	}
+	if errStr, _ := endedPayload["error"].(string); errStr == "" {
+		t.Fatalf("ended error empty; payload=%#v", endedPayload)
+	}
+}
+
+func TestEqualSpacingMinInterBeatAfterSlowOnBeat(t *testing.T) {
+	// When OnBeat overruns the absolute ladder slot, the next beat must still
+	// wait MinInterBeat=BeatSpacing from lastFinished (not fire immediately).
+	clock := NewVirtualClock(time.Date(2026, 7, 20, 18, 0, 0, 0, time.UTC))
+	spacing := 2 * time.Second
+	beats := []contracts.ScheduledBeat{
+		{BeatID: "a", Order: 1, RawEventID: "r1", Delay: 0},
+		{BeatID: "b", Order: 2, RawEventID: "r2", Delay: 0},
+		{BeatID: "c", Order: 3, RawEventID: "r3", Delay: 0},
+	}
+	var fireAt []time.Time
+	var mu sync.Mutex
+	ctrl := newTestController(t, beats, func(cfg *Config) {
+		cfg.Clock = clock.Now
+		cfg.After = clock.After
+		cfg.BeatSpacing = spacing
+		cfg.NewSessionID = func() string { return "slow-onbeat-session" }
+		cfg.OnBeat = func(_ context.Context, beat contracts.ScheduledBeat) error {
+			mu.Lock()
+			fireAt = append(fireAt, clock.Now())
+			mu.Unlock()
+			if beat.BeatID == "a" {
+				// Overrun absolute ladder: beat b's ladder slot is start+2s,
+				// but OnBeat alone costs 5s → next earliest is lastFinished+2s.
+				clock.Advance(5 * time.Second)
+			}
+			return nil
+		}
+	})
+	sub := ctrl.Subscribe()
+	t.Cleanup(sub.Cancel)
+
+	if _, err := ctrl.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	// First beat fires immediately (index 0).
+	_ = collectUntil(t, sub, 3, time.Second) // clear, status, beat a SSE
+
+	// After slow OnBeat, clock is at start+5s. Absolute ladder for b is start+2s
+	// (already past). MinInterBeat requires wait until start+5s+2s = start+7s.
+	// Advancing only 1s must not emit beat b.
+	clock.Advance(spacing - time.Second)
+	select {
+	case ev := <-sub.Events():
+		if ev.Type == contracts.StreamEventBeat {
+			t.Fatalf("beat b fired too early after slow OnBeat: %#v", ev)
+		}
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	clock.Advance(time.Second) // reach lastFinished+spacing
+	second := collectUntil(t, sub, 1, time.Second)
+	if second[0].Type != contracts.StreamEventBeat {
+		t.Fatalf("expected beat b, got %v", second[0].Type)
+	}
+	if second[0].Payload.(map[string]any)["beat_id"] != "b" {
+		t.Fatalf("second beat = %#v, want b", second[0].Payload)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(fireAt) < 2 {
+		t.Fatalf("OnBeat fires = %d, want ≥2", len(fireAt))
+	}
+	// b should fire at least spacing after a finished (a finished at start+5s).
+	gap := fireAt[1].Sub(fireAt[0])
+	// fireAt[0] is start of OnBeat a (t0); OnBeat advances +5s before return.
+	// fireAt[1] is start of OnBeat b; earliest is lastFinished(+5 from t0)+spacing.
+	// So fireAt[1] - fireAt[0] >= 5s+spacing.
+	if gap < 5*time.Second+spacing {
+		t.Fatalf("OnBeat gap a→b = %v, want ≥ %v (slow work + MinInterBeat)", gap, 5*time.Second+spacing)
+	}
+}
+
+// collectUntilQuiet drains subscription events until idle for idle duration.
+func collectUntilQuiet(t *testing.T, sub contracts.SimulationStreamSubscription, idle time.Duration) []contracts.SimulationStreamEvent {
+	t.Helper()
+	var out []contracts.SimulationStreamEvent
+	timer := time.NewTimer(idle)
+	defer timer.Stop()
+	for {
+		select {
+		case ev, ok := <-sub.Events():
+			if !ok {
+				return out
+			}
+			out = append(out, ev)
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(idle)
+		case <-timer.C:
+			return out
+		}
 	}
 }
 

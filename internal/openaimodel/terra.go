@@ -3,23 +3,20 @@ package openaimodel
 import (
 	"context"
 	"fmt"
+	"strings"
 
-	"mosaic.local/mosaic/internal/ontology/gen"
 	"mosaic.local/mosaic/internal/terra"
 )
 
-const terraInstructions = `You are Terra, Mosaic's structured assessment agent.
-Given a committed COP serialization, its state revision, and permitted evidence,
-return one Insight JSON object (schema_version 1.0.0) with assertions that cite
-only the supplied evidence. You inform operators; you never issue operational
-actions or mutate the projection. Respond with a single Insight JSON object only.`
-
 // TerraClient implements terra.StructuredClient over the OpenAI Responses API.
 type TerraClient struct {
-	transport *transport
+	transport    *transport
+	instructions string
+	schema       structuredOutputSchema
 }
 
-// NewTerraClient constructs a live Terra client. APIKey is required.
+// NewTerraClient constructs a live Terra client. APIKey and versioned prompt
+// content are required; composition loads the prompt from the asset root.
 func NewTerraClient(cfg Config) (*TerraClient, error) {
 	if cfg.Model == "" {
 		cfg.Model = DefaultTerraModel
@@ -28,7 +25,15 @@ func NewTerraClient(cfg Config) (*TerraClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &TerraClient{transport: t}, nil
+	instructions := strings.TrimSpace(cfg.Instructions)
+	if instructions == "" {
+		return nil, fmt.Errorf("terra instructions are required")
+	}
+	schema, err := loadStructuredOutputSchema(cfg.SchemaDir, insightSchemaRoute)
+	if err != nil {
+		return nil, fmt.Errorf("load Terra output schema: %w", err)
+	}
+	return &TerraClient{transport: t, instructions: instructions, schema: schema}, nil
 }
 
 // Assess performs one Responses API call and maps structured Insight JSON or refusal.
@@ -40,15 +45,19 @@ func (c *TerraClient) Assess(ctx context.Context, request terra.Request) (terra.
 	input, err := marshalInput("terra", terraWireInput{
 		StateRevision: request.StateRevision,
 		SerializedCOP: rawOrNull(request.SerializedCOP),
-		Evidence:      request.Evidence,
+		// Wire evidence_ref items only — full Evidence identity fields are not
+		// part of insight.schema.json and cause live-model invalid runs when
+		// echoed back into Insight.evidence.
+		Evidence: evidenceToWireRefs(request.Evidence),
 	})
 	if err != nil {
 		return terra.Response{}, err
 	}
 
 	result, err := c.transport.call(ctx, structuredCall{
-		Instructions: terraInstructions,
-		SchemaName:   "insight",
+		Instructions: c.instructions,
+		SchemaName:   c.schema.name,
+		Schema:       c.schema.document,
 		UserInput:    input,
 	})
 	if err != nil {
@@ -57,14 +66,22 @@ func (c *TerraClient) Assess(ctx context.Context, request terra.Request) (terra.
 	if result.Refusal != "" {
 		return terra.Response{ResponseID: result.ResponseID, RefusalDetail: result.Refusal}, nil
 	}
+	insightJSON, err := withoutNullObjectProperties(result.JSON)
+	if err != nil {
+		return terra.Response{}, err
+	}
+	insightJSON, err = normalizeArtifactEvidenceRefs(insightJSON)
+	if err != nil {
+		return terra.Response{}, err
+	}
 	return terra.Response{
-		InsightJSON: result.JSON,
+		InsightJSON: insightJSON,
 		ResponseID:  result.ResponseID,
 	}, nil
 }
 
 type terraWireInput struct {
-	StateRevision int64          `json:"state_revision"`
-	SerializedCOP any            `json:"serialized_cop"`
-	Evidence      []gen.Evidence `json:"evidence"`
+	StateRevision int64             `json:"state_revision"`
+	SerializedCOP any               `json:"serialized_cop"`
+	Evidence      []evidenceRefWire `json:"evidence"`
 }

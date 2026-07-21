@@ -1,20 +1,31 @@
 services:
-  mosaic-data-init:
-    image: busybox:1.37.0
-    user: "0:0"
-    command: ["sh", "-c", "mkdir -p /var/lib/mosaic && chown -R 65532:65532 /var/lib/mosaic"]
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: mosaic
+      POSTGRES_USER: mosaic
+      POSTGRES_PASSWORD: mosaic
     volumes:
-      - mosaic-data:/var/lib/mosaic
-    restart: "no"
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mosaic -d mosaic"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
 
   mosaic:
     build:
       context: .
       dockerfile: Dockerfile
     image: mosaic-demo:local
+    # Local `db` is optional when MOSAIC_DB_PATH points at shared Supabase
+    # (session pooler). required:false keeps `docker compose up` working for
+    # either topology without forcing an unused Postgres container.
     depends_on:
-      mosaic-data-init:
-        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+        required: false
     ports:
       - "${MOSAIC_PORT:-8080}:8080"
     # Root .env is used for ${…} interpolation (OPENAI_API_KEY, etc.).
@@ -22,14 +33,23 @@ services:
     # fixture at runtime. Billing balance is unrelated to mode selection.
     environment:
       MOSAIC_LISTEN_ADDR: ":8080"
-      MOSAIC_DB_PATH: "/var/lib/mosaic/mosaic.db"
+      # Default: the local `db` container. Override with a Supabase DSN in .env
+      # to share ONE database with Cloud Run. Prefer the session pooler (port
+      # 5432, user postgres.<ref>) — free-tier direct hosts are often IPv6-only
+      # and break Docker/desktop IPv4. Do NOT use transaction pooler :6543.
+      # Example:
+      # MOSAIC_DB_PATH=postgres://postgres.<ref>:PW@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require
+      MOSAIC_DB_PATH: "${MOSAIC_DB_PATH:-postgres://mosaic:mosaic@db:5432/mosaic?sslmode=disable}"
       MOSAIC_UI_DIR: "/srv/mosaic/ui"
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
       MOSAIC_LUNA_PROVIDER: "${MOSAIC_LUNA_PROVIDER:-live}"
       MOSAIC_TERRA_PROVIDER: "${MOSAIC_TERRA_PROVIDER:-live}"
       MOSAIC_SOL_PROVIDER: "${MOSAIC_SOL_PROVIDER:-live}"
-    volumes:
-      - mosaic-data:/var/lib/mosaic
+      # Cassette modes (C5): live|fixture|replay — process-level only, not UI.
+      # Default live for end-to-end demos; without OPENAI_API_KEY agents demote
+      # to fixture clients. Recordings land under /tmp (read-only rootfs).
+      MOSAIC_SIM_MODE: "${MOSAIC_SIM_MODE:-live}"
+      MOSAIC_CASSETTE_DIR: "${MOSAIC_CASSETTE_DIR:-/tmp/mosaic-recordings}"
     read_only: true
     tmpfs:
       - /tmp
@@ -40,4 +60,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  mosaic-data:
+  postgres-data:

@@ -1,4 +1,4 @@
-package simsession
+package session
 
 import (
 	"sync"

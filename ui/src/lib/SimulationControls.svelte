@@ -94,24 +94,38 @@
   }
 </script>
 
-<div class="simulation-controls-bar">
+<div class="simulation-controls-bar" data-testid="simulation-controls">
   <div class="status-indicator">
     <span class="status-dot" class:running={session?.status === 'running'} class:ended={session?.status === 'ended'}></span>
-    <span class="status-label">
+    <span
+      class="status-label"
+      data-testid="run-status"
+      data-status={session?.status || 'idle'}
+    >
       Scenario: <strong>{statusLabel}</strong>
       <HelpTip text="Plays the 10-step synthetic domestic-disturbance call (911 → weather → road issues → correction). Practice only." label="About the scenario player" />
     </span>
     {#if session?.status === 'running'}
-      <span class="timer-display">Demo clock: <strong>{formatTime(elapsedSeconds)}</strong></span>
+      <span class="timer-display" data-testid="scenario-clock">Demo clock: <strong>{formatTime(elapsedSeconds)}</strong></span>
     {/if}
   </div>
 
   <div class="actions">
-    <button class="primary-button" onclick={startSimulation} disabled={isSubmitting || session?.status === 'running'}>
+    <button
+      class="primary-button"
+      data-testid="play-scenario"
+      onclick={startSimulation}
+      disabled={isSubmitting || session?.status === 'running'}
+    >
       Play scenario
       <HelpTip text="Replays the made-up call step by step so the incident board fills in. Safe to run as often as you like." label="About Play scenario" />
     </button>
-    <button class="secondary-button" onclick={resetSimulation} disabled={isSubmitting}>
+    <button
+      class="secondary-button"
+      data-testid="start-over"
+      onclick={resetSimulation}
+      disabled={isSubmitting}
+    >
       Start over
       <HelpTip text="Clears the live play-through view so you can demo again. Notes you already saved stay in the history tab (on local Docker they also survive restarts)." label="About Start over" />
     </button>
