@@ -34,10 +34,11 @@ type LunaResponse struct {
 type LunaClient struct {
 	transport    *transport
 	instructions string
+	schema       structuredOutputSchema
 }
 
-// NewLunaClient constructs a live Luna client. APIKey and versioned prompt
-// content are required; composition loads the prompt from the asset root.
+// NewLunaClient constructs a live Luna client. APIKey, versioned prompt content,
+// and the Luna output schema are required; composition supplies their locations.
 func NewLunaClient(cfg Config) (*LunaClient, error) {
 	if cfg.Model == "" {
 		cfg.Model = DefaultLunaModel
@@ -50,7 +51,11 @@ func NewLunaClient(cfg Config) (*LunaClient, error) {
 	if instructions == "" {
 		return nil, fmt.Errorf("luna instructions are required")
 	}
-	return &LunaClient{transport: t, instructions: instructions}, nil
+	schema, err := loadLunaStructuredOutputSchema(cfg.SchemaDir)
+	if err != nil {
+		return nil, fmt.Errorf("load Luna output schema: %w", err)
+	}
+	return &LunaClient{transport: t, instructions: instructions, schema: schema}, nil
 }
 
 // Normalize performs one Responses API call and maps structured output or refusal.
@@ -67,7 +72,8 @@ func (c *LunaClient) Normalize(ctx context.Context, request LunaRequest) (LunaRe
 
 	result, err := c.transport.call(ctx, structuredCall{
 		Instructions: c.instructions,
-		SchemaName:   "luna_result",
+		SchemaName:   c.schema.name,
+		Schema:       c.schema.document,
 		UserInput:    string(request.RawEventJSON),
 	})
 	if err != nil {
@@ -101,12 +107,26 @@ func mapLunaPayload(payload json.RawMessage) (LunaResponse, error) {
 		if !json.Valid(result) {
 			return LunaResponse{}, fmt.Errorf("luna result is not valid JSON")
 		}
-		out := LunaResponse{ResultJSON: append(json.RawMessage(nil), result...)}
+		normalizedResult, err := withoutNullObjectProperties(result)
+		if err != nil {
+			return LunaResponse{}, err
+		}
+		out := LunaResponse{ResultJSON: normalizedResult}
 		if len(wrapper.CanonicalEvent) > 0 && json.Valid(wrapper.CanonicalEvent) {
-			out.CanonicalEventJSON = append(json.RawMessage(nil), wrapper.CanonicalEvent...)
+			normalizedCanonical, err := withoutNullObjectProperties(wrapper.CanonicalEvent)
+			if err != nil {
+				return LunaResponse{}, err
+			}
+			if string(normalizedCanonical) != "null" {
+				out.CanonicalEventJSON = normalizedCanonical
+			}
 		}
 		return out, nil
 	}
 	// Whole payload is the LunaResult object.
-	return LunaResponse{ResultJSON: append(json.RawMessage(nil), payload...)}, nil
+	normalizedResult, err := withoutNullObjectProperties(payload)
+	if err != nil {
+		return LunaResponse{}, err
+	}
+	return LunaResponse{ResultJSON: normalizedResult}, nil
 }

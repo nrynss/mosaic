@@ -14,6 +14,7 @@ import (
 type SolClient struct {
 	transport    *transport
 	instructions string
+	schema       structuredOutputSchema
 }
 
 // NewSolClient constructs a live Sol client. APIKey and versioned prompt
@@ -30,7 +31,11 @@ func NewSolClient(cfg Config) (*SolClient, error) {
 	if instructions == "" {
 		return nil, fmt.Errorf("sol instructions are required")
 	}
-	return &SolClient{transport: t, instructions: instructions}, nil
+	schema, err := loadStructuredOutputSchema(cfg.SchemaDir, recommendationSchemaRoute)
+	if err != nil {
+		return nil, fmt.Errorf("load Sol output schema: %w", err)
+	}
+	return &SolClient{transport: t, instructions: instructions, schema: schema}, nil
 }
 
 // Brief performs one Responses API call and maps structured Recommendation JSON or refusal.
@@ -52,7 +57,8 @@ func (c *SolClient) Brief(ctx context.Context, request sol.Request) (sol.Respons
 
 	result, err := c.transport.call(ctx, structuredCall{
 		Instructions: c.instructions,
-		SchemaName:   "recommendation",
+		SchemaName:   c.schema.name,
+		Schema:       c.schema.document,
 		UserInput:    input,
 	})
 	if err != nil {
@@ -61,8 +67,12 @@ func (c *SolClient) Brief(ctx context.Context, request sol.Request) (sol.Respons
 	if result.Refusal != "" {
 		return sol.Response{ResponseID: result.ResponseID, RefusalDetail: result.Refusal}, nil
 	}
+	recommendationJSON, err := withoutNullObjectProperties(result.JSON)
+	if err != nil {
+		return sol.Response{}, err
+	}
 	return sol.Response{
-		RecommendationJSON: result.JSON,
+		RecommendationJSON: recommendationJSON,
 		ResponseID:         result.ResponseID,
 	}, nil
 }

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -22,6 +23,73 @@ type roundTripperFunc func(*http.Request) (*http.Response, error)
 
 func (fn roundTripperFunc) RoundTrip(request *http.Request) (*http.Response, error) {
 	return fn(request)
+}
+
+func testSchemaDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.Abs(filepath.Join("..", "..", "ontology"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func assertAuthoredSchema(t *testing.T, got any, filename string) {
+	t.Helper()
+	contents, err := os.ReadFile(filepath.Join(testSchemaDir(t), filename))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var authored map[string]any
+	if err := json.Unmarshal(contents, &authored); err != nil {
+		t.Fatal(err)
+	}
+	actual, ok := got.(map[string]any)
+	if !ok {
+		t.Fatalf("structured schema for %s = %#v, want object", filename, got)
+	}
+	if actual["$id"] != authored["$id"] {
+		t.Fatalf("structured schema for %s has $id %q, want %q", filename, actual["$id"], authored["$id"])
+	}
+	assertStrictObjects(t, actual)
+}
+
+func assertStrictObjects(t *testing.T, value any) {
+	t.Helper()
+	switch node := value.(type) {
+	case map[string]any:
+		if properties, ok := node["properties"].(map[string]any); ok {
+			if node["type"] != "object" || node["additionalProperties"] != false {
+				t.Fatalf("strict object schema = %#v", node)
+			}
+			required, _ := node["required"].([]any)
+			requiredSet := map[string]bool{}
+			for _, item := range required {
+				if name, ok := item.(string); ok {
+					requiredSet[name] = true
+				}
+			}
+			for name := range properties {
+				if !requiredSet[name] {
+					t.Fatalf("strict object schema did not require property %q: %#v", name, node)
+				}
+			}
+		}
+		for _, child := range node {
+			assertStrictObjects(t, child)
+		}
+	case []any:
+		for _, child := range node {
+			assertStrictObjects(t, child)
+		}
+	}
+}
+
+func assertStrictFormat(t *testing.T, format map[string]any, name string) {
+	t.Helper()
+	if format["type"] != "json_schema" || format["name"] != name || format["strict"] != true {
+		t.Fatalf("text.format = %#v", format)
+	}
 }
 
 func testHTTPClient(fn roundTripperFunc) *http.Client {
@@ -84,7 +152,7 @@ func TestTerraAssessMapsInsightAndShapesRequest(t *testing.T) {
 
 	var captured *http.Request
 	var capturedBody []byte
-	client, err := NewTerraClient(Config{Instructions: "test Terra prompt",
+	client, err := NewTerraClient(Config{SchemaDir: testSchemaDir(t), Instructions: "test Terra prompt",
 		APIKey:   "test-key",
 		Endpoint: "https://api.openai.com/v1/responses",
 		Model:    "gpt-5.6",
@@ -162,16 +230,15 @@ func TestTerraAssessMapsInsightAndShapesRequest(t *testing.T) {
 	}
 	text, _ := body["text"].(map[string]any)
 	format, _ := text["format"].(map[string]any)
-	if format["type"] != "json_schema" || format["name"] != "insight" {
-		t.Fatalf("text.format = %#v", format)
-	}
+	assertStrictFormat(t, format, insightSchemaName)
+	assertAuthoredSchema(t, format["schema"], "insight.schema.json")
 }
 
 func TestSolBriefMapsRecommendationAndShapesRequest(t *testing.T) {
 	const recJSON = `{"schema_version":"1.0.0","recommendation_id":"recommendation-001","state_revision":7,"text":"review access","evidence":[{"target_kind":"insight","target_id":"insight-001","explanation":"assessment"}],"created_at":"2026-07-18T10:00:04Z"}`
 
 	var capturedBody []byte
-	client, err := NewSolClient(Config{Instructions: "test Sol prompt",
+	client, err := NewSolClient(Config{SchemaDir: testSchemaDir(t), Instructions: "test Sol prompt",
 		APIKey: "test-key",
 		HTTPClient: testHTTPClient(func(request *http.Request) (*http.Response, error) {
 			body, err := io.ReadAll(request.Body)
@@ -216,27 +283,26 @@ func TestSolBriefMapsRecommendationAndShapesRequest(t *testing.T) {
 	}
 	text, _ := body["text"].(map[string]any)
 	format, _ := text["format"].(map[string]any)
-	if format["name"] != "recommendation" {
-		t.Fatalf("schema name = %v", format["name"])
-	}
+	assertStrictFormat(t, format, recommendationSchemaName)
+	assertAuthoredSchema(t, format["schema"], "recommendation.schema.json")
 }
 
 func TestLunaNormalizeMapsResultAndOptionalCanonical(t *testing.T) {
 	const payload = `{"result":{"schema_version":"1.0.0","luna_result_id":"luna-001","raw_event_id":"raw-001","status":"accepted","canonical_event_id":"canon-001","evidence":[{"target_kind":"raw_event","target_id":"raw-001","explanation":"envelope"}],"created_at":"2026-07-18T10:00:02Z"},"canonical_event":{"schema_version":"1.0.0","canonical_event_id":"canon-001","raw_event_id":"raw-001","event_type":"note","occurred_at":"2026-07-18T10:00:00Z","ingested_at":"2026-07-18T10:00:01Z","payload":{"summary":"synthetic"}}}`
 
 	var capturedBody []byte
-	client, err := NewLunaClient(Config{
+	client, err := NewLunaClient(Config{SchemaDir: testSchemaDir(t),
+		Instructions: "test Luna prompt",
 		APIKey:       "test-key",
-		Instructions: "versioned Luna prompt",
 		HTTPClient: testHTTPClient(func(request *http.Request) (*http.Response, error) {
 			if request.Header.Get("Authorization") != "Bearer test-key" {
 				t.Fatalf("Authorization = %q", request.Header.Get("Authorization"))
 			}
-			var err error
-			capturedBody, err = io.ReadAll(request.Body)
+			body, err := io.ReadAll(request.Body)
 			if err != nil {
 				return nil, err
 			}
+			capturedBody = body
 			resp := jsonResponse(http.StatusOK, successEnvelope("resp_luna_1", payload))
 			resp.Request = request
 			return resp, nil
@@ -261,18 +327,76 @@ func TestLunaNormalizeMapsResultAndOptionalCanonical(t *testing.T) {
 	if !strings.Contains(string(response.CanonicalEventJSON), `"canonical_event_id":"canon-001"`) {
 		t.Fatalf("CanonicalEventJSON = %s", response.CanonicalEventJSON)
 	}
+
 	var body map[string]any
 	if err := json.Unmarshal(capturedBody, &body); err != nil {
 		t.Fatal(err)
 	}
-	if body["instructions"] != "versioned Luna prompt" {
-		t.Fatalf("instructions = %q", body["instructions"])
+	text, _ := body["text"].(map[string]any)
+	format, _ := text["format"].(map[string]any)
+	assertStrictFormat(t, format, lunaSchemaName)
+	wrapper, _ := format["schema"].(map[string]any)
+	if wrapper["type"] != "object" || wrapper["additionalProperties"] != false {
+		t.Fatalf("Luna wrapper = %#v", wrapper)
+	}
+	properties, _ := wrapper["properties"].(map[string]any)
+	assertAuthoredSchema(t, properties["result"], "luna-result.schema.json")
+	canonical, _ := properties["canonical_event"].(map[string]any)
+	anyOf, _ := canonical["anyOf"].([]any)
+	if len(anyOf) != 2 {
+		t.Fatalf("Luna canonical_event schema = %#v", canonical)
+	}
+	assertAuthoredSchema(t, anyOf[0], "canonical-event.schema.json")
+	if nullSchema, _ := anyOf[1].(map[string]any); nullSchema["type"] != "null" {
+		t.Fatalf("Luna nullable canonical_event schema = %#v", anyOf[1])
+	}
+}
+
+func TestStrictSchemaTransformsOptionalFieldsWithoutChangingAuthoredSchema(t *testing.T) {
+	path := filepath.Join(testSchemaDir(t), "insight.schema.json")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema, err := loadStructuredOutputSchema(testSchemaDir(t), insightSchemaRoute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Fatal("authored schema was modified")
+	}
+
+	var document map[string]any
+	if err := json.Unmarshal(schema.document, &document); err != nil {
+		t.Fatal(err)
+	}
+	assertStrictObjects(t, document)
+	properties, _ := document["properties"].(map[string]any)
+	optional, _ := properties["supersedes_insight_id"].(map[string]any)
+	types, _ := optional["type"].([]any)
+	if len(types) != 2 || types[0] != "string" || types[1] != "null" {
+		t.Fatalf("optional property was not nullable: %#v", optional)
+	}
+}
+
+func TestWithoutNullObjectProperties(t *testing.T) {
+	got, err := withoutNullObjectProperties(json.RawMessage(`{"optional":null,"nested":{"remove":null,"keep":"value"},"rows":[{"remove":null,"keep":1}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"nested":{"keep":"value"},"rows":[{"keep":1}]}`
+	if string(got) != want {
+		t.Fatalf("normalized output = %s, want %s", got, want)
 	}
 }
 
 func TestRefusalDetailPath(t *testing.T) {
 	t.Run("terra", func(t *testing.T) {
-		client, err := NewTerraClient(Config{Instructions: "test Terra prompt",
+		client, err := NewTerraClient(Config{SchemaDir: testSchemaDir(t), Instructions: "test Terra prompt",
 			APIKey: "test-key",
 			HTTPClient: testHTTPClient(func(request *http.Request) (*http.Response, error) {
 				resp := jsonResponse(http.StatusOK, refusalEnvelope("resp_refuse", "policy declined assessment"))
@@ -292,7 +416,7 @@ func TestRefusalDetailPath(t *testing.T) {
 		}
 	})
 	t.Run("sol", func(t *testing.T) {
-		client, err := NewSolClient(Config{Instructions: "test Sol prompt",
+		client, err := NewSolClient(Config{SchemaDir: testSchemaDir(t), Instructions: "test Sol prompt",
 			APIKey: "test-key",
 			HTTPClient: testHTTPClient(func(request *http.Request) (*http.Response, error) {
 				resp := jsonResponse(http.StatusOK, refusalEnvelope("resp_refuse_sol", "briefing refused"))
@@ -312,9 +436,9 @@ func TestRefusalDetailPath(t *testing.T) {
 		}
 	})
 	t.Run("luna", func(t *testing.T) {
-		client, err := NewLunaClient(Config{
-			APIKey:       "test-key",
+		client, err := NewLunaClient(Config{SchemaDir: testSchemaDir(t),
 			Instructions: "test Luna prompt",
+			APIKey:       "test-key",
 			HTTPClient: testHTTPClient(func(request *http.Request) (*http.Response, error) {
 				resp := jsonResponse(http.StatusOK, refusalEnvelope("resp_refuse_luna", "cannot normalize"))
 				resp.Request = request
@@ -335,7 +459,7 @@ func TestRefusalDetailPath(t *testing.T) {
 }
 
 func TestContextCancelAndTimeout(t *testing.T) {
-	client, err := NewTerraClient(Config{Instructions: "test Terra prompt",
+	client, err := NewTerraClient(Config{SchemaDir: testSchemaDir(t), Instructions: "test Terra prompt",
 		APIKey: "test-key",
 		HTTPClient: testHTTPClient(func(request *http.Request) (*http.Response, error) {
 			select {
@@ -375,7 +499,7 @@ func TestHTTPErrorsNoRetry(t *testing.T) {
 		status := status
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			var calls atomic.Int32
-			client, err := NewTerraClient(Config{Instructions: "test Terra prompt",
+			client, err := NewTerraClient(Config{SchemaDir: testSchemaDir(t), Instructions: "test Terra prompt",
 				APIKey: "test-key",
 				HTTPClient: testHTTPClient(func(request *http.Request) (*http.Response, error) {
 					calls.Add(1)
@@ -412,25 +536,25 @@ func TestHTTPErrorsNoRetry(t *testing.T) {
 }
 
 func TestMissingAPIKey(t *testing.T) {
-	if _, err := NewTerraClient(Config{Instructions: "test Terra prompt"}); err == nil || !strings.Contains(err.Error(), "missing API key") {
+	if _, err := NewTerraClient(Config{SchemaDir: testSchemaDir(t), Instructions: "test Terra prompt"}); err == nil || !strings.Contains(err.Error(), "missing API key") {
 		t.Fatalf("NewTerraClient error = %v", err)
 	}
-	if _, err := NewSolClient(Config{Instructions: "test Sol prompt", APIKey: "  "}); err == nil || !strings.Contains(err.Error(), "missing API key") {
+	if _, err := NewSolClient(Config{SchemaDir: testSchemaDir(t), Instructions: "test Sol prompt", APIKey: "  "}); err == nil || !strings.Contains(err.Error(), "missing API key") {
 		t.Fatalf("NewSolClient error = %v", err)
 	}
-	if _, err := NewLunaClient(Config{}); err == nil || !strings.Contains(err.Error(), "missing API key") {
+	if _, err := NewLunaClient(Config{SchemaDir: testSchemaDir(t)}); err == nil || !strings.Contains(err.Error(), "missing API key") {
 		t.Fatalf("NewLunaClient error = %v", err)
 	}
 }
 
 func TestMissingInstructions(t *testing.T) {
-	if _, err := NewTerraClient(Config{APIKey: "test-key"}); err == nil || !strings.Contains(err.Error(), "instructions") {
+	if _, err := NewTerraClient(Config{SchemaDir: testSchemaDir(t), APIKey: "test-key"}); err == nil || !strings.Contains(err.Error(), "instructions") {
 		t.Fatalf("NewTerraClient error = %v", err)
 	}
-	if _, err := NewSolClient(Config{APIKey: "test-key"}); err == nil || !strings.Contains(err.Error(), "instructions") {
+	if _, err := NewSolClient(Config{SchemaDir: testSchemaDir(t), APIKey: "test-key"}); err == nil || !strings.Contains(err.Error(), "instructions") {
 		t.Fatalf("NewSolClient error = %v", err)
 	}
-	if _, err := NewLunaClient(Config{APIKey: "test-key"}); err == nil || !strings.Contains(err.Error(), "instructions") {
+	if _, err := NewLunaClient(Config{SchemaDir: testSchemaDir(t), APIKey: "test-key"}); err == nil || !strings.Contains(err.Error(), "instructions") {
 		t.Fatalf("NewLunaClient error = %v", err)
 	}
 }
@@ -569,7 +693,7 @@ func TestPackageSourceHasNoSecretPatterns(t *testing.T) {
 }
 
 func TestEmptyAndInvalidBodies(t *testing.T) {
-	client, err := NewTerraClient(Config{Instructions: "test Terra prompt",
+	client, err := NewTerraClient(Config{SchemaDir: testSchemaDir(t), Instructions: "test Terra prompt",
 		APIKey: "test-key",
 		HTTPClient: testHTTPClient(func(request *http.Request) (*http.Response, error) {
 			resp := jsonResponse(http.StatusOK, "   ")
@@ -584,7 +708,7 @@ func TestEmptyAndInvalidBodies(t *testing.T) {
 		t.Fatalf("empty body error = %v", err)
 	}
 
-	client, err = NewTerraClient(Config{Instructions: "test Terra prompt",
+	client, err = NewTerraClient(Config{SchemaDir: testSchemaDir(t), Instructions: "test Terra prompt",
 		APIKey: "test-key",
 		HTTPClient: testHTTPClient(func(request *http.Request) (*http.Response, error) {
 			resp := jsonResponse(http.StatusOK, `{"id":"resp_x","output":[{"type":"message","content":[{"type":"output_text","text":"not-json"}]}]}`)

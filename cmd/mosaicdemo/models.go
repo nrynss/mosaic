@@ -153,7 +153,7 @@ func composeModels(
 		// Construct only the live clients that are actually selected. Terra and
 		// Sol prompts are immutable assets, loaded only for a live invocation;
 		// fixture mode remains prompt-independent.
-		base := openaimodel.Config{APIKey: env.APIKey}
+		base := openaimodel.Config{APIKey: env.APIKey, SchemaDir: schemaDir}
 		if effective[openaimodel.AgentLuna] == contracts.ProviderLive {
 			lunaPrompt, err = loadVersionedPrompt(assetRoot, openaimodel.AgentLuna, "v1.0.0")
 			if err != nil {
@@ -161,6 +161,7 @@ func composeModels(
 			}
 			client, err := openaimodel.NewLunaClient(openaimodel.Config{
 				APIKey:       base.APIKey,
+				SchemaDir:    base.SchemaDir,
 				Instructions: lunaPrompt.Instructions,
 			})
 			if err != nil {
@@ -175,6 +176,7 @@ func composeModels(
 			}
 			client, err := openaimodel.NewTerraClient(openaimodel.Config{
 				APIKey:       base.APIKey,
+				SchemaDir:    base.SchemaDir,
 				Instructions: terraPrompt.Instructions,
 			})
 			if err != nil {
@@ -189,6 +191,7 @@ func composeModels(
 			}
 			client, err := openaimodel.NewSolClient(openaimodel.Config{
 				APIKey:       base.APIKey,
+				SchemaDir:    base.SchemaDir,
 				Instructions: solPrompt.Instructions,
 			})
 			if err != nil {

@@ -44,6 +44,10 @@ type Config struct {
 	APIKey   string
 	Endpoint string
 	Model    string
+	// SchemaDir contains the authored ontology JSON Schemas. It is supplied by
+	// composition from the configured asset root; live clients do not carry a
+	// divergent in-code schema copy.
+	SchemaDir string
 	// Instructions is the versioned prompt content supplied by composition.
 	// Every live agent requires its own versioned prompt artifact.
 	Instructions string
@@ -101,6 +105,7 @@ func normalizeEndpoint(endpoint string) (string, error) {
 type structuredCall struct {
 	Instructions string
 	SchemaName   string
+	Schema       json.RawMessage
 	UserInput    string
 }
 
@@ -130,11 +135,8 @@ func (t *transport) call(ctx context.Context, call structuredCall) (structuredRe
 			Format: textFormat{
 				Type:   "json_schema",
 				Name:   call.SchemaName,
-				Strict: false,
-				Schema: map[string]any{
-					"type":                 "object",
-					"additionalProperties": true,
-				},
+				Strict: true,
+				Schema: call.Schema,
 			},
 		},
 	}
@@ -241,10 +243,10 @@ type textConfig struct {
 }
 
 type textFormat struct {
-	Type   string         `json:"type"`
-	Name   string         `json:"name,omitempty"`
-	Strict bool           `json:"strict,omitempty"`
-	Schema map[string]any `json:"schema,omitempty"`
+	Type   string          `json:"type"`
+	Name   string          `json:"name,omitempty"`
+	Strict bool            `json:"strict,omitempty"`
+	Schema json.RawMessage `json:"schema,omitempty"`
 }
 
 type responsesAPIResponse struct {
