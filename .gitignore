@@ -11,9 +11,16 @@ node_modules/
 # Local cassette recordings (banked live runs; do not commit secrets)
 /recordings/
 
-# Playwright
+# Playwright (repo root and ui/)
 /test-results/
 /playwright-report/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+ui/test-results/
+ui/playwright-report/
+ui/blob-report/
+ui/playwright/.cache/
+ui/.e2e-bin/
+mosaicdemo
+mosaicdemo.exe

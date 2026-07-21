@@ -1,0 +1,71 @@
+name: Playwright demo E2E
+
+on:
+  pull_request:
+  push:
+    paths:
+      - 'ui/**'
+      - 'cmd/mosaicdemo/**'
+      - 'internal/**'
+      - 'datasets/**'
+      - 'testdata/demo/**'
+      - 'ontology/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/playwright.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  playwright:
+    name: Demo UI E2E (fixture + replay)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install UI dependencies
+        working-directory: ui
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        working-directory: ui
+        run: npx playwright install --with-deps chromium
+
+      - name: Build UI + mosaicdemo binary
+        working-directory: ui
+        run: |
+          npm run build
+          npm run e2e:prepare:force
+
+      - name: Run Playwright suite
+        working-directory: ui
+        env:
+          CI: 'true'
+          # Never allow ambient keys in CI.
+          OPENAI_API_KEY: ''
+        run: npx playwright test
+
+      - name: Upload Playwright report and artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-demo-e2e
+          retention-days: 7
+          path: |
+            ui/playwright-report/
+            ui/test-results/
