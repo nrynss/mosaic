@@ -16,7 +16,6 @@ import (
 	"mosaic.local/mosaic/internal/openaimodel"
 	"mosaic.local/mosaic/internal/reference/domesticdisturbance/simulator"
 	"mosaic.local/mosaic/internal/sol"
-	"mosaic.local/mosaic/internal/store"
 	"mosaic.local/mosaic/internal/terra"
 )
 
@@ -111,12 +110,17 @@ func loadVersionedPrompt(assetRoot, agent, version string) (versionedPrompt, err
 	}, nil
 }
 
+type composeStore interface {
+	contracts.ImmutableRecordRepository
+	contracts.AdvisoryHistoryReader
+}
+
 // composeModels wires fixture/live structured clients behind Terra/Sol services
 // and a Luna adapter. Live OpenAI clients are constructed only when the
 // effective selection is live (explicit + key). The key is never logged.
 func composeModels(
 	ctx context.Context,
-	database *store.Store,
+	database composeStore,
 	assetRoot string,
 	fixtureDir string,
 	schemaDir string,

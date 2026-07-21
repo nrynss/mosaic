@@ -7,3 +7,10 @@ dist/
 node_modules/
 .env
 .worktrees/
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
