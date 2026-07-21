@@ -20,6 +20,19 @@ In-app **Help** and **?** tips walk operators through the board.
 
 ---
 
+## Origin
+
+Built solo, in four days, on a simple belief: AI should supplement people, not
+replace the person in the chair. A senior leader once called AI the new TCP. I
+think that is right, and I wanted something that treats it that way. AI proposes.
+A human still decides. Everything else here follows from that.
+
+The reference domain is emergency operations because the cost of getting it wrong
+is one you can feel. The framework itself does not care about the domain. The pain
+of getting it wrong is universal.
+
+---
+
 ## Why it exists
 
 Enterprises and governments want AI in the loop — not AI in a black box. They
