@@ -5,7 +5,7 @@ import (
 	"context"
 
 	"mosaic.local/mosaic/internal/api"
-	"mosaic.local/mosaic/internal/store"
+	"mosaic.local/mosaic/internal/contracts"
 )
 
 // Profile supplies one domain-specific implementation to the reusable local
@@ -15,7 +15,7 @@ type Profile interface {
 	ID() string
 	Identities() Identities
 	Validate(assetRoot string) error
-	Compose(context.Context, *store.Store, string) (Runtime, error)
+	Compose(context.Context, contracts.ImmutableRecordRepository, string) (Runtime, error)
 }
 
 // Identities carries the demo actor identity tokens a profile composes into the

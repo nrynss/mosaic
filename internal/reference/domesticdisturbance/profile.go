@@ -46,7 +46,11 @@ func (domainProfile) Validate(assetRoot string) error {
 	return dataset.Validate(assetRoot)
 }
 
-func (domainProfile) Compose(ctx context.Context, database *store.Store, assetRoot string) (profile.Runtime, error) {
+func (domainProfile) Compose(ctx context.Context, repository contracts.ImmutableRecordRepository, assetRoot string) (profile.Runtime, error) {
+	database, ok := repository.(*store.Store)
+	if !ok {
+		return nil, errors.New("domesticdisturbance requires a SQLite store (*store.Store)")
+	}
 	if database == nil {
 		return nil, errors.New("store is required")
 	}
