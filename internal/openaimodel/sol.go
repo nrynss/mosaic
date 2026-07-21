@@ -48,8 +48,11 @@ func (c *SolClient) Brief(ctx context.Context, request sol.Request) (sol.Respons
 		StateRevision: request.StateRevision,
 		SerializedCOP: rawOrNull(request.SerializedCOP),
 		Insights:      request.Insights,
-		Evidence:      request.Evidence,
-		RequestedBy:   request.RequestedBy,
+		// Wire evidence_ref items only — full Evidence identity fields are not
+		// part of recommendation.schema.json and cause live-model invalid runs
+		// when echoed back into Recommendation.evidence.
+		Evidence:    evidenceToWireRefs(request.Evidence),
+		RequestedBy: request.RequestedBy,
 	})
 	if err != nil {
 		return sol.Response{}, err
@@ -71,6 +74,10 @@ func (c *SolClient) Brief(ctx context.Context, request sol.Request) (sol.Respons
 	if err != nil {
 		return sol.Response{}, err
 	}
+	recommendationJSON, err = normalizeArtifactEvidenceRefs(recommendationJSON)
+	if err != nil {
+		return sol.Response{}, err
+	}
 	return sol.Response{
 		RecommendationJSON: recommendationJSON,
 		ResponseID:         result.ResponseID,
@@ -78,11 +85,11 @@ func (c *SolClient) Brief(ctx context.Context, request sol.Request) (sol.Respons
 }
 
 type solWireInput struct {
-	StateRevision int64          `json:"state_revision"`
-	SerializedCOP any            `json:"serialized_cop"`
-	Insights      []gen.Insight  `json:"insights"`
-	Evidence      []gen.Evidence `json:"evidence"`
-	RequestedBy   string         `json:"requested_by"`
+	StateRevision int64             `json:"state_revision"`
+	SerializedCOP any               `json:"serialized_cop"`
+	Insights      []gen.Insight     `json:"insights"`
+	Evidence      []evidenceRefWire `json:"evidence"`
+	RequestedBy   string            `json:"requested_by"`
 }
 
 func rawOrNull(raw json.RawMessage) any {

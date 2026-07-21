@@ -165,8 +165,8 @@ docker compose up --build
 
 Open [http://localhost:8080](http://localhost:8080).
 
-Compose mounts a named volume at `/var/lib/mosaic` so SQLite audits survive
-local restarts. That durability does **not** apply to Cloud Run (`/tmp`).
+Compose defaults to a local Postgres container. Point `MOSAIC_DB_PATH` at
+Supabase (see `.env.example`) to share durable storage with Cloud Run.
 
 ### Port binding
 
@@ -179,10 +179,14 @@ The production image does not bake in `MOSAIC_LISTEN_ADDR`. Compose sets
 
 ---
 
-## Cloud Run deployment (ephemeral hackathon demo)
+## Cloud Run + Supabase (durable demo)
 
-**What it is:** live, single-instance, fixture-safe, ephemeral `/tmp` DB.  
-**What it is not:** Litestream / Cloud SQL durable history.
+**What it is:** live, single-instance, durable Postgres via **Supabase**
+(session pooler). Local Compose and Cloud Run share one DSN so local Plays
+show up on the hosted demo and vice versa.
+
+**What it is not:** multi-region HA or Kafka. Cassette files under `/tmp` on
+Cloud Run are still process-local.
 
 ```bash
 gcloud services enable \
@@ -192,17 +196,23 @@ gcloud services enable \
 gcloud auth configure-docker us-central1-docker.pkg.dev
 ```
 
-Store the API key in Secret Manager (not `--set-env-vars`):
+Store secrets in Secret Manager (not plain `--set-env-vars` for credentials):
 
 ```bash
 printf '%s' "$OPENAI_API_KEY" | gcloud secrets create openai-api-key \
   --data-file=- \
   --replication-policy=automatic
 
+# Session pooler DSN (IPv4). Do NOT use transaction pooler :6543.
+printf '%s' 'postgres://postgres.<ref>:PASSWORD@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require' \
+  | gcloud secrets create mosaic-db-dsn --data-file=-
+
 PROJECT_NUMBER="$(gcloud projects describe "$(gcloud config get-value project)" --format='value(projectNumber)')"
-gcloud secrets add-iam-policy-binding openai-api-key \
-  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
-  --role="roles/secretmanager.secretAccessor"
+for s in openai-api-key mosaic-db-dsn; do
+  gcloud secrets add-iam-policy-binding "$s" \
+    --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+    --role="roles/secretmanager.secretAccessor"
+done
 ```
 
 ```bash
@@ -213,21 +223,24 @@ gcloud run deploy mosaic-demo \
   --image=us-central1-docker.pkg.dev/YOUR_PROJECT_ID/mosaic-repo/mosaic-demo:latest \
   --max-instances=1 \
   --concurrency=8 \
-  --set-env-vars="MOSAIC_DB_PATH=/tmp/mosaic.db,MOSAIC_LUNA_PROVIDER=live,MOSAIC_TERRA_PROVIDER=live,MOSAIC_SOL_PROVIDER=live,MOSAIC_SIM_MODE=live,MOSAIC_CASSETTE_DIR=/tmp/mosaic-recordings" \
-  --set-secrets="OPENAI_API_KEY=openai-api-key:latest" \
+  --set-env-vars="MOSAIC_LUNA_PROVIDER=live,MOSAIC_TERRA_PROVIDER=live,MOSAIC_SOL_PROVIDER=live,MOSAIC_SIM_MODE=live,MOSAIC_CASSETTE_DIR=/tmp/mosaic-recordings" \
+  --set-secrets="MOSAIC_DB_PATH=mosaic-db-dsn:latest,OPENAI_API_KEY=openai-api-key:latest" \
   --allow-unauthenticated \
   --region=us-central1
 ```
 
+Local parity: put the **same** session-pooler DSN in gitignored `.env` as
+`MOSAIC_DB_PATH=…` so `docker compose up` talks to Supabase (see
+[`.env.example`](.env.example)).
+
 Image must include versioned prompts under `prompts/{luna,terra,sol}/` (see
-`Dockerfile`). `MOSAIC_SIM_MODE=live` records Luna/Terra/Sol cassette banks under
-`/tmp` (ephemeral on Cloud Run). Cassette mode is process-level only — not
-surfaced in the UI.
+`Dockerfile`). Full notes:
+[`docs/runbook/cloud-run-deployment-analysis.md`](docs/runbook/cloud-run-deployment-analysis.md) §6.
 
 * **Public URL:** [https://mosaic.nryn.dev](https://mosaic.nryn.dev)  
-* **Cloud Run:** [https://mosaic-demo-358513274447.us-central1.run.app](https://mosaic-demo-358513274447.us-central1.run.app)  
-* Durable persistence (Litestream / Cloud SQL): future parcel — see
-  [`docs/runbook/cloud-run-deployment-analysis.md`](docs/runbook/cloud-run-deployment-analysis.md).
+* **Cloud Run:** [https://mosaic-demo-358513274447.us-central1.run.app](https://mosaic-demo-358513274447.us-central1.run.app)
+
+Also fix the earlier README note that durable storage is missing:
 
 ---
 
@@ -235,7 +248,7 @@ surfaced in the UI.
 
 - Multi-tenant hosted platform or “AI ran the operation”  
 - Real dispatch, real PII, or real external delivery  
-- Durable Cloud Run production storage today  
+- Multi-region HA or Kafka event transport today (Postgres spine is the demo path)  
 - A shipped multi-domain product — only pluggable **architecture**
 
 ---

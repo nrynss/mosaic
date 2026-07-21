@@ -25,8 +25,8 @@ import (
 // semantic fixture expectations and this hash in the same reviewed change.
 var promptEvalHashes = map[string]string{
 	AgentLuna:  "3f943e46d22b34c339ec0dc59293500b8f29eef097ec8816e05781a2f90fe3c4",
-	AgentTerra: "da9e7449a49dc6dc4b4bcde844989ee93ba1b67bd1196a3c8b30685b7635a7cc",
-	AgentSol:   "293cfa720c5885099060d3000f98eb4eb56c3a5d716432855b64769bb82fb378",
+	AgentTerra: "d442602f63f934c1945061cd903791e3d13c18ec425357ebad3b2e9233efe3d6",
+	AgentSol:   "ca3a64cb2fb8c8ac0711a2eb4297dd510946e3c4a77a18f974f583d468b0902e",
 }
 
 type promptEvalFixture struct {

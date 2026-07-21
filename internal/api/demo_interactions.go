@@ -25,7 +25,7 @@ func (s *Server) handleDemoInteractions(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, nil, apiError{
 			Code:    "demo_interactions_load_failed",
-			Message: "could not load demo recording interactions",
+			Message: "could not load demo recording interactions: " + err.Error(),
 		})
 		return
 	}

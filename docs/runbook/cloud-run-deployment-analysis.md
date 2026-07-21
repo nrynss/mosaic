@@ -25,7 +25,7 @@ runtime by `MOSAIC_DB_PATH`; nothing in the app changes between topologies.
 |---|---|---|---|---|
 | Local dev | SQLite file (or in-memory) | `./mosaic.db` | Local disk | Tests, quick runs |
 | Docker Compose | Postgres container + volume | `postgres://…@db:5432/…` | Named volume | Full local end-to-end |
-| **Cloud Run + Supabase** | Managed Postgres (Supabase) | `postgres://…@…supabase.co:5432/…?sslmode=require` | **Managed, durable** | **Chosen demo** |
+| **Cloud Run + Supabase** | Managed Postgres (Supabase) | session pooler `postgres://postgres.<ref>:…@aws-0-<region>.pooler.supabase.com:5432/…?sslmode=require` | **Managed, durable** | **Chosen demo** |
 | Cloud Run + Cloud SQL | Managed Postgres (GCP-native) | Cloud SQL DSN via connector | Managed, durable | Enterprise GCP path |
 | VM / GKE | Literal `docker compose up` / StatefulSet | Postgres in-cluster | Volume | "Local Docker in the cloud" |
 
@@ -178,30 +178,51 @@ step is needed here.
 supabase login                          # one-time, opens browser
 supabase projects list                  # find/confirm the project ref
 
-# Retrieve the DIRECT connection string (NOT the transaction pooler).
-# Dashboard equivalent: Project Settings → Database → Connection string → URI.
+# Prefer the SESSION pooler URI (IPv4). Dashboard equivalent:
+# Project Settings → Database → Connect → Session mode → URI.
 # It looks like:
-#   postgres://postgres:[PASSWORD]@db.<project-ref>.supabase.co:5432/postgres
+#   postgres://postgres.<project-ref>:[PASSWORD]@aws-0-<region>.pooler.supabase.com:5432/postgres
 ```
 
-> **Two gotchas that will bite otherwise:**
-> - Use the **direct** connection (port `5432`) or the **session** pooler —
->   **not** the transaction pooler (port `6543`). `pgx` prepared statements and
->   the startup migration DDL break under PgBouncer transaction pooling.
-> - Append **`?sslmode=require`** to the DSN. (Compose uses `sslmode=disable`
->   against the in-network container; Supabase needs TLS.)
+> **Gotchas that will bite otherwise:**
+> - Prefer the **session** pooler (port `5432`, user `postgres.<ref>`). Free-tier
+>   **direct** hosts (`db.<ref>.supabase.co`) are often **IPv6-only** and fail
+>   from Docker Desktop and many IPv4-only networks (including some Cloud Run
+>   egress paths depending on project networking).
+> - Do **not** use the **transaction** pooler (port `6543`). `pgx` prepared
+>   statements, migration DDL, and `LISTEN/NOTIFY` break under transaction
+>   pooling.
+> - Append **`?sslmode=require`**. (Compose uses `sslmode=disable` against the
+>   in-network container; Supabase needs TLS.)
 
-Final value: `postgres://postgres:PASSWORD@db.<ref>.supabase.co:5432/postgres?sslmode=require`
+Final value (session pooler):
+`postgres://postgres.<ref>:PASSWORD@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require`
+
+Direct (only if you have working IPv6 or the paid IPv4 add-on):
+`postgres://postgres:PASSWORD@db.<ref>.supabase.co:5432/postgres?sslmode=require`
 
 ### Step 2 — Store the DSN as a Cloud Run secret
 
 ```bash
-printf '%s' 'postgres://postgres:PASSWORD@db.<ref>.supabase.co:5432/postgres?sslmode=require' \
+printf '%s' 'postgres://postgres.<ref>:PASSWORD@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require' \
   | gcloud secrets create mosaic-db-dsn --data-file=-
 # rotate later with: gcloud secrets versions add mosaic-db-dsn --data-file=-
 ```
 
+Grant the Cloud Run runtime service account access:
+
+```bash
+PROJECT_NUMBER="$(gcloud projects describe "$(gcloud config get-value project)" --format='value(projectNumber)')"
+gcloud secrets add-iam-policy-binding mosaic-db-dsn \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+```
+
 ### Step 3 — Deploy the same image, pointed at Supabase
+
+Use `--set-env-vars` **without** `MOSAIC_DB_PATH` (it replaces the whole plain-env
+list) and put the DSN only under `--set-secrets`. Do not combine
+`--set-env-vars` with `--remove-env-vars` in one `gcloud` invocation.
 
 ```bash
 gcloud run deploy mosaic-demo \
@@ -213,6 +234,10 @@ gcloud run deploy mosaic-demo \
   --allow-unauthenticated \
   --region=us-central1
 ```
+
+Local Compose shares the same database by putting the **same DSN** in root
+`.env` as `MOSAIC_DB_PATH=…` (gitignored). Data written locally then appears
+in the Cloud Run demo and vice versa.
 
 Notes:
 - `--max-instances=1` / `--concurrency=8` still apply: process-local SSE/sim

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"mosaic.local/mosaic/internal/ontology/gen"
 	"mosaic.local/mosaic/internal/terra"
 )
 
@@ -46,7 +45,10 @@ func (c *TerraClient) Assess(ctx context.Context, request terra.Request) (terra.
 	input, err := marshalInput("terra", terraWireInput{
 		StateRevision: request.StateRevision,
 		SerializedCOP: rawOrNull(request.SerializedCOP),
-		Evidence:      request.Evidence,
+		// Wire evidence_ref items only — full Evidence identity fields are not
+		// part of insight.schema.json and cause live-model invalid runs when
+		// echoed back into Insight.evidence.
+		Evidence: evidenceToWireRefs(request.Evidence),
 	})
 	if err != nil {
 		return terra.Response{}, err
@@ -68,6 +70,10 @@ func (c *TerraClient) Assess(ctx context.Context, request terra.Request) (terra.
 	if err != nil {
 		return terra.Response{}, err
 	}
+	insightJSON, err = normalizeArtifactEvidenceRefs(insightJSON)
+	if err != nil {
+		return terra.Response{}, err
+	}
 	return terra.Response{
 		InsightJSON: insightJSON,
 		ResponseID:  result.ResponseID,
@@ -75,7 +81,7 @@ func (c *TerraClient) Assess(ctx context.Context, request terra.Request) (terra.
 }
 
 type terraWireInput struct {
-	StateRevision int64          `json:"state_revision"`
-	SerializedCOP any            `json:"serialized_cop"`
-	Evidence      []gen.Evidence `json:"evidence"`
+	StateRevision int64             `json:"state_revision"`
+	SerializedCOP any               `json:"serialized_cop"`
+	Evidence      []evidenceRefWire `json:"evidence"`
 }

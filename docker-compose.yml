@@ -19,9 +19,13 @@ services:
       context: .
       dockerfile: Dockerfile
     image: mosaic-demo:local
+    # Local `db` is optional when MOSAIC_DB_PATH points at shared Supabase
+    # (session pooler). required:false keeps `docker compose up` working for
+    # either topology without forcing an unused Postgres container.
     depends_on:
       db:
         condition: service_healthy
+        required: false
     ports:
       - "${MOSAIC_PORT:-8080}:8080"
     # Root .env is used for ${…} interpolation (OPENAI_API_KEY, etc.).
@@ -30,9 +34,11 @@ services:
     environment:
       MOSAIC_LISTEN_ADDR: ":8080"
       # Default: the local `db` container. Override with a Supabase DSN in .env
-      # (MOSAIC_DB_PATH=postgres://…@db.<ref>.supabase.co:5432/postgres?sslmode=require)
-      # to share ONE database with the Cloud Run demo — data generated locally
-      # then shows up in the deployed app, and vice versa.
+      # to share ONE database with Cloud Run. Prefer the session pooler (port
+      # 5432, user postgres.<ref>) — free-tier direct hosts are often IPv6-only
+      # and break Docker/desktop IPv4. Do NOT use transaction pooler :6543.
+      # Example:
+      # MOSAIC_DB_PATH=postgres://postgres.<ref>:PW@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require
       MOSAIC_DB_PATH: "${MOSAIC_DB_PATH:-postgres://mosaic:mosaic@db:5432/mosaic?sslmode=disable}"
       MOSAIC_UI_DIR: "/srv/mosaic/ui"
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"

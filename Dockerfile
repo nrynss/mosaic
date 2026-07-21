@@ -19,6 +19,10 @@ COPY internal/ ./internal/
 COPY migrations/ ./migrations/
 COPY ontology/ ./ontology/
 COPY datasets/domestic-disturbance/ ./datasets/domestic-disturbance/
+# Demo recording manifest + cassette bank for /api/v1/demo/interactions and
+# no-live replay. Asset root defaults to /srv/mosaic (WORKDIR). Skip backup dirs.
+COPY testdata/demo/recording-manifest.json ./testdata/demo/recording-manifest.json
+COPY testdata/demo/cassettes/ ./testdata/demo/cassettes/
 # Versioned Luna/Terra/Sol prompt artifacts (H1) — required at compose when
 # providers are live; also used for honest PromptVersion provenance hashing.
 COPY prompts/luna/ ./prompts/luna/
@@ -32,6 +36,7 @@ WORKDIR /srv/mosaic
 COPY --from=runtime-build --chown=nonroot:nonroot /out/mosaicdemo /usr/local/bin/mosaicdemo
 COPY --from=runtime-build --chown=nonroot:nonroot /src/ontology ./ontology
 COPY --from=runtime-build --chown=nonroot:nonroot /src/datasets/domestic-disturbance ./datasets/domestic-disturbance
+COPY --from=runtime-build --chown=nonroot:nonroot /src/testdata/demo ./testdata/demo
 COPY --from=runtime-build --chown=nonroot:nonroot /src/prompts ./prompts
 COPY --from=dashboard-build --chown=nonroot:nonroot /src/ui/dist ./ui
 

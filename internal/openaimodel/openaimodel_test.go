@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"mosaic.local/mosaic/internal/contracts"
+	"mosaic.local/mosaic/internal/ontology/gen"
 	"mosaic.local/mosaic/internal/sol"
 	"mosaic.local/mosaic/internal/terra"
 )
@@ -652,6 +653,78 @@ func TestWithoutNullObjectProperties(t *testing.T) {
 	want := `{"nested":{"keep":"value"},"rows":[{"keep":1,"original":null}]}`
 	if string(got) != want {
 		t.Fatalf("normalized output = %s, want %s", got, want)
+	}
+}
+
+func TestNormalizeArtifactEvidenceRefsStripsFullEvidenceIdentity(t *testing.T) {
+	// Live Sol failure mode: model echoes full Evidence records into
+	// recommendation.evidence; authored schema allows only evidence_ref fields.
+	in := json.RawMessage(`{
+		"schema_version":"1.0.0",
+		"recommendation_id":"recommendation-001",
+		"state_revision":9,
+		"text":"Consider reviewing access.",
+		"evidence":[{
+			"schema_version":"1.0.0",
+			"evidence_id":"evidence-001",
+			"target_kind":"insight",
+			"target_id":"insight-001",
+			"explanation":"active access assessment",
+			"created_at":"2026-07-21T12:00:00Z"
+		}],
+		"created_at":"2026-07-21T12:00:01Z"
+	}`)
+	got, err := normalizeArtifactEvidenceRefs(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root map[string]any
+	if err := json.Unmarshal(got, &root); err != nil {
+		t.Fatal(err)
+	}
+	arr, ok := root["evidence"].([]any)
+	if !ok || len(arr) != 1 {
+		t.Fatalf("evidence = %#v", root["evidence"])
+	}
+	item, ok := arr[0].(map[string]any)
+	if !ok {
+		t.Fatalf("evidence[0] = %#v", arr[0])
+	}
+	for _, banned := range []string{"evidence_id", "schema_version", "created_at"} {
+		if _, exists := item[banned]; exists {
+			t.Fatalf("evidence ref still has %q: %#v", banned, item)
+		}
+	}
+	if item["target_kind"] != "insight" || item["target_id"] != "insight-001" || item["explanation"] != "active access assessment" {
+		t.Fatalf("unexpected evidence ref: %#v", item)
+	}
+}
+
+func TestEvidenceToWireRefsOmitsIdentityFields(t *testing.T) {
+	refs := evidenceToWireRefs([]gen.Evidence{{
+		SchemaVersion: "1.0.0",
+		EvidenceID:    "evidence-001",
+		TargetKind:    "insight",
+		TargetID:      "insight-001",
+		Explanation:   "active access assessment",
+		JsonPointer:   "/assertions/0",
+		CreatedAt:     "2026-07-21T12:00:00Z",
+	}})
+	if len(refs) != 1 {
+		t.Fatalf("len = %d", len(refs))
+	}
+	if refs[0].TargetKind != "insight" || refs[0].TargetID != "insight-001" || refs[0].JSONPointer != "/assertions/0" {
+		t.Fatalf("refs[0] = %#v", refs[0])
+	}
+	// Encode and ensure identity fields never appear on the wire.
+	encoded, err := json.Marshal(refs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, banned := range []string{"evidence_id", "schema_version", "created_at"} {
+		if strings.Contains(string(encoded), banned) {
+			t.Fatalf("wire refs contain %q: %s", banned, encoded)
+		}
 	}
 }
 
