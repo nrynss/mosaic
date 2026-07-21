@@ -1,110 +1,216 @@
-# Kafka / Redpanda Introduction Guide
+# Kafka / Redpanda introduction guide
 
-This runbook outlines the architectural role of Kafka (or Redpanda) in the Mosaic ecosystem and how to introduce it as the primary event spine transport layer without disrupting the existing application topology.
+This runbook describes how Mosaic keeps a **pluggable event-spine transport** so
+a real log (Kafka or Redpanda) can replace the Postgres log implementation
+later **without changing producers or consumers**. It matches the locked A1
+interfaces in [`internal/eventlog`](../../internal/eventlog) and the Postgres
+backend in [`internal/pgstore`](../../internal/pgstore).
 
-## 1. Architectural Role: The Event Spine Transport Layer
+## 1. Three layers (only the transport is swapped)
 
-In the Mosaic architecture, the event log serves as the immutable spine of the system. All operational facts (raw events, model insights, handoff decisions) are published as discrete events. 
+| Layer | Responsibility | Today | Later (scale) |
+|-------|----------------|-------|---------------|
+| **Log (transport)** | Append + ordered consume | Postgres `event_log` + consumer group | Kafka / Redpanda topic + consumer group |
+| **System of record / read model** | Immutable provenance + materialized COP | **Postgres forever** | Postgres (unchanged) |
+| **Fan-out** | Best-effort “read model changed” hints | Postgres `LISTEN/NOTIFY` | Redis / NATS / compacted topic |
 
-By introducing Kafka or Redpanda, we transition from a polling or listen/notify-based local transport (like Postgres) to a high-throughput, distributed log. Kafka acts purely as the **transport layer**:
-- **Producers** append events to topics.
-- **Consumers** tail topics and project those events into the relational database.
-- The transport layer provides durable retention, partitioning, and strict ordering within partitions.
+Introducing Kafka replaces **only the transport layer**. Postgres remains the
+queryable system of record and COP materialization. That is ordinary CQRS:
+append to a log, project into relational tables, read from those tables.
 
-This enables Mosaic to scale horizontally, allowing multiple consumer groups to project the same event stream into different models or external systems independently.
+## 2. Real A1 interfaces (`internal/eventlog`)
 
-## 2. Pluggable Transport: ventlog.EventLog and ventlog.EventConsumer
+Producers and consumers depend on these seams only. Nothing in application code
+imports Kafka or speaks SQL for the spine.
 
-Mosaic's core domains do not know about Kafka or Postgres directly. They depend on small, focused interfaces in the ventlog package (or equivalent internal contracts):
+### EventLog (append side)
 
-`go
-// eventlog.EventLog represents the write-side of the spine.
+```go
+// internal/eventlog/eventlog.go
 type EventLog interface {
-    Append(ctx context.Context, streamID string, events ...Event) error
+    // Append is at-least-once safe: re-appending an already-seen
+    // IdempotencyKey is a no-op that returns nil (first-wins payload).
+    Append(ctx context.Context, e EventEnvelope) error
 }
 
-// eventlog.EventConsumer represents the read-side of the spine.
+type EventEnvelope struct {
+    PartitionKey   string // routing + per-key ordering (e.g. incident id)
+    IdempotencyKey string // source dedup token
+    Type           string // application label, opaque to transport
+    Payload        []byte // opaque body; transport never interprets it
+}
+```
+
+### EventConsumer (read side)
+
+```go
 type EventConsumer interface {
-    Consume(ctx context.Context, handler func(Event) error) error
+    // Run delivers events ordered per PartitionKey, at-least-once.
+    // handle nil  => ack / advance position
+    // handle err  => no ack; event will be redelivered
+    Run(ctx context.Context, handle func(context.Context, Event) error) error
 }
-`
 
-Because these interfaces define the contract for the event spine, the underlying implementation is completely pluggable. The domain logic simply calls Append(), while the projector logic receives events via Consume(). Switching from a PostgreSQL-backed log to a Kafka-backed log only requires providing a different implementation of these interfaces at startup.
-
-## 3. The "Wiring Swap" at the Composition Root
-
-To introduce Kafka, the domain logic and projectors remain unchanged. The only file that needs modification is the composition root (e.g., cmd/mosaicdemo/main.go), where dependencies are injected.
-
-**Before (Postgres-only):**
-`go
-// cmd/mosaicdemo/main.go
-func main() {
-    db := connectPostgres()
-    
-    // Postgres-backed event log and consumer
-    pgLog := pglog.NewEventLog(db)
-    pgConsumer := pglog.NewEventConsumer(db)
-
-    // Domain services publish via pgLog
-    service := domain.NewService(pgLog)
-    
-    // Projectors read from pgConsumer
-    projector := projection.NewProjector(db)
-    go pgConsumer.Consume(ctx, projector.HandleEvent)
-    
-    // ...
+type Event struct {
+    EventEnvelope
+    Position  Position  // opaque per-partition cursor
+    Sequence  uint64    // diagnostic only; not a global offset
+    Timestamp time.Time // descriptive metadata only
 }
-`
+```
 
-**After (Kafka swap):**
-`go
-// cmd/mosaicdemo/main.go
-func main() {
-    db := connectPostgres()
-    kafkaClient := connectKafka()
-    
-    // Kafka-backed event log and consumer
-    kafkaLog := kafkalog.NewEventLog(kafkaClient, "mosaic-events")
-    kafkaConsumer := kafkalog.NewEventConsumer(kafkaClient, "mosaic-events", "consumer-group-1")
+### EventBus (fan-out, not the durable log)
 
-    // Domain services now publish via kafkaLog
-    service := domain.NewService(kafkaLog)
-    
-    // Projectors read from kafkaConsumer
-    projector := projection.NewProjector(db)
-    go kafkaConsumer.Consume(ctx, projector.HandleEvent)
-    
-    // ...
+```go
+type EventBus interface {
+    Publish(ctx context.Context, topic string, note []byte) error
+    // Subscribe: implementation closes the channel when ctx is cancelled.
+    // Best-effort; bounded buffer; slow readers drop notes.
+    Subscribe(ctx context.Context, topic string) (<-chan []byte, error)
 }
-`
+```
 
-This "wiring swap" demonstrates how the transport layer can be upgraded with zero changes to the core application logic.
+### Position
 
-## 4. Postgres as the Relational Read Model (CQRS)
+`Position` is an opaque per-partition cursor (`PartitionKey()` + `Token()`).
+Callers **must not** do arithmetic on tokens. The zero position means “before
+the first event.” Equality is only meaningful within the same partition.
 
-Even after introducing Kafka as the event spine, **PostgreSQL remains a critical component**: it serves as the relational read model (the system of record for queries).
+### Delivery contract (weakest common semantics)
 
-Mosaic follows a Command Query Responsibility Segregation (CQRS) topology:
-1. **Write Path:** Domain commands result in events being published (produced) to Kafka.
-2. **Projection:** Consumers tail Kafka topics and project the events into structured relational tables in Postgres.
-3. **Read Path:** The UI queries the Postgres read-model tables to populate dashboards and views.
+Every backend must honor **only**:
 
-Postgres is optimized for complex queries, filtering, and joining data, making it the perfect companion to Kafka's append-only log.
+- **At-least-once**, never exactly-once.
+- **Ordered per partition key**, never globally ordered.
 
-## 5. Delivery Contracts and Checkpoint Guarantees
+Mosaic’s source **IdempotencyKey** turns at-least-once into effectively-once at
+the projection boundary. Do not claim exactly-once delivery from the transport.
 
-When projecting events from Kafka to Postgres, we must ensure consistency.
+## 3. Postgres implementation today (`internal/pgstore`)
 
-**Delivery Contract:**
-- **At-Least-Once Delivery:** Kafka ensures that events are delivered to consumers at least once. Consumers must be idempotent or manage offsets carefully to prevent duplicate processing.
-- **Ordered Per Partition-Key:** Kafka guarantees strict ordering of events within a single partition. By using the aggregate ID (e.g., Incident ID) as the partition key, we guarantee that all events for a specific incident are processed in the exact order they occurred.
+| Seam | Type | Behaviour |
+|------|------|-----------|
+| `EventLog` | `*pgstore.Store` | `Append` → `INSERT` into `event_log`; unique on `idempotency_key` → first-wins no-op |
+| `EventConsumer` | `pgstore.EventConsumer` | Per-partition advisory locks; process in sequence; checkpoint in same TX as handle |
+| `EventBus` | `pgstore.EventBus` | `LISTEN/NOTIFY` via dedicated connections; bounded drop-new buffers |
 
-**Atomic Projection and Position Checkpoints:**
-To achieve exactly-once projection semantics (idempotency) and crash resilience, the consumer's position (the Kafka offset) must be saved atomically with the projected data.
+Composition constructs these next to the durable record store:
 
-In the consumer handler, we open a single Postgres transaction to:
-1. Apply the event to the read-model tables.
-2. Update the consumer_offsets table with the new Kafka offset.
-3. Commit the transaction.
+```go
+pg, err := pgstore.Open(ctx, dsn)
+// ...
+log := eventlog.EventLog(pg)                    // Store.Append
+consumer := pgstore.NewEventConsumer(pg, pgstore.ConsumerConfig{})
+bus := pgstore.NewEventBus(pg.Pool())
+```
 
-If the process crashes before the commit, the transaction rolls back, and the consumer will re-read the event from the last saved offset. If it succeeds, both the data and the offset move forward atomically. This guarantees that the read model is always consistent with the event stream, avoiding partial updates or skipped events.
+## 4. Wiring swap at composition only
+
+Domain services, the simulation, and projectors take `eventlog.EventLog` /
+`EventConsumer` / `EventBus`. They do **not** change when the transport changes.
+Only the composition root (e.g. `cmd/mosaicdemo`) swaps constructors.
+
+**Before (Postgres log):**
+
+```go
+pg, _ := pgstore.Open(ctx, dsn)
+var log eventlog.EventLog = pg
+consumer := pgstore.NewEventConsumer(pg, pgstore.ConsumerConfig{
+    ConsumerGroup: "mosaic-projector",
+})
+bus := pgstore.NewEventBus(pg.Pool())
+
+// producers (including simulation) call log.Append
+// projector worker: consumer.Run(ctx, handle)
+// SSE gateways: bus.Subscribe(ctx, "cop.updated")
+```
+
+**After (Kafka/Redpanda log — illustrative):**
+
+```go
+pg, _ := pgstore.Open(ctx, dsn) // still system of record + COP
+klog := kafkalog.NewEventLog(client, "mosaic-events")           // future package
+kconsumer := kafkalog.NewEventConsumer(client, "mosaic-events", "mosaic-projector")
+// Fan-out may stay Postgres LISTEN/NOTIFY, or move to Redis/NATS:
+bus := pgstore.NewEventBus(pg.Pool())
+
+// Same producer / consumer call sites — only the concrete types differ.
+var log eventlog.EventLog = klog
+// consumer.Run(ctx, handle) unchanged signature
+```
+
+There is no `pglog` package today; the Postgres log is `pgstore`. A future
+Kafka adapter is a new package that implements the same three interfaces.
+
+## 5. Atomic project + position (never append + project)
+
+The portability rule:
+
+> The projector **consumes from the log interface** and commits
+> **(projection update + position advance)** atomically —
+> **never (append + project)**.
+
+Why: Postgres *could* append and project in one ACID transaction; Kafka cannot.
+Both backends can commit “I updated the read model **and** advanced my
+consuming position.” Encoding append+project into the product path would nail
+the spine to Postgres.
+
+On the Postgres consumer path, `EventConsumer.Run` invokes `handle` inside
+`Store.WithinTransaction`. A nil return UPSERTs the consumer checkpoint in the
+same transaction. On error the transaction rolls back and the event is
+redelivered (at-least-once). Handlers that also materialize the COP (via
+`pgstore.MaterializingProjector`) should save the read model on that same TX
+context so project+position+materialize stay atomic.
+
+## 6. Conformance gate for new backends (E2)
+
+Any new transport implementation **must** pass:
+
+```go
+// internal/eventlog/eventlogtest
+eventlogtest.RunConformanceTests(t, func() (eventlog.EventLog, eventlog.EventConsumer, eventlog.EventBus, func()) {
+    // construct an isolated backend instance
+    return log, consumer, bus, cleanup
+})
+```
+
+The suite covers:
+
+- Append + consume payload integrity
+- Idempotent append (including **first-wins** when a retry carries a different payload)
+- Per-partition-key ordering
+- At-least-once redelivery after handler error
+- Position token integrity
+- Multi-worker same consumer group: different partitions, no double-processing
+- EventBus: Publish/Subscribe, cancel closes channel, topic isolation, backpressure does not hang Publish
+
+Postgres wires the suite in `internal/pgstore/conformance_test.go` (skipped unless
+`MOSAIC_TEST_PG_DSN` is set). A Kafka/Redpanda package should register the same
+suite against its own factory.
+
+## 7. What stays in Postgres after a Kafka swap
+
+Even with Kafka as the log:
+
+- Immutable records (raw/canonical events, insights, recommendations, model runs, audits)
+- Checkpoints and projection receipts used by deterministic recovery
+- Materialized COP read model (`GET /cop` cheap path)
+- Optional fan-out until a separate bus backend is chosen
+
+The UI and public API continue to read Postgres. Kafka is not a query store.
+
+## 8. Checklist before introducing Kafka/Redpanda
+
+1. Implement `eventlog.EventLog`, `EventConsumer`, and (if used) `EventBus`.
+2. Pass `eventlogtest.RunConformanceTests` in CI.
+3. Wire the new types only in the composition root; leave producers/consumers alone.
+4. Keep project+position atomic in the consumer handle; never append+project.
+5. Keep partition key = incident (or domain-scoped key) so per-key order holds.
+6. Treat delivery as at-least-once; rely on IdempotencyKey for effect-once.
+7. Leave Postgres as system of record; do not put COP snapshots on the bus.
+
+See also:
+
+- [`internal/eventlog/doc.go`](../../internal/eventlog/doc.go) — package contract
+- [`docs/HANDOFF-v0.4-pluggable-event-spine.md`](../HANDOFF-v0.4-pluggable-event-spine.md) — increment design
+- [`docs/runbook/local-docker-demo.md`](local-docker-demo.md) — two-container Postgres topology today
