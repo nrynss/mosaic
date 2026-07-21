@@ -220,7 +220,7 @@ gcloud run deploy mosaic-demo \
 ```
 
 Image must include versioned prompts under `prompts/{luna,terra,sol}/` (see
-`Dockerfile`). `MOSAIC_SIM_MODE=live` records Terra/Sol cassette banks under
+`Dockerfile`). `MOSAIC_SIM_MODE=live` records Luna/Terra/Sol cassette banks under
 `/tmp` (ephemeral on Cloud Run). Cassette mode is process-level only — not
 surfaced in the UI.
 

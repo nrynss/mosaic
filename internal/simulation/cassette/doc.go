@@ -1,5 +1,5 @@
-// Package cassette provides record/replay decorators around Terra and Sol
-// StructuredClient interfaces for the interactive simulation modes.
+// Package cassette provides record/replay decorators around Terra, Sol, and Luna
+// structured-client interfaces for the interactive simulation modes.
 //
 // # Modes
 //
@@ -11,14 +11,19 @@
 //
 // # Key algorithm
 //
-// Each recording is addressed by a stable string key:
+// Terra and Sol recordings are addressed by:
 //
 //	{agent}/rev{state_revision}[/{beat_id}]/{request_hash16}
 //
+// Luna recordings (not COP-revision-scoped) use:
+//
+//	luna/{raw_event_id}[/{beat_id}]/{request_hash16}
+//
 // where:
 //
-//   - agent is "terra" or "sol"
-//   - state_revision is the committed COP revision on the request
+//   - agent is "terra", "sol", or "luna"
+//   - state_revision is the committed COP revision on Terra/Sol requests
+//   - raw_event_id is parsed from Luna's RawEventJSON when present
 //   - beat_id is optional simulation context (empty when not set)
 //   - request_hash16 is the first 16 hex characters of SHA-256 over a
 //     canonical JSON fingerprint of the request identity
@@ -36,10 +41,15 @@
 //	insight_ids (sorted unique InsightID values),
 //	requested_by
 //
+// Luna fingerprint fields:
+//
+//	agent, raw_event_id, raw_json_sha256 (SHA-256 of RawEventJSON bytes),
+//	beat_id (if non-empty)
+//
 // The full fingerprint SHA-256 hex is also stored on the recording as
 // request_fingerprint for collision diagnostics. Keys are stable for identical
 // request identity inputs; changing COP bytes, evidence set, insights (Sol),
-// beat_id, or revision produces a different key.
+// raw event envelope (Luna), beat_id, or revision produces a different key.
 //
 // # Prompt provenance
 //

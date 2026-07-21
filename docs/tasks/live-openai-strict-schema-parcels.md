@@ -1,12 +1,17 @@
-# Task: Make the live OpenAI path work end-to-end (Terra ✅, Sol + Luna parcels)
+# Task: Make the live OpenAI path work end-to-end (Terra, Sol, Luna)
 
-**Status:** Terra live path fixed and shipped. Sol and Luna live paths blocked by
-two *independent* issues, each scoped as its own parcel below. This document is a
-self-contained handoff — a fresh agent should be able to act on it without prior
-conversation context.
+**Status:** ✅ **Complete** (Terra previously shipped; Sol + Luna parcels landed
+on `feat/v0.4-pluggable-event-spine`). Live operator paths work for all three
+agents; Luna/Terra/Sol share the same cassette record/replay spine.
 
 **Branch:** `feat/v0.4-pluggable-event-spine`
-**Shipped commit (context):** `6c2ad38` — `fix(openai): infer type on const/enum schema leaves for strict mode`
+
+**Shipped context:**
+- `6c2ad38` — `fix(openai): infer type on const/enum schema leaves for strict mode` (Terra unblocked)
+- This pass — Sol brief hydration, Luna strict wire schema, transport error detail,
+  Luna cassette parity with Terra/Sol
+
+This document is a self-contained handoff and post-implementation record.
 
 ---
 
@@ -28,7 +33,8 @@ with `text.format.type = "json_schema"` and **`strict: true`**
 ([internal/openaimodel/transport.go](../../internal/openaimodel/transport.go)).
 
 The wire JSON schema is derived from the authored ontology schemas in `ontology/`
-by `strictCompatibleSchema` / `makeSchemaStrict`
+by `strictCompatibleSchema` / `makeSchemaStrict` (Terra/Sol) or
+`buildLunaStrictWireSchema` (Luna)
 ([internal/openaimodel/schema.go](../../internal/openaimodel/schema.go)). **The
 authored ontology schemas are the source of truth for all internal validation and
 must never be modified for OpenAI's sake** — only the wire copy is transformed.
@@ -36,266 +42,274 @@ must never be modified for OpenAI's sake** — only the wire copy is transformed
 Model output is always re-validated against the *authored* schema after the call
 (ingestion / service validators), so the wire schema does not need to be as strict
 as the authored one — it only needs to (a) be accepted by OpenAI strict mode and
-(b) guide the model well enough. This is the key lever for the Luna parcel.
+(b) guide the model well enough.
+
+### Cassette modes (all three agents)
+
+| `MOSAIC_SIM_MODE` | Behaviour |
+|---|---|
+| `fixture` / `passthrough` / empty | No cassette; fixtures (or refuse clients for interactive Terra/Sol) |
+| `live` / `record` | Call live inners when provider+key say live; bank each successful response |
+| `replay` / `recorded` | Store only — **no network**, no API key required; miss → `ErrReplayMiss` |
+
+Cassette directory: `MOSAIC_CASSETTE_DIR` (default: `$TEMP/mosaic-recordings`).
+`/recordings/` is gitignored for local banks.
+
+Composition: [cmd/mosaicdemo/models.go](../../cmd/mosaicdemo/models.go)
+`applyCassette` wraps Luna + Terra + Sol structured clients.
 
 ---
 
-## 1. What was fixed and shipped (commit `6c2ad38`) — for context
+## 1. What was fixed earlier (commit `6c2ad38`) — Terra
 
-**Root cause found:** OpenAI strict structured-output mode requires **every schema
-node to declare a `type`**. Authored ontology schemas legally omit `type` when a
-`const` or `enum` already pins the value, e.g.:
+**Root cause:** OpenAI strict mode requires every schema node to declare a
+`type`. Authored ontology schemas omit `type` when `const`/`enum` pin the value
+(e.g. `"schema_version": { "const": "1.0.0" }`). OpenAI returned HTTP 400
+`invalid_json_schema` for all three agents.
 
-```json
-"schema_version": { "const": "1.0.0" }          // no "type"
-"lifecycle_status": { "enum": ["active","obsolete"] }   // no "type"
-```
+**Fix:** `inferStrictLeafType` in `schema.go` assigns an inferred type on
+const/enum leaves in the wire copy only.
 
-OpenAI rejects the whole request:
-
-```
-HTTP 400 invalid_json_schema
-"Invalid schema for response_format 'mosaic_insight_v1_0_0':
- In context=('properties','schema_version'), schema must have a 'type' key."
-```
-
-Because `schema_version` (a const) is in every agent's schema, **all three live
-agents failed with HTTP 400**. The transport also discards the OpenAI error body
-([transport.go:165-167](../../internal/openaimodel/transport.go)), so it only ever
-surfaced as an opaque "openai request failed with HTTP 400".
-
-**Fix (shipped):** `inferStrictLeafType` in `schema.go`, called from
-`makeSchemaStrict`, assigns an inferred `type` (string / integer / boolean, or a
-type array for mixed enums) to any `const`/`enum` leaf lacking one. Plus tests:
-`TestStrictSchemaInfersTypeForConstAndEnumLeaves` and the regression guard
-`TestStrictSchemaLeavesNoUntypedConstOrEnum`.
-
-**Verified live:** Terra now returns a valid `Insight` (HTTP 200) against the real
-API. Confirmed real OpenAI (not a mock): 404 on bad path, 401 on bad key,
-Cloudflare-fronted, valid TLS. (Aside: requested model `gpt-5.6` is echoed back as
-`gpt-5.6-sol` with `"billing":{"payer":"openai"}` — consistent with promotional
-credits. Worth confirming the billing arrangement but not a bug.)
+**Verified live:** Terra returns a valid `Insight` (HTTP 200).
 
 ---
 
-## 2. Parcel A — Sol interactive brief cannot be driven (endpoint contract gap)
+## 2. Parcel A — Sol interactive brief (✅ done)
 
-**Sol is NOT blocked by OpenAI schema.** Its output schema
-(`recommendation.schema.json`) is the same clean family as Terra's, already covered
-by commit `6c2ad38`. Sol never returned an HTTP 400.
-
-**The actual blocker:** `POST /api/v1/operator/brief` requires at least one **valid
-active `Insight`**, but the request type can't carry one.
-
-- Request shape: `operatorBriefRequest.Insights []operatorInsightRef`
-  ([internal/api/operator.go:29](../../internal/api/operator.go)).
-- `operatorInsightRef` only has `insight_id`, `state_revision`, `lifecycle_status`,
-  `schema_version` — **not** `assertions` / `evidence` / `confidence` / `created_at`.
-- `mapOperatorInsights` ([operator.go:509](../../internal/api/operator.go)) therefore
-  builds a `gen.Insight` missing required fields, and `Sol.Brief` validates it and
-  fails:
+### Problem
+`POST /api/v1/operator/brief` accepted bare `insight_id` refs. `mapOperatorInsights`
+built incomplete `gen.Insight` values missing required fields; Sol validation failed:
 
 ```
-status: invalid
-failure: validate active Insight "insight-domestic-access-001":
-  missing properties 'state_revision','assertions','evidence','confidence','created_at'
+validate active Insight "…": missing properties 'assertions','evidence','confidence','created_at'
 ```
 
-- Passing *no* insights fails differently: `"at least one active Insight is required"`.
-- The demo UI does **not** call `/brief` (Sol's demo advisory comes from progressive
-  Play / the domain process, not this interactive endpoint).
+Sol was **not** blocked by OpenAI schema (same clean family as Terra after `6c2ad38`).
 
-**Recommended fix (small):** have `handleOperatorBrief` **hydrate** the full insight
-from the recovered COP / store by `insight_id`, instead of trusting the request to
-carry a complete insight. The COP is already recovered in the handler
-(`s.recoverCOP`) and contains the active insights. Map the incoming `insight_id`
-refs to the corresponding full insights from the COP, then validate those.
+### Fix
+`handleOperatorBrief` hydrates full insights from **advisory history** (durable
+store) by `insight_id`, bounded by recovered COP revision:
 
-**Acceptance criteria (Parcel A):**
-- `POST /api/v1/operator/brief` with `X-Mosaic-Demo-Identity: supervisor-demo`,
-  a body referencing an active insight id present in the COP (e.g.
-  `insight-domestic-access-001` after a Play) and at least one evidence ref,
-  returns `status: ok` on the fixture path and a valid `Recommendation` on the live
-  path.
-- No regression to the decision-boundary guarantees (`executed:false`, audit append).
-- Add/extend an API test covering hydrate-from-COP.
+- Symbol: `hydrateOperatorInsights` in [internal/api/operator.go](../../internal/api/operator.go)
+- Clients still send only `{"insights":[{"insight_id":"…"}]}`
+- Missing / future / duplicate ids → `400 invalid_insights`
+- Prefer newest insight version with `state_revision ≤ COP revision`
+
+### Acceptance
+- Fixture path: operator API tests seed an insight into the store and assert Sol
+  receives full hydrated fields (`TestOperatorBriefSuccessWithSupervisor`,
+  `TestOperatorBriefHydrateMissingInsight`).
+- Live path (record mode): `status: ok`, `executed: false`, recommendation banked
+  under the Sol cassette key.
+
+### Cassette banked (local, gitignored example)
+```
+recordings/sol/rev9/<hash16>.json
+```
+Key shape: `sol/rev{N}/{request_hash16}` (fingerprint includes COP hash, evidence
+ids, insight ids, `requested_by`).
 
 ---
 
-## 3. Parcel B — Luna needs a strict-compatible wire schema (design change)
+## 3. Parcel B — Luna strict wire schema (✅ done)
 
-**Luna is genuinely blocked by a chain of OpenAI strict-mode incompatibilities** in
-its composed wire schema (built by `loadLunaStructuredOutputSchema` in
-[schema.go](../../internal/openaimodel/schema.go), which wraps `luna-result.schema.json`
-+ `canonical-event.schema.json` into `{result, canonical_event|null}`). Each issue
-below was discovered only after fixing the previous one:
+### Problem
+Luna’s composed wire schema failed OpenAI strict mode after const/enum typing:
 
-| # | Issue | Where | Strict-mode rule |
-|---|-------|-------|------------------|
-| 1 | const/enum without `type` | all schemas | **Fixed by `6c2ad38`** |
-| 2 | `allOf` + `if`/`then` discriminated union (payload keyed by `event_type`) | `canonical-event.schema.json` (6 branches), `luna-result.schema.json` | `allOf`/`if`/`then` forbidden |
-| 3 | `$defs` ref-scoping when embedding two schemas into one wrapper — inner `#/$defs/confidence` refs resolve against the wrapper root, which has no `$defs` | `loadLunaStructuredOutputSchema` wrapper | `$ref` must resolve |
-| 4 | typeless `{}` field (`repair.fields[].original`, an intentional "any") | `luna-result.schema.json` `$defs.repair.properties.fields.items.properties.original` | every node needs a `type` |
+| # | Issue | OpenAI rule |
+|---|-------|-------------|
+| 1 | const/enum without `type` | Fixed by `6c2ad38` |
+| 2 | `allOf` + `if`/`then` | Forbidden composition keywords |
+| 3 | `$defs` ref-scoping when embedding two `$id` documents | `$ref` must resolve |
+| 4 | typeless `{}` (`repair.fields[].original` / `replacement`) | every node needs `type` |
 
-Exact OpenAI errors captured (for reference):
-```
-#2: "In context=('properties','canonical_event','anyOf','0'), 'allOf' is not permitted."
-#3: "In context=(...'canonical_event','anyOf','0','properties','confidence'),
-     reference to component '#/$defs/confidence' which was not found in the schema."
-#4: "In context=(...'fields','items','properties','original'), schema must have a 'type' key."
-```
+Mechanical transform of authored composites broke tests that asserted authored
+`$id` on embedded bodies. Approach: **purpose-built wire schema**, authored
+files untouched.
 
-**Why this is a parcel, not a patch:** An in-session attempt to fix 2–4 generically
-(flatten `allOf`/`if`/`then` → `anyOf`, hoist and namespace `$defs`, drop `$id`)
-**broke existing tests** — `TestLunaNormalizeMapsResultAndOptionalCanonical` and
-`TestPromptEvalHarness/luna/*` assert the standalone schema keeps its `$id`
-(`assertAuthoredSchema` in [openaimodel_test.go](../../internal/openaimodel/openaimodel_test.go)).
-Hoisting `$defs` to the wrapper root conflicts with keeping `$id` on the embedded
-bodies (a JSON Schema `$id` establishes a new base URI, so `#/$defs/...` would
-re-scope to the body and break again). That tension = design change + test rework.
-**All of that attempt was reverted;** the tree currently contains only the clean B
-fix.
+### Fix
+`buildLunaStrictWireSchema` / `loadLunaStructuredOutputSchema` in
+[internal/openaimodel/schema.go](../../internal/openaimodel/schema.go):
 
-### Recommended approach (Parcel B)
+1. Deep-copy authored `luna-result` + `canonical-event`
+2. Hoist `$defs` to one root table with `luna_` / `canon_` prefixes
+3. Strip `allOf` / `if` / `then` / `else` / `not` (re-validated by Mosaic after call)
+4. Type bare `{}` as scalar union `string|number|integer|boolean|null`
+5. Expand `payload` to `anyOf` of the six concrete payload defs
+6. Rewrite `#/$defs/…` refs to namespaced keys; drop `$id` / `$schema` / nested `$defs`
+7. Run `makeSchemaStrict` on the wrapper `{ result, canonical_event|null }`
 
-Build a **purpose-designed, self-contained strict-compatible Luna wire schema**
-rather than mechanically transforming the authored composite. Design constraints:
+Tests: `TestLunaWireSchemaIsOpenAIStrictCompatible`, updated
+`TestLunaNormalizeMapsResultAndOptionalCanonical`, prompt-eval wire assertions.
 
-- One flat JSON Schema document (single `$defs` table at root, or none), no
-  cross-schema embedding of two `$id`-bearing documents.
-- No `allOf` / `if` / `then` / `else`. Represent the `payload` discriminated union
-  as a single `anyOf` of the concrete payload object shapes (incident, incident-
-  resolved, unit, resource, road, weather). Exact per-`event_type` discrimination is
-  re-enforced afterward by Mosaic's authored-schema validation in ingestion.
-- No typeless nodes. Give `repair.fields[].original` a concrete strict type — a
-  scalar union like `["string","number","integer","boolean","null"]` is acceptable
-  since Mosaic re-validates the real value against the authored `{}` (accept-any)
-  afterward.
-- Every object: `additionalProperties:false`, all keys in `required`, optional keys
-  made nullable (this part already works via `makeSchemaStrict`).
+### Acceptance
+- Authored `ontology/*` unchanged
+- Live interpret accepted by OpenAI; valid `LunaResult` (+ optional canonical)
 
-Alternative worth evaluating first (may be simpler): **send Luna with
-`strict:false`.** The transport currently hardcodes `Strict:true`
-([transport.go:138](../../internal/openaimodel/transport.go)). Making `strict`
-per-agent and setting Luna to `false` *may* let OpenAI accept a looser schema —
-BUT note issue #3 (unresolved `$ref`) is a hard schema error independent of strict
-mode, so the `$defs` composition still needs fixing even with `strict:false`. Prototype
-this against the real API before committing to it.
-
-**Do NOT modify the authored `ontology/*.schema.json` files.** Keep them as the
-validation source of truth; do all shaping in `openaimodel`.
-
-**Acceptance criteria (Parcel B):**
-- `loadLunaStructuredOutputSchema` produces a document OpenAI accepts (no 400) — add
-  a regression test asserting no forbidden keyword (`allOf`/`if`/`then`/`else`) and
-  no untyped node survive, and that every `$ref` resolves within the document.
-- Existing tests updated to match the new wire schema shape (the ones that assert
-  `$id` today).
-- Verified live: `POST /api/v1/operator/interpret` with a real key returns a valid
-  `LunaResult` (and optional canonical event), `status: ok`, banked to cassette.
-- Authored ontology schemas unchanged (`git diff ontology/` is empty).
+### Side improvement — transport errors
+Non-2xx OpenAI responses now include a **sanitized** error body snippet in the
+error string and on stderr (`model`, `schema`, detail only — never request,
+prompt, or key). See `extractOpenAIErrorMessage` / `sanitizedErrorMessage` in
+[transport.go](../../internal/openaimodel/transport.go).
 
 ---
 
-## 4. How to reproduce / test the live path (operational notes)
+## 4. Parcel C — Luna cassette parity with Terra/Sol (✅ done)
+
+### Problem
+Terra and Sol were banked by `internal/simulation/cassette`. Luna live calls
+returned HTTP results only — nothing for `$0` replay.
+
+### Fix
+Same decorator pattern as Terra/Sol:
+
+| Piece | Location |
+|---|---|
+| `LunaCassette` | [internal/simulation/cassette/luna.go](../../internal/simulation/cassette/luna.go) |
+| `LunaKey` | [key.go](../../internal/simulation/cassette/key.go) |
+| `result_json` / `canonical_event_json` on `Recording` | [recording.go](../../internal/simulation/cassette/recording.go) |
+| `AgentLuna` provenance | [provenance.go](../../internal/simulation/cassette/provenance.go) |
+| Wire into compose | [cmd/mosaicdemo/models.go](../../cmd/mosaicdemo/models.go) `applyCassette` |
+
+**Key shape (Luna is not COP-revision-scoped):**
+```
+luna/{raw_event_id}[/{beat_id}]/{request_hash16}
+```
+Fingerprint: `agent`, `raw_event_id`, `raw_json_sha256` (SHA-256 of
+`RawEventJSON` bytes as presented), optional `beat_id`.
+
+**Compose behaviour:**
+- **Record:** wrap each live agent (Luna and/or Terra and/or Sol); demote to
+  passthrough only when *no* agent is live
+- **Replay:** force all three construct selections to fixture (no API key);
+  wrap with ModeReplay + nil inner; `liveLunaAdapter` still maps banked JSON →
+  `LunaResult` / `ModelRun` with **fixture provider labels** (honest, not
+  `"openai"`)
+- **Passthrough:** no decorator
+
+**FileStore.List hardening:** only files with non-empty `schema_version`, `key`,
+and `agent` count as recordings. Operator response dumps or debug JSON living
+under the cassette dir are ignored; corrupt envelopes that *claim* to be
+recordings still error.
+
+### Cassette banked (local, gitignored example)
+```
+recordings/luna/raw-live-bank-full-001/<hash16>.json
+```
+Contains `result_json` (e.g. `status: accepted`), `canonical_event_json`
+(`incident_reported`), prompt provenance, and OpenAI `response_id`.
+
+### Replay (no key, $0)
+```bash
+export MOSAIC_SIM_MODE=replay
+export MOSAIC_CASSETTE_DIR=/path/to/recordings   # Windows: absolute path
+# OPENAI_API_KEY not required
+# Same operator request identity → store hit; miss → ErrReplayMiss (no silent live)
+```
+
+---
+
+## 5. How to record / verify (operational notes)
 
 ### Safe by default
-The repo's `.env` is set to **fixture** safe-mode (`MOSAIC_SIM_MODE=fixture`,
-providers `fixture`) so a funded key can't spend by accident. See
-[.env.example](../../.env.example) for the SAFE vs SPENDS blocks. A live pass is a
-**deliberate override**.
+Repo `.env` uses fixture providers. A live/record pass is a deliberate override.
+See [.env.example](../../.env.example).
 
-### Run a live record pass (spends a few cents)
-Build and run the binary directly with an explicit live env (bypasses `.env`
-safe-mode). On Windows use `cygpath -w` for paths passed to the Go binary:
-
+### Record pass (spends a few cents; Play beats stay fixture)
 ```bash
-go build -o /tmp/mosaicdemo.exe ./cmd/mosaicdemo
-set -a; source .env; set +a            # loads OPENAI_API_KEY (do not echo it)
-export MOSAIC_SIM_MODE=record \
-       MOSAIC_LUNA_PROVIDER=live MOSAIC_TERRA_PROVIDER=live MOSAIC_SOL_PROVIDER=live \
-       MOSAIC_CASSETTE_DIR="$(cygpath -w /tmp/cassettes)" \
-       MOSAIC_DB_PATH="$(cygpath -w /tmp/rec.db)" \
-       MOSAIC_SIM_BEAT_SPACING=1ms
-/tmp/mosaicdemo.exe -listen-addr 127.0.0.1:8099 \
-  -asset-root "$(cygpath -w "$PWD")" -ui-dir "$(cygpath -w "$PWD/ui")" &
+# Build
+go build -o mosaicdemo ./cmd/mosaicdemo   # or .exe on Windows
+
+# Env (do not echo the key)
+export OPENAI_API_KEY=…                  # from .env
+export MOSAIC_SIM_MODE=record
+export MOSAIC_LUNA_PROVIDER=live
+export MOSAIC_TERRA_PROVIDER=fixture     # optional: live only if you need Terra bank
+export MOSAIC_SOL_PROVIDER=live
+export MOSAIC_CASSETTE_DIR="$PWD/recordings"
+export MOSAIC_SIM_BEAT_SPACING=1ms
+export MOSAIC_SEED_ON_START=0
+
+./mosaicdemo -listen-addr 127.0.0.1:8099 -asset-root "$PWD" -ui-dir "$PWD/ui"
 ```
 
-Then drive it (Play first to build a COP at revision 9):
+Drive (Play first → COP rev 9; then operator routes):
 
 ```bash
 B=http://127.0.0.1:8099
-curl -s -X POST $B/api/v1/simulation/start >/dev/null; sleep 3   # fixture-driven, no model cost
+curl -s -X POST $B/api/v1/simulation/start >/dev/null; sleep 3
 
-# Terra (works today): evidence ref that exists after Play
-curl -s -X POST $B/api/v1/operator/analyze -H 'Content-Type: application/json' \
-  -d '{"evidence":[{"kind":"raw_event","id":"raw-domestic-001-call","explanation":"v"}],"note":"v"}'
-
-# Sol (Parcel A): requires supervisor identity header + a valid insight
-curl -s -X POST $B/api/v1/operator/brief -H 'Content-Type: application/json' \
+# Sol — hydrate insight from store by id only
+curl -s -X POST $B/api/v1/operator/brief \
+  -H 'Content-Type: application/json' \
   -H 'X-Mosaic-Demo-Identity: supervisor-demo' \
   -d '{"insights":[{"insight_id":"insight-domestic-access-001"}],
-       "evidence":[{"kind":"raw_event","id":"raw-domestic-001-call","explanation":"v"}],"note":"v"}'
+       "evidence":[{"kind":"raw_event","id":"raw-domestic-001-call","explanation":"v"}],
+       "note":"v"}'
 
-# Luna (Parcel B): raw-event envelope
-curl -s -X POST $B/api/v1/operator/interpret -H 'Content-Type: application/json' \
-  -d '{"raw_event_id":"raw-live-verify-001","content_type":"text/plain",
-       "payload_bytes_b64":"<base64>","raw_sha256":"<sha256 hex>",
+# Luna — structured payload more likely to accept than plain text
+curl -s -X POST $B/api/v1/operator/interpret \
+  -H 'Content-Type: application/json' \
+  -d '{"raw_event_id":"raw-live-bank-full-001","content_type":"application/json",
+       "payload_bytes_b64":"<base64 of incident JSON with incident_id/category/location_id>",
+       "raw_sha256":"<sha256 hex>",
        "source":{"source_id":"sim","source_record_id":"src-1"},
        "source_occurred_at":"2026-07-18T10:00:00Z","received_at":"2026-07-18T10:00:01Z"}'
 ```
 
-Key facts:
-- Supervisor identity header const: `X-Mosaic-Demo-Identity` = `supervisor-demo`
-  ([internal/api/server.go:28](../../internal/api/server.go),
-  [internal/reference/domesticdisturbance/profile.go:95](../../internal/reference/domesticdisturbance/profile.go)).
-- Play uses **fixture** events (no live Luna per beat); the live model calls happen
-  only on the three `/operator/*` endpoints above.
-- **Windows gotcha:** the Go binary does not resolve MSYS `/c/...` paths — use
-  `cygpath -w`. And `pkill -f mosaicdemo.exe` does NOT match the running process
-  (ps shows it as `mosaicdemo`); kill with `taskkill //F //IM mosaicdemo.exe`.
+**Windows notes:** pass Windows paths to the Go binary (not MSYS `/c/...`).
+Kill with process name of the built binary if needed.
 
-### See the real OpenAI error body (transport swallows it)
-The transport reports only `HTTP <code>`. To debug a 400, temporarily add to the
-non-2xx branch in [transport.go](../../internal/openaimodel/transport.go) (revert
-before committing):
-
-```go
-if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-    errBody, _ := io.ReadAll(io.LimitReader(response.Body, 8192))
-    if os.Getenv("MOSAIC_DEBUG_DUMP_DIR") != "" {
-        fmt.Fprintf(os.Stderr, "\n===DEBUG model=%s status=%d schema=%s\n===RESP: %s\n===END\n",
-            t.model, response.StatusCode, call.SchemaName, string(errBody))
-    }
-    return structuredResult{}, fmt.Errorf("openai request failed with HTTP %d", response.StatusCode)
-}
-```
-
-Consider landing a **permanent, safe** version of this (log the OpenAI error body to
-stderr, never the request/prompt/key) as a small side-improvement — the opaque
-"HTTP 400" cost real debugging time.
-
-### Cost & demo posture
-- A live structured call is ~2–3k tokens (~a cent). Rejected 400s are unbilled.
-- Once recorded, flip `MOSAIC_SIM_MODE=replay` to replay banked real output at $0,
-  offline, deterministic — the intended demo posture. Fixture mode also stays $0.
+### Cost
+- Live structured call ~2–3k tokens (~a cent). Rejected schema 400s are unbilled.
+- Play / progressive beats use fixture events (no live Luna per beat).
+- After record: `MOSAIC_SIM_MODE=replay` → $0, offline, deterministic.
 
 ---
 
-## 5. Files & symbols index
+## 6. Review fixes applied after implementation
 
-- Wire-schema transform: [internal/openaimodel/schema.go](../../internal/openaimodel/schema.go)
-  — `strictCompatibleSchema`, `makeSchemaStrict`, `inferStrictLeafType` (shipped),
-  `loadStructuredOutputSchema`, `loadLunaStructuredOutputSchema` (Parcel B focus).
-- Transport / strict flag / error handling: [internal/openaimodel/transport.go](../../internal/openaimodel/transport.go).
-- Agent clients: `terra.go`, `sol.go`, `luna.go` in the same package.
-- Operator endpoints: [internal/api/operator.go](../../internal/api/operator.go)
-  — `handleOperatorAnalyze` (Terra), `handleOperatorBrief` (Sol, Parcel A),
-  `handleOperatorInterpret` (Luna), `mapOperatorInsights`, `mapOperatorEvidence`.
-- Provider/mode selection: [cmd/mosaicdemo/models.go](../../cmd/mosaicdemo/models.go).
-- Authored schemas (DO NOT edit for OpenAI): `ontology/insight.schema.json`,
-  `ontology/recommendation.schema.json`, `ontology/luna-result.schema.json`,
-  `ontology/canonical-event.schema.json`.
-- Tests to mind: `internal/openaimodel/openaimodel_test.go`
-  (`assertAuthoredSchema`, `TestStrictSchema*`, `TestLunaNormalizeMapsResultAndOptionalCanonical`,
-  `TestPromptEvalHarness`).
+| Issue | Fix |
+|---|---|
+| `FileStore.List` treated any JSON under the dir as a recording (operator dumps could pollute provenance scans) | Skip unless `schema_version` + `key` + `agent` present; hard-fail only on corrupt *envelope-shaped* files |
+| Luna `ModelRun` always claimed `provider=openai` under replay | Composition sets fixture labels on `liveLunaAdapter` in ModeReplay |
+| `replayPromptVersions` scanned the store twice | Single scan; feed Luna/Terra/Sol prompt versions from one result |
+| Docs still said Luna outside cassette / Terra+Sol only | Updated this file, `.env.example`, README |
+
+### Known intentional limits
+- Interactive `/operator/interpret` still does **not** `AppendLunaResult` /
+  `AppendModelRun` to SQLite — durable **replay** identity is the **cassette**
+  bank (same as Terra/Sol interactive path). Ingestion progressive path keeps
+  using domain FixtureLuna + fixture outcomes.
+- Cassette keys for Luna hash the exact `RawEventJSON` bytes from
+  `json.Marshal(gen.RawEvent)` on the adapter path; replaying a hand-edited
+  envelope with different key order will miss (fingerprint mismatch).
+
+---
+
+## 7. Files & symbols index
+
+| Area | Paths / symbols |
+|---|---|
+| Wire schema (Terra/Sol) | `strictCompatibleSchema`, `makeSchemaStrict`, `inferStrictLeafType` |
+| Wire schema (Luna) | `loadLunaStructuredOutputSchema`, `buildLunaStrictWireSchema`, hoist/strip/type/rewrite helpers |
+| Transport | `transport.call`, `extractOpenAIErrorMessage`, `sanitizedErrorMessage` |
+| Sol hydrate | `handleOperatorBrief`, `hydrateOperatorInsights` |
+| Cassette | `LunaCassette`, `TerraCassette`, `SolCassette`, `LunaKey`, `FileStore.List` + `isBankedRecording` |
+| Compose | `composeModels`, `applyCassette`, `replayPromptVersions`, `liveLunaAdapter` |
+| Authored schemas (do not edit for OpenAI) | `ontology/insight`, `recommendation`, `luna-result`, `canonical-event` |
+| Tests | `internal/openaimodel/*strict*`, `internal/api/operator_test.go` (brief hydrate), `internal/simulation/cassette/*luna*`, `cmd/mosaicdemo/models_test.go` |
+
+---
+
+## 8. Verification checklist (no live spend required)
+
+```bash
+go test ./internal/openaimodel/ ./internal/api/ ./internal/sol/ \
+  ./internal/simulation/cassette/ ./cmd/mosaicdemo/ -count=1
+```
+
+Optional live (deliberate): one Sol brief + one Luna interpret under
+`MOSAIC_SIM_MODE=record`, then confirm files under `$MOSAIC_CASSETTE_DIR/{luna,sol}/`.
+Then `MOSAIC_SIM_MODE=replay` and re-issue the **same** requests — expect store
+hits, no network.

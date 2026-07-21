@@ -216,7 +216,18 @@ func (s *FileStore) List(_ context.Context) ([]*Recording, error) {
 		}
 		var rec Recording
 		if decodeErr := json.Unmarshal(data, &rec); decodeErr != nil {
-			return fmt.Errorf("cassette: decode %s: %w", path, decodeErr)
+			// Skip non-recording JSON that may live beside the bank (operator
+			// response dumps, debug artifacts). Hard-fail only on a file that
+			// looks like a cassette envelope but is corrupt.
+			if looksLikeRecordingJSON(data) {
+				return fmt.Errorf("cassette: decode %s: %w", path, decodeErr)
+			}
+			return nil
+		}
+		if !isBankedRecording(&rec) {
+			// Operator dumps and other JSON often unmarshal into a zero
+			// Recording without error — omit them from provenance scans.
+			return nil
 		}
 		out = append(out, cloneRecording(&rec))
 		return nil
@@ -225,6 +236,40 @@ func (s *FileStore) List(_ context.Context) ([]*Recording, error) {
 		return nil, walkErr
 	}
 	return out, nil
+}
+
+// isBankedRecording reports whether rec has the identity fields every Put
+// writes. Used by List so ad-hoc JSON under the store dir is ignored.
+func isBankedRecording(rec *Recording) bool {
+	if rec == nil {
+		return false
+	}
+	if strings.TrimSpace(rec.SchemaVersion) == "" {
+		return false
+	}
+	if strings.TrimSpace(rec.Key) == "" {
+		return false
+	}
+	if strings.TrimSpace(rec.Agent) == "" {
+		return false
+	}
+	return true
+}
+
+// looksLikeRecordingJSON is a cheap pre-check used only when Unmarshal fails:
+// if the bytes claim to be a cassette envelope, surface the decode error.
+func looksLikeRecordingJSON(data []byte) bool {
+	var probe struct {
+		SchemaVersion string `json:"schema_version"`
+		Key           string `json:"key"`
+		Agent         string `json:"agent"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return false
+	}
+	return strings.TrimSpace(probe.SchemaVersion) != "" &&
+		strings.TrimSpace(probe.Key) != "" &&
+		strings.TrimSpace(probe.Agent) != ""
 }
 
 func (s *FileStore) pathForKey(key string) (string, error) {
@@ -254,5 +299,7 @@ func cloneRecording(rec *Recording) *Recording {
 	out := *rec
 	out.InsightJSON = cloneRaw(rec.InsightJSON)
 	out.RecommendationJSON = cloneRaw(rec.RecommendationJSON)
+	out.ResultJSON = cloneRaw(rec.ResultJSON)
+	out.CanonicalEventJSON = cloneRaw(rec.CanonicalEventJSON)
 	return &out
 }

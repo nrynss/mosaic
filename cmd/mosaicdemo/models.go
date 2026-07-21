@@ -33,7 +33,7 @@ const defaultCassetteDirName = "mosaic-recordings"
 // Provider / cassette mapping (C5):
 //
 //	MOSAIC_SIM_MODE=fixture|passthrough|off  → ModePassthrough + fixture path (default / CI)
-//	MOSAIC_SIM_MODE=live|record              → ModeRecord + live Terra/Sol when key+provider say live
+//	MOSAIC_SIM_MODE=live|record              → ModeRecord + live Luna/Terra/Sol when key+provider say live
 //	MOSAIC_SIM_MODE=replay|recorded          → ModeReplay + FileStore; OPENAI_API_KEY not required
 //
 // MOSAIC_CASSETTE_MODE is accepted as an alias of MOSAIC_SIM_MODE (SIM wins if both set).
@@ -199,11 +199,12 @@ func composeModels(
 	requested := selectionFromEnv(env)
 	effective := effectiveSelection(requested, env.APIKey)
 
-	// Replay never needs a network client for Terra/Sol: force fixture
-	// construction selection so OPENAI_API_KEY is optional, then wrap with
-	// ModeReplay after Select. Luna is independent of the cassette.
+	// Replay never needs a network client: force fixture construction so
+	// OPENAI_API_KEY is optional, then wrap Luna/Terra/Sol with ModeReplay
+	// after Select.
 	construct := cloneSelection(effective)
 	if requestedMode == cassette.ModeReplay {
+		construct[openaimodel.AgentLuna] = contracts.ProviderFixture
 		construct[openaimodel.AgentTerra] = contracts.ProviderFixture
 		construct[openaimodel.AgentSol] = contracts.ProviderFixture
 	}
@@ -295,11 +296,8 @@ func composeModels(
 		}
 	}
 
-	// Luna structured clients: fixture path uses FixtureLuna as the adapter
-	// directly; live path wraps the OpenAI structured client.
-	// Select uses construct (replay-forced fixture for Terra/Sol). Luna may
-	// still be live and needs the real API key; Terra/Sol stay fixture inners
-	// under ModeReplay so no key is required for those agents.
+	// Select uses construct (replay-forced fixture for all three agents so no
+	// API key is required under ModeReplay).
 	selected, err := openaimodel.Select(openaimodel.SelectConfig{
 		Selection:    construct,
 		APIKey:       env.APIKey,
@@ -314,26 +312,21 @@ func composeModels(
 		return modelBundle{}, fmt.Errorf("select model clients: %w", err)
 	}
 
-	// Apply cassette decorator to Terra/Sol StructuredClients (C5).
-	// Effective mode may demote record→passthrough when no live Terra/Sol.
-	terraClient, solClient, effectiveMode, cassetteDir, err := applyCassette(
+	// Apply cassette decorator to Luna/Terra/Sol structured clients (C5).
+	// Effective mode may demote record→passthrough when no agent is live.
+	lunaClient, terraClient, solClient, effectiveMode, cassetteDir, err := applyCassette(
 		requestedMode,
 		env,
+		selected.Luna,
 		selected.Terra,
 		selected.Sol,
 		construct,
+		lunaPrompt,
 		terraPrompt,
 		solPrompt,
 	)
 	if err != nil {
 		return modelBundle{}, err
-	}
-
-	var luna contracts.LunaAdapter
-	if construct[openaimodel.AgentLuna] == contracts.ProviderLive {
-		luna = &liveLunaAdapter{client: selected.Luna, records: database, clock: time.Now, promptVersion: lunaPrompt.Provenance}
-	} else {
-		luna = fixtureLuna
 	}
 
 	history, err := database.ReadAdvisoryHistory(ctx)
@@ -352,9 +345,11 @@ func composeModels(
 
 	// Provider labels and prompt versions follow construct (what clients were
 	// built for). Replay surfaces as fixture providers with CassetteMode=replay
-	// for D2 status; no silent live path.
+	// for D2 status; no silent live path. One provenance scan covers all agents.
+	lunaPromptVersion := lunaPrompt.Provenance
 	terraProvider, terraModel := providerLabels(construct[openaimodel.AgentTerra])
 	solProvider, solModel := providerLabels(construct[openaimodel.AgentSol])
+	lunaProvider, lunaModel := providerLabels(construct[openaimodel.AgentLuna])
 	terraPromptVersion := fixtureInteractivePromptVersion
 	if construct[openaimodel.AgentTerra] == contracts.ProviderLive && terraPrompt.Provenance != "" {
 		terraPromptVersion = terraPrompt.Provenance
@@ -366,9 +361,30 @@ func composeModels(
 	if effectiveMode == cassette.ModeReplay {
 		// Prefer banked recording provenance (version+sha256:hash) over a generic
 		// opaque id so ModelRun remains attributable to the recorded prompt (H6).
-		terraPromptVersion, solPromptVersion = replayPromptVersions(ctx, env)
+		lunaPromptVersion, terraPromptVersion, solPromptVersion = replayPromptVersions(ctx, env)
+		lunaProvider, lunaModel = providerLabels(contracts.ProviderFixture)
 		solProvider, solModel = providerLabels(contracts.ProviderFixture)
 		terraProvider, terraModel = providerLabels(contracts.ProviderFixture)
+	}
+
+	// Live and replay both use the structured Luna adapter so ModelRun/result
+	// mapping is identical; only the inner client (network vs cassette) differs.
+	// Pure fixture interactive path keeps FixtureLuna (scenario beat advisories).
+	var luna contracts.LunaAdapter
+	if construct[openaimodel.AgentLuna] == contracts.ProviderLive || effectiveMode == cassette.ModeReplay {
+		if strings.TrimSpace(lunaPromptVersion) == "" {
+			lunaPromptVersion = cassetteReplayPromptVersion
+		}
+		luna = &liveLunaAdapter{
+			client:        lunaClient,
+			records:       database,
+			clock:         time.Now,
+			promptVersion: lunaPromptVersion,
+			provider:      lunaProvider,
+			model:         lunaModel,
+		}
+	} else {
+		luna = fixtureLuna
 	}
 
 	terraService, err := terra.New(terra.Config{
@@ -407,8 +423,9 @@ func composeModels(
 	// still show requested agents; CassetteMode is the honest inference path.
 	reported := effective
 	if effectiveMode == cassette.ModeReplay {
-		// Terra/Sol are store-backed, not live network; report fixture.
+		// Luna/Terra/Sol are store-backed, not live network; report fixture.
 		reported = cloneSelection(effective)
+		reported[openaimodel.AgentLuna] = contracts.ProviderFixture
 		reported[openaimodel.AgentTerra] = contracts.ProviderFixture
 		reported[openaimodel.AgentSol] = contracts.ProviderFixture
 	}
@@ -424,39 +441,47 @@ func composeModels(
 	}, nil
 }
 
-// applyCassette wraps Terra/Sol clients with the C4 cassette decorator.
+// applyCassette wraps Luna/Terra/Sol clients with the C4 cassette decorator.
 //
 //	passthrough/fixture → leave clients as-is (no decorator)
 //	record/live         → ModeRecord + FileStore around selected inners when at
-//	                      least one of Terra/Sol is live; otherwise demote to
+//	                      least one agent is live; otherwise demote to
 //	                      passthrough (no key / all fixture → safe CI path)
 //	replay/recorded     → ModeReplay + FileStore; inner is nil (miss = ErrReplayMiss)
 func applyCassette(
 	mode cassette.Mode,
 	env modelEnv,
+	lunaInner openaimodel.LunaStructuredClient,
 	terraInner terra.StructuredClient,
 	solInner sol.StructuredClient,
 	construct contracts.AgentProviderSelection,
-	terraPrompt, solPrompt versionedPrompt,
-) (terra.StructuredClient, sol.StructuredClient, cassette.Mode, string, error) {
+	lunaPrompt, terraPrompt, solPrompt versionedPrompt,
+) (openaimodel.LunaStructuredClient, terra.StructuredClient, sol.StructuredClient, cassette.Mode, string, error) {
 	switch mode {
 	case cassette.ModePassthrough:
-		return terraInner, solInner, cassette.ModePassthrough, "", nil
+		return lunaInner, terraInner, solInner, cassette.ModePassthrough, "", nil
 
 	case cassette.ModeRecord:
+		lunaLive := construct[openaimodel.AgentLuna] == contracts.ProviderLive
 		terraLive := construct[openaimodel.AgentTerra] == contracts.ProviderLive
 		solLive := construct[openaimodel.AgentSol] == contracts.ProviderLive
-		if !terraLive && !solLive {
+		if !lunaLive && !terraLive && !solLive {
 			// Match effectiveSelection fallback: mode=live without key/providers
 			// stays on the fixture path; do not bank refuse responses.
-			return terraInner, solInner, cassette.ModePassthrough, "", nil
+			return lunaInner, terraInner, solInner, cassette.ModePassthrough, "", nil
 		}
 		store, dir, err := openCassetteStore(env)
 		if err != nil {
-			return nil, nil, 0, "", err
+			return nil, nil, nil, 0, "", err
 		}
+		lunaOut := lunaInner
 		terraOut := terraInner
 		solOut := solInner
+		if lunaLive {
+			wrapped := cassette.NewLuna(cassette.ModeRecord, store, lunaInner)
+			wrapped.PromptVersion, wrapped.PromptHash = splitPromptProvenance(lunaPrompt.Provenance)
+			lunaOut = wrapped
+		}
 		if terraLive {
 			wrapped := cassette.NewTerra(cassette.ModeRecord, store, terraInner)
 			wrapped.PromptVersion, wrapped.PromptHash = splitPromptProvenance(terraPrompt.Provenance)
@@ -467,20 +492,21 @@ func applyCassette(
 			wrapped.PromptVersion, wrapped.PromptHash = splitPromptProvenance(solPrompt.Provenance)
 			solOut = wrapped
 		}
-		return terraOut, solOut, cassette.ModeRecord, dir, nil
+		return lunaOut, terraOut, solOut, cassette.ModeRecord, dir, nil
 
 	case cassette.ModeReplay:
 		store, dir, err := openCassetteStore(env)
 		if err != nil {
-			return nil, nil, 0, "", err
+			return nil, nil, nil, 0, "", err
 		}
 		// Inner is nil: ModeReplay must never fall through to the network.
-		return cassette.NewTerra(cassette.ModeReplay, store, nil),
+		return cassette.NewLuna(cassette.ModeReplay, store, nil),
+			cassette.NewTerra(cassette.ModeReplay, store, nil),
 			cassette.NewSol(cassette.ModeReplay, store, nil),
 			cassette.ModeReplay, dir, nil
 
 	default:
-		return nil, nil, 0, "", fmt.Errorf("unsupported cassette mode %s", mode)
+		return nil, nil, nil, 0, "", fmt.Errorf("unsupported cassette mode %s", mode)
 	}
 }
 
@@ -512,12 +538,13 @@ func splitPromptProvenance(provenance string) (version, hash string) {
 // ModeReplay has no banked prompt_version/prompt_hash on any recording.
 const cassetteReplayPromptVersion = "mosaic-cassette-replay-v1"
 
-// replayPromptVersions resolves honest Terra/Sol PromptVersion strings for
+// replayPromptVersions resolves honest Luna/Terra/Sol PromptVersion strings for
 // ModeReplay from banked cassette recordings. Falls back to
 // cassetteReplayPromptVersion when provenance was not recorded (legacy banks).
 // Store open/List failures are logged once so a misconfigured cassette dir is
-// not silent until the first Assess miss.
-func replayPromptVersions(ctx context.Context, env modelEnv) (terraPV, solPV string) {
+// not silent until the first call miss.
+func replayPromptVersions(ctx context.Context, env modelEnv) (lunaPV, terraPV, solPV string) {
+	lunaPV = cassetteReplayPromptVersion
 	terraPV = cassetteReplayPromptVersion
 	solPV = cassetteReplayPromptVersion
 	store, dir, err := openCassetteStore(env)
@@ -525,12 +552,15 @@ func replayPromptVersions(ctx context.Context, env modelEnv) (terraPV, solPV str
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "mosaicdemo: cassette provenance scan skipped (open store %q): %v\n", dir, err)
 		}
-		return terraPV, solPV
+		return lunaPV, terraPV, solPV
 	}
 	recs, err := store.List(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mosaicdemo: cassette provenance scan failed (list %q): %v\n", dir, err)
-		return terraPV, solPV
+		return lunaPV, terraPV, solPV
+	}
+	if p := cassette.BankedPromptProvenance(recs, cassette.AgentLuna); p != "" {
+		lunaPV = p
 	}
 	if p := cassette.BankedPromptProvenance(recs, cassette.AgentTerra); p != "" {
 		terraPV = p
@@ -538,7 +568,7 @@ func replayPromptVersions(ctx context.Context, env modelEnv) (terraPV, solPV str
 	if p := cassette.BankedPromptProvenance(recs, cassette.AgentSol); p != "" {
 		solPV = p
 	}
-	return terraPV, solPV
+	return lunaPV, terraPV, solPV
 }
 
 func cloneSelection(in contracts.AgentProviderSelection) contracts.AgentProviderSelection {
@@ -610,11 +640,16 @@ func (s lunaStructuredShim) Normalize(ctx context.Context, request openaimodel.L
 // liveLunaAdapter maps openaimodel structured output to contracts.LunaAdapter.
 // Transport failures and refusals produce a failed/refused ModelRun with no
 // CanonicalEvent and no state mutation beyond the returned artifacts.
+//
+// Provider/Model are composition-supplied so ModeReplay can honestly report
+// fixture/cassette labels instead of always claiming "openai".
 type liveLunaAdapter struct {
 	client        openaimodel.LunaStructuredClient
 	records       contracts.ImmutableRecordRepository
 	clock         func() time.Time
 	promptVersion string
+	provider      string
+	model         string
 }
 
 func (a *liveLunaAdapter) Normalize(ctx context.Context, raw gen.RawEvent) (contracts.LunaOutput, error) {
@@ -624,6 +659,7 @@ func (a *liveLunaAdapter) Normalize(ctx context.Context, raw gen.RawEvent) (cont
 	if a.clock == nil {
 		a.clock = time.Now
 	}
+	provider, model := a.modelLabels()
 	started := a.clock().UTC()
 	encoded, err := json.Marshal(raw)
 	if err != nil {
@@ -632,24 +668,24 @@ func (a *liveLunaAdapter) Normalize(ctx context.Context, raw gen.RawEvent) (cont
 	response, callErr := a.client.Normalize(ctx, openaimodel.LunaRequest{RawEventJSON: encoded})
 	completed := a.clock().UTC()
 	if callErr != nil {
-		run := lunaFailureRun(raw, started, completed, "failed", callErr.Error(), "", a.promptVersion)
+		run := lunaFailureRun(raw, started, completed, "failed", callErr.Error(), "", a.promptVersion, provider, model)
 		return contracts.LunaOutput{ModelRun: run, Result: quarantinedLunaResult(raw, started)}, nil
 	}
 	if strings.TrimSpace(response.RefusalDetail) != "" {
-		run := lunaFailureRun(raw, started, completed, "refused", response.RefusalDetail, response.ResponseID, a.promptVersion)
+		run := lunaFailureRun(raw, started, completed, "refused", response.RefusalDetail, response.ResponseID, a.promptVersion, provider, model)
 		return contracts.LunaOutput{ModelRun: run, Result: quarantinedLunaResult(raw, started)}, nil
 	}
 	var result gen.LunaResult
 	if err := json.Unmarshal(response.ResultJSON, &result); err != nil {
-		run := lunaFailureRun(raw, started, completed, "invalid", err.Error(), response.ResponseID, a.promptVersion)
+		run := lunaFailureRun(raw, started, completed, "invalid", err.Error(), response.ResponseID, a.promptVersion, provider, model)
 		return contracts.LunaOutput{ModelRun: run, Result: quarantinedLunaResult(raw, started)}, nil
 	}
 	run := gen.ModelRun{
 		SchemaVersion:       "1.0.0",
 		ModelRunID:          "modelrun-live-luna-" + raw.RawEventID,
 		Agent:               "luna",
-		Provider:            "openai",
-		Model:               openaimodel.DefaultLunaModel,
+		Provider:            provider,
+		Model:               model,
 		PromptVersion:       a.promptVersion,
 		OutputSchemaVersion: "1.0.0",
 		InputEventIds:       []any{raw.RawEventID},
@@ -671,13 +707,31 @@ func (a *liveLunaAdapter) Normalize(ctx context.Context, raw gen.RawEvent) (cont
 	return out, nil
 }
 
-func lunaFailureRun(raw gen.RawEvent, started, completed time.Time, status, detail, responseID, promptVersion string) gen.ModelRun {
+func (a *liveLunaAdapter) modelLabels() (provider, model string) {
+	provider = strings.TrimSpace(a.provider)
+	model = strings.TrimSpace(a.model)
+	if provider == "" {
+		provider = "openai"
+	}
+	if model == "" {
+		model = openaimodel.DefaultLunaModel
+	}
+	return provider, model
+}
+
+func lunaFailureRun(raw gen.RawEvent, started, completed time.Time, status, detail, responseID, promptVersion, provider, model string) gen.ModelRun {
+	if strings.TrimSpace(provider) == "" {
+		provider = "openai"
+	}
+	if strings.TrimSpace(model) == "" {
+		model = openaimodel.DefaultLunaModel
+	}
 	return gen.ModelRun{
 		SchemaVersion:       "1.0.0",
 		ModelRunID:          "modelrun-live-luna-" + raw.RawEventID + "-" + status,
 		Agent:               "luna",
-		Provider:            "openai",
-		Model:               openaimodel.DefaultLunaModel,
+		Provider:            provider,
+		Model:               model,
 		PromptVersion:       promptVersion,
 		OutputSchemaVersion: "1.0.0",
 		InputEventIds:       []any{raw.RawEventID},

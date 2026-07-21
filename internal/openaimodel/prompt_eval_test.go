@@ -419,8 +419,22 @@ func assertPromptEvalWire(t *testing.T, body []byte, prompt, schemaName, schemaF
 			t.Fatalf("Luna structured schema = %#v", request.Text.Format["schema"])
 		}
 		assertStrictObjects(t, wrapper)
+		// Luna wire schema is purpose-built for OpenAI strict mode; it does not
+		// embed the authored $id documents.
+		if _, hasID := wrapper["$id"]; hasID {
+			t.Fatal("Luna wire schema must not carry an authored $id")
+		}
+		if _, hasDefs := wrapper["$defs"]; !hasDefs {
+			t.Fatal("Luna wire schema requires a root $defs table")
+		}
 		properties, _ := wrapper["properties"].(map[string]any)
-		assertAuthoredSchema(t, properties["result"], schemaFile)
+		result, _ := properties["result"].(map[string]any)
+		if result["type"] != "object" {
+			t.Fatalf("Luna result wire schema = %#v", result)
+		}
+		if _, hasAllOf := result["allOf"]; hasAllOf {
+			t.Fatal("Luna result wire schema must not retain authored allOf")
+		}
 		return
 	}
 	assertAuthoredSchema(t, request.Text.Format["schema"], schemaFile)

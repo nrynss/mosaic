@@ -9,6 +9,7 @@ import (
 const (
 	AgentTerra = agentTerra
 	AgentSol   = agentSol
+	AgentLuna  = agentLuna
 )
 
 // JoinPromptProvenance rebuilds H1-style provenance "version+sha256:hash".

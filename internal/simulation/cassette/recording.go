@@ -20,13 +20,18 @@ var ErrInnerRequired = errors.New("cassette: inner StructuredClient is required"
 // ErrStoreRequired means Record or Replay mode needs a non-nil Store.
 var ErrStoreRequired = errors.New("cassette: store is required")
 
-// Recording is the persisted envelope for one Terra or Sol StructuredClient call.
+// Recording is the persisted envelope for one Terra, Sol, or Luna structured
+// client call.
 //
 // PromptVersion and PromptHash bank the H1 prompt provenance used when the
 // response was recorded (split from "v1.0.0+sha256:<hex>"). ModeRecord copies
 // them from the decorator; ModeReplay restores them onto the decorator and
 // compose may rejoin them into ModelRun.PromptVersion via JoinPromptProvenance.
 // Older recordings may leave both empty.
+//
+// Agent-specific payload fields are mutually exclusive by agent:
+// Terra → InsightJSON, Sol → RecommendationJSON, Luna → ResultJSON (+ optional
+// CanonicalEventJSON).
 type Recording struct {
 	SchemaVersion      string          `json:"schema_version"`
 	Key                string          `json:"key"`
@@ -40,6 +45,9 @@ type Recording struct {
 	RefusalDetail      string          `json:"refusal_detail,omitempty"`
 	InsightJSON        json.RawMessage `json:"insight_json,omitempty"`
 	RecommendationJSON json.RawMessage `json:"recommendation_json,omitempty"`
+	// ResultJSON / CanonicalEventJSON are Luna Normalize outputs.
+	ResultJSON         json.RawMessage `json:"result_json,omitempty"`
+	CanonicalEventJSON json.RawMessage `json:"canonical_event_json,omitempty"`
 	RecordedAt         string          `json:"recorded_at,omitempty"`
 }
 

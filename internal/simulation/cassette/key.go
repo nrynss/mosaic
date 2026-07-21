@@ -1,6 +1,7 @@
 package cassette
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"mosaic.local/mosaic/internal/ontology/gen"
+	"mosaic.local/mosaic/internal/openaimodel"
 	"mosaic.local/mosaic/internal/sol"
 	"mosaic.local/mosaic/internal/terra"
 )
@@ -16,6 +18,7 @@ import (
 const (
 	agentTerra = "terra"
 	agentSol   = "sol"
+	agentLuna  = "luna"
 	hashPrefix = 16 // hex characters used in the key path segment
 )
 
@@ -47,6 +50,22 @@ func SolKey(req sol.Request, meta KeyMeta) (key string, fingerprint string, err 
 	return formatKey(agentSol, req.StateRevision, meta.BeatID, full), full, nil
 }
 
+// LunaKey returns the stable storage key and full request fingerprint hex for a
+// Luna Normalize request. Luna is not COP-revision-scoped; keys are:
+//
+//	luna/{raw_event_id}[/{beat_id}]/{request_hash16}
+//
+// The fingerprint hashes the RawEventJSON bytes as presented plus the parsed
+// raw_event_id when available.
+func LunaKey(req openaimodel.LunaRequest, meta KeyMeta) (key string, fingerprint string, err error) {
+	fp, rawEventID, err := lunaFingerprint(req, meta)
+	if err != nil {
+		return "", "", err
+	}
+	full := sha256Hex(fp)
+	return formatLunaKey(rawEventID, meta.BeatID, full), full, nil
+}
+
 func formatKey(agent string, revision int64, beatID, fingerprintHex string) string {
 	short := fingerprintHex
 	if len(short) > hashPrefix {
@@ -57,6 +76,22 @@ func formatKey(agent string, revision int64, beatID, fingerprintHex string) stri
 		return fmt.Sprintf("%s/rev%d/%s", agent, revision, short)
 	}
 	return fmt.Sprintf("%s/rev%d/%s/%s", agent, revision, sanitizeSegment(beatID), short)
+}
+
+func formatLunaKey(rawEventID, beatID, fingerprintHex string) string {
+	short := fingerprintHex
+	if len(short) > hashPrefix {
+		short = short[:hashPrefix]
+	}
+	id := sanitizeSegment(rawEventID)
+	if id == "" || id == "_" {
+		id = "unknown"
+	}
+	beatID = strings.TrimSpace(beatID)
+	if beatID == "" {
+		return fmt.Sprintf("%s/%s/%s", agentLuna, id, short)
+	}
+	return fmt.Sprintf("%s/%s/%s/%s", agentLuna, id, sanitizeSegment(beatID), short)
 }
 
 func sanitizeSegment(s string) string {
@@ -103,6 +138,36 @@ func solFingerprint(req sol.Request, meta KeyMeta) ([]byte, error) {
 		doc["beat_id"] = beat
 	}
 	return json.Marshal(doc)
+}
+
+func lunaFingerprint(req openaimodel.LunaRequest, meta KeyMeta) (fp []byte, rawEventID string, err error) {
+	rawEventID = extractRawEventID(req.RawEventJSON)
+	doc := map[string]any{
+		"agent":           agentLuna,
+		"raw_event_id":    rawEventID,
+		"raw_json_sha256": sha256Hex(req.RawEventJSON),
+	}
+	if beat := strings.TrimSpace(meta.BeatID); beat != "" {
+		doc["beat_id"] = beat
+	}
+	encoded, err := json.Marshal(doc)
+	if err != nil {
+		return nil, rawEventID, err
+	}
+	return encoded, rawEventID, nil
+}
+
+func extractRawEventID(raw json.RawMessage) string {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return ""
+	}
+	var envelope struct {
+		RawEventID string `json:"raw_event_id"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(envelope.RawEventID)
 }
 
 func sortedEvidenceIDs(evidence []gen.Evidence) []string {

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"mosaic.local/mosaic/internal/ontology/gen"
+	"mosaic.local/mosaic/internal/openaimodel"
 	"mosaic.local/mosaic/internal/simulation/cassette"
 	"mosaic.local/mosaic/internal/sol"
 	"mosaic.local/mosaic/internal/terra"
@@ -54,6 +55,25 @@ func (c *countingSol) Brief(_ context.Context, _ sol.Request) (sol.Response, err
 	}, nil
 }
 
+type countingLuna struct {
+	calls atomic.Int32
+	resp  openaimodel.LunaResponse
+	err   error
+}
+
+func (c *countingLuna) Normalize(_ context.Context, _ openaimodel.LunaRequest) (openaimodel.LunaResponse, error) {
+	c.calls.Add(1)
+	if c.err != nil {
+		return openaimodel.LunaResponse{}, c.err
+	}
+	return openaimodel.LunaResponse{
+		ResultJSON:         append(json.RawMessage(nil), c.resp.ResultJSON...),
+		CanonicalEventJSON: append(json.RawMessage(nil), c.resp.CanonicalEventJSON...),
+		ResponseID:         c.resp.ResponseID,
+		RefusalDetail:      c.resp.RefusalDetail,
+	}, nil
+}
+
 func sampleEvidence(id string) gen.Evidence {
 	return gen.Evidence{
 		SchemaVersion: "1.0.0",
@@ -82,6 +102,12 @@ func sampleSolRequest() sol.Request {
 		},
 		Evidence:    []gen.Evidence{sampleEvidence("ev-a")},
 		RequestedBy: "supervisor-demo",
+	}
+}
+
+func sampleLunaRequest() openaimodel.LunaRequest {
+	return openaimodel.LunaRequest{
+		RawEventJSON: json.RawMessage(`{"schema_version":"1.0.0","raw_event_id":"raw-cassette-001","content_type":"application/json","payload_bytes_b64":"e30=","raw_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","source":{"source_id":"sim","source_record_id":"s1"},"received_at":"2026-07-18T10:00:01Z"}`),
 	}
 }
 
@@ -287,6 +313,120 @@ func TestSolReplayMiss(t *testing.T) {
 	_, err := client.Brief(context.Background(), sampleSolRequest())
 	if !errors.Is(err, cassette.ErrReplayMiss) {
 		t.Fatalf("error = %v, want ErrReplayMiss", err)
+	}
+}
+
+// --- Luna record / replay ---
+
+func TestLunaKeyStableAndIncludesRawEventID(t *testing.T) {
+	req := sampleLunaRequest()
+	k1, fp1, err := cassette.LunaKey(req, cassette.KeyMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	k2, fp2, err := cassette.LunaKey(req, cassette.KeyMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if k1 != k2 || fp1 != fp2 {
+		t.Fatalf("unstable: %q/%q vs %q/%q", k1, fp1, k2, fp2)
+	}
+	if want := "luna/raw-cassette-001/"; len(k1) <= len(want) || k1[:len(want)] != want {
+		t.Fatalf("key = %q, want prefix %q", k1, want)
+	}
+
+	// Different payload bytes → different key.
+	other := sampleLunaRequest()
+	other.RawEventJSON = json.RawMessage(`{"schema_version":"1.0.0","raw_event_id":"raw-cassette-001","content_type":"text/plain","payload_bytes_b64":"eA==","raw_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","source":{"source_id":"sim","source_record_id":"s1"},"received_at":"2026-07-18T10:00:01Z"}`)
+	k3, _, _ := cassette.LunaKey(other, cassette.KeyMeta{})
+	if k3 == k1 {
+		t.Fatal("payload change should alter key")
+	}
+	kBeat, _, _ := cassette.LunaKey(req, cassette.KeyMeta{BeatID: "beat-x"})
+	if kBeat == k1 {
+		t.Fatal("beat_id should alter key")
+	}
+}
+
+func TestLunaRecordThenReplay(t *testing.T) {
+	store := cassette.NewMemoryStore()
+	inner := &countingLuna{
+		resp: openaimodel.LunaResponse{
+			ResultJSON:         json.RawMessage(`{"schema_version":"1.0.0","luna_result_id":"luna-1","raw_event_id":"raw-cassette-001","status":"accepted","created_at":"2026-07-18T10:00:02Z"}`),
+			CanonicalEventJSON: json.RawMessage(`{"schema_version":"1.0.0","canonical_event_id":"canon-1","raw_event_id":"raw-cassette-001","event_type":"incident_reported"}`),
+			ResponseID:         "resp-luna-1",
+		},
+	}
+	req := sampleLunaRequest()
+
+	recorder := cassette.NewLuna(cassette.ModeRecord, store, inner)
+	recorder.PromptVersion = "v1.0.0"
+	recorder.PromptHash = "lunahash"
+	got, err := recorder.Normalize(context.Background(), req)
+	if err != nil {
+		t.Fatalf("record Normalize: %v", err)
+	}
+	if inner.calls.Load() != 1 {
+		t.Fatalf("inner calls = %d, want 1", inner.calls.Load())
+	}
+	if string(got.ResultJSON) != string(inner.resp.ResultJSON) || got.ResponseID != "resp-luna-1" {
+		t.Fatalf("recorded response = %#v", got)
+	}
+	if store.Len() != 1 {
+		t.Fatalf("store len = %d, want 1", store.Len())
+	}
+
+	key, _, err := cassette.LunaKey(req, cassette.KeyMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := store.Get(context.Background(), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Agent != cassette.AgentLuna || rec.PromptVersion != "v1.0.0" || rec.PromptHash != "lunahash" {
+		t.Fatalf("recording envelope = %#v", rec)
+	}
+	if !bytes.Contains(rec.ResultJSON, []byte("luna-1")) || !bytes.Contains(rec.CanonicalEventJSON, []byte("canon-1")) {
+		t.Fatalf("payloads not banked: result=%s canon=%s", rec.ResultJSON, rec.CanonicalEventJSON)
+	}
+
+	replayer := cassette.NewLuna(cassette.ModeReplay, store, nil)
+	replayed, err := replayer.Normalize(context.Background(), req)
+	if err != nil {
+		t.Fatalf("replay Normalize: %v", err)
+	}
+	if inner.calls.Load() != 1 {
+		t.Fatalf("inner calls after replay = %d, want 1", inner.calls.Load())
+	}
+	if string(replayed.ResultJSON) != string(got.ResultJSON) ||
+		string(replayed.CanonicalEventJSON) != string(got.CanonicalEventJSON) ||
+		replayed.ResponseID != got.ResponseID {
+		t.Fatalf("replayed = %#v, want %#v", replayed, got)
+	}
+	if replayer.PromptVersion != "v1.0.0" || replayer.PromptHash != "lunahash" {
+		t.Fatalf("replay did not restore provenance: %q / %q", replayer.PromptVersion, replayer.PromptHash)
+	}
+}
+
+func TestLunaReplayMiss(t *testing.T) {
+	client := cassette.NewLuna(cassette.ModeReplay, cassette.NewMemoryStore(), nil)
+	_, err := client.Normalize(context.Background(), sampleLunaRequest())
+	if !errors.Is(err, cassette.ErrReplayMiss) {
+		t.Fatalf("error = %v, want ErrReplayMiss", err)
+	}
+}
+
+func TestLunaRecordDoesNotPersistInnerError(t *testing.T) {
+	store := cassette.NewMemoryStore()
+	inner := &countingLuna{err: errors.New("network down")}
+	client := cassette.NewLuna(cassette.ModeRecord, store, inner)
+	_, err := client.Normalize(context.Background(), sampleLunaRequest())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if store.Len() != 0 {
+		t.Fatalf("store should stay empty on transport failure, len=%d", store.Len())
 	}
 }
 
@@ -510,6 +650,60 @@ func TestSolRecordBanksAndReplayRestoresPromptProvenance(t *testing.T) {
 	}
 	if replayer.PromptVersion != wantVersion || replayer.PromptHash != wantHash {
 		t.Fatalf("replay restore = %q / %q", replayer.PromptVersion, replayer.PromptHash)
+	}
+}
+
+func TestFileStoreListSkipsNonRecordingJSON(t *testing.T) {
+	dir := t.TempDir()
+	// Operator response dumps and ad-hoc banks must not break List / provenance.
+	if err := os.WriteFile(filepath.Join(dir, "sol-operator-brief-response.json"), []byte(`{"data":{"status":"ok"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "luna-debug.json"), []byte(`{"result_json":{"status":"accepted"},"response_id":"x"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Valid JSON envelope with a type-mismatched field must still surface an error
+	// (not silently skipped). Truncated/non-JSON dumps are ignored.
+	if err := os.WriteFile(filepath.Join(dir, "broken.json"), []byte(`{"schema_version":"1.0.0","key":"terra/rev1/abc","agent":"terra","state_revision":"not-an-int"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := cassette.NewFileStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.List(context.Background()); err == nil {
+		t.Fatal("expected List to fail on corrupt recording envelope")
+	}
+
+	// Remove corrupt file; dumps alone should yield an empty list (not error).
+	if err := os.Remove(filepath.Join(dir, "broken.json")); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := store.List(context.Background())
+	if err != nil {
+		t.Fatalf("list with dumps only: %v", err)
+	}
+	if len(listed) != 0 {
+		t.Fatalf("listed = %d, want 0 (dumps ignored)", len(listed))
+	}
+
+	// A real recording coexists with dumps.
+	inner := &countingTerra{
+		resp: terra.Response{InsightJSON: json.RawMessage(`{"insight_id":"i1"}`), ResponseID: "r1"},
+	}
+	recorder := cassette.NewTerra(cassette.ModeRecord, store, inner)
+	recorder.PromptVersion = "v1.0.0"
+	recorder.PromptHash = "h1"
+	if _, err := recorder.Assess(context.Background(), sampleTerraRequest()); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	listed, err = store.List(context.Background())
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(listed) != 1 || listed[0].Agent != cassette.AgentTerra {
+		t.Fatalf("listed = %#v, want one terra recording", listed)
 	}
 }
 

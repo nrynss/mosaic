@@ -52,10 +52,14 @@ func loadStructuredOutputSchema(schemaDir string, route schemaRoute) (structured
 	return structuredOutputSchema{name: route.name, document: document}, nil
 }
 
-// loadLunaStructuredOutputSchema preserves the existing Luna adapter contract:
-// the model returns a LunaResult plus an optional CanonicalEvent. The authored
-// schemas are transformed only for OpenAI's strict wire requirements; Mosaic's
-// authored schemas remain the source of truth for all local validation.
+// loadLunaStructuredOutputSchema builds a purpose-designed OpenAI strict-mode
+// wire schema for Luna. The model returns {result, canonical_event|null}.
+//
+// Authored ontology schemas remain the source of truth for local validation and
+// are never modified. The wire document is self-contained: one root $defs table,
+// no $id base-URI re-scoping, no allOf/if/then (forbidden by OpenAI strict mode),
+// and no typeless nodes. Payload discrimination and status-conditional required
+// fields are re-enforced by Mosaic's authored-schema validators after the call.
 func loadLunaStructuredOutputSchema(schemaDir string) (structuredOutputSchema, error) {
 	if !responseFormatName.MatchString(lunaResultSchemaRoute.name) {
 		return structuredOutputSchema{}, fmt.Errorf("unsafe structured-output schema name %q", lunaResultSchemaRoute.name)
@@ -64,37 +68,252 @@ func loadLunaStructuredOutputSchema(schemaDir string) (structuredOutputSchema, e
 	if err != nil {
 		return structuredOutputSchema{}, err
 	}
-	lunaResult, err = strictCompatibleSchema(lunaResult)
-	if err != nil {
-		return structuredOutputSchema{}, fmt.Errorf("make Luna result schema strict-compatible: %w", err)
-	}
 	canonicalEvent, err := readAuthoredSchema(schemaDir, "canonical-event.schema.json")
 	if err != nil {
 		return structuredOutputSchema{}, err
 	}
-	canonicalEvent, err = strictCompatibleSchema(canonicalEvent)
+	document, err := buildLunaStrictWireSchema(lunaResult, canonicalEvent)
 	if err != nil {
-		return structuredOutputSchema{}, fmt.Errorf("make canonical event schema strict-compatible: %w", err)
+		return structuredOutputSchema{}, err
+	}
+	return structuredOutputSchema{name: lunaResultSchemaRoute.name, document: document}, nil
+}
+
+// buildLunaStrictWireSchema composes a single strict-compatible JSON Schema
+// document from the authored LunaResult + CanonicalEvent schemas.
+func buildLunaStrictWireSchema(lunaResult, canonicalEvent json.RawMessage) (json.RawMessage, error) {
+	lunaRoot, err := decodeSchemaObject(lunaResult, "luna-result")
+	if err != nil {
+		return nil, err
+	}
+	canonRoot, err := decodeSchemaObject(canonicalEvent, "canonical-event")
+	if err != nil {
+		return nil, err
 	}
 
-	// CanonicalEvent is nullable for quarantined/rejected Luna outcomes; accepted
-	// and repaired outcomes remain checked by the existing ingestion validator.
+	rootDefs := map[string]any{}
+
+	// Namespace each schema's $defs into the wrapper root so #/$defs/... refs
+	// resolve against one table (embedding two $id documents would re-scope
+	// fragment refs and break OpenAI's resolver).
+	if err := hoistDefs(lunaRoot, "luna_", rootDefs); err != nil {
+		return nil, fmt.Errorf("hoist Luna $defs: %w", err)
+	}
+	if err := hoistDefs(canonRoot, "canon_", rootDefs); err != nil {
+		return nil, fmt.Errorf("hoist canonical $defs: %w", err)
+	}
+
+	// Strip OpenAI-forbidden / wire-unneeded keywords from the embedded bodies.
+	// allOf/if/then express status and event_type discrimination that Mosaic
+	// re-validates after the call; keeping them on the wire yields HTTP 400.
+	stripWireIncompatibleKeywords(lunaRoot)
+	stripWireIncompatibleKeywords(canonRoot)
+
+	// repair.fields[].original (and replacement) are authored as bare {}
+	// ("any"). Strict mode requires a type; a scalar union is enough because
+	// authored validation accepts the real value afterward.
+	if err := typeAnyLeavesInDefs(rootDefs); err != nil {
+		return nil, err
+	}
+
+	// Represent the payload discriminated union as anyOf of concrete payload
+	// shapes instead of allOf/if/then on event_type.
+	if err := expandCanonicalPayloadAnyOf(canonRoot, "canon_"); err != nil {
+		return nil, err
+	}
+
+	// Rewrite fragment refs to the namespaced root $defs keys. Bodies first,
+	// then each def under its own prefix (defs still use un-prefixed fragments
+	// until this pass — e.g. confidence → #/$defs/strength becomes
+	// #/$defs/canon_strength).
+	rewriteDefRefs(lunaRoot, "luna_")
+	rewriteDefRefs(canonRoot, "canon_")
+	for name, def := range rootDefs {
+		switch {
+		case strings.HasPrefix(name, "luna_"):
+			rewriteDefRefs(def, "luna_")
+		case strings.HasPrefix(name, "canon_"):
+			rewriteDefRefs(def, "canon_")
+		}
+	}
+
+	// Drop metadata that must not appear on the wire document.
+	for _, meta := range []string{"$schema", "$id", "title", "$defs"} {
+		delete(lunaRoot, meta)
+		delete(canonRoot, meta)
+	}
+
 	wrapper := map[string]any{
 		"type":                 "object",
 		"additionalProperties": false,
-		"required":             []string{"result", "canonical_event"},
+		"required":             []any{"result", "canonical_event"},
 		"properties": map[string]any{
-			"result": json.RawMessage(lunaResult),
+			"result": lunaRoot,
 			"canonical_event": map[string]any{
-				"anyOf": []any{json.RawMessage(canonicalEvent), map[string]any{"type": "null"}},
+				"anyOf": []any{canonRoot, map[string]any{"type": "null"}},
 			},
 		},
+		"$defs": rootDefs,
 	}
-	document, err := json.Marshal(wrapper)
+
+	if err := makeSchemaStrict(wrapper); err != nil {
+		return nil, fmt.Errorf("make Luna wire schema strict-compatible: %w", err)
+	}
+	encoded, err := json.Marshal(wrapper)
 	if err != nil {
-		return structuredOutputSchema{}, fmt.Errorf("encode Luna structured-output wrapper: %w", err)
+		return nil, fmt.Errorf("encode Luna structured-output wrapper: %w", err)
 	}
-	return structuredOutputSchema{name: lunaResultSchemaRoute.name, document: document}, nil
+	return encoded, nil
+}
+
+func decodeSchemaObject(document json.RawMessage, label string) (map[string]any, error) {
+	var root map[string]any
+	if err := json.Unmarshal(document, &root); err != nil {
+		return nil, fmt.Errorf("decode %s schema: %w", label, err)
+	}
+	// Deep-copy via re-marshal so mutations never touch shared/cached input.
+	// Callers pass freshly read bytes, but keep the transform hermetic.
+	encoded, err := json.Marshal(root)
+	if err != nil {
+		return nil, fmt.Errorf("clone %s schema: %w", label, err)
+	}
+	var clone map[string]any
+	if err := json.Unmarshal(encoded, &clone); err != nil {
+		return nil, fmt.Errorf("clone %s schema: %w", label, err)
+	}
+	return clone, nil
+}
+
+func hoistDefs(root map[string]any, prefix string, into map[string]any) error {
+	defs, ok := root["$defs"].(map[string]any)
+	if !ok || len(defs) == 0 {
+		return nil
+	}
+	for name, def := range defs {
+		key := prefix + name
+		if _, exists := into[key]; exists {
+			return fmt.Errorf("duplicate $defs key %q", key)
+		}
+		into[key] = def
+	}
+	return nil
+}
+
+func stripWireIncompatibleKeywords(node any) {
+	switch n := node.(type) {
+	case map[string]any:
+		for _, key := range []string{"allOf", "if", "then", "else", "not", "dependentRequired", "dependentSchemas"} {
+			delete(n, key)
+		}
+		for _, child := range n {
+			stripWireIncompatibleKeywords(child)
+		}
+	case []any:
+		for _, child := range n {
+			stripWireIncompatibleKeywords(child)
+		}
+	}
+}
+
+// typeAnyLeavesInDefs replaces typeless accept-any objects ({}) under $defs
+// with a concrete scalar union OpenAI strict mode accepts.
+func typeAnyLeavesInDefs(defs map[string]any) error {
+	scalarAny := map[string]any{
+		"type": []any{"string", "number", "integer", "boolean", "null"},
+	}
+	var walk func(any)
+	walk = func(value any) {
+		switch n := value.(type) {
+		case map[string]any:
+			// A bare {} (no type, no keywords that pin a shape) is accept-any.
+			if isTypelessAnyObject(n) {
+				// Mutate in place: clear and set type union.
+				for k := range n {
+					delete(n, k)
+				}
+				n["type"] = scalarAny["type"]
+				return
+			}
+			for _, child := range n {
+				walk(child)
+			}
+		case []any:
+			for _, child := range n {
+				walk(child)
+			}
+		}
+	}
+	walk(defs)
+	return nil
+}
+
+func isTypelessAnyObject(node map[string]any) bool {
+	if len(node) == 0 {
+		return true
+	}
+	// Only metadata-less empty constraints count as "any".
+	for key := range node {
+		switch key {
+		case "description", "title", "default":
+			continue
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// expandCanonicalPayloadAnyOf replaces the opaque payload object with an anyOf
+// of the concrete per-event_type payload defs (incident, unit, road, ...).
+func expandCanonicalPayloadAnyOf(canonRoot map[string]any, prefix string) error {
+	properties, ok := canonRoot["properties"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("canonical event schema missing properties")
+	}
+	payloadNames := []string{
+		"incident_payload",
+		"incident_resolved_payload",
+		"unit_payload",
+		"resource_payload",
+		"road_payload",
+		"weather_payload",
+	}
+	variants := make([]any, 0, len(payloadNames))
+	for _, name := range payloadNames {
+		variants = append(variants, map[string]any{
+			"$ref": "#/$defs/" + prefix + name,
+		})
+	}
+	properties["payload"] = map[string]any{"anyOf": variants}
+	return nil
+}
+
+// rewriteDefRefs rewrites #/$defs/<name> fragment refs by prepending prefix to
+// the def name. Refs that already include the prefix, or point outside $defs,
+// are left unchanged.
+func rewriteDefRefs(value any, prefix string) {
+	if prefix == "" {
+		return
+	}
+	switch n := value.(type) {
+	case map[string]any:
+		if ref, ok := n["$ref"].(string); ok {
+			const head = "#/$defs/"
+			if strings.HasPrefix(ref, head) {
+				name := strings.TrimPrefix(ref, head)
+				if name != "" && !strings.HasPrefix(name, prefix) {
+					n["$ref"] = head + prefix + name
+				}
+			}
+		}
+		for _, child := range n {
+			rewriteDefRefs(child, prefix)
+		}
+	case []any:
+		for _, child := range n {
+			rewriteDefRefs(child, prefix)
+		}
+	}
 }
 
 func readAuthoredSchema(schemaDir, filename string) (json.RawMessage, error) {

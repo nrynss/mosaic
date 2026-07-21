@@ -340,14 +340,32 @@ func TestLunaNormalizeMapsResultAndOptionalCanonical(t *testing.T) {
 	if wrapper["type"] != "object" || wrapper["additionalProperties"] != false {
 		t.Fatalf("Luna wrapper = %#v", wrapper)
 	}
+	// Wire schema is purpose-built for OpenAI strict mode: no authored $id,
+	// single root $defs, nullable canonical_event.
+	if _, hasID := wrapper["$id"]; hasID {
+		t.Fatal("Luna wire schema must not carry an authored $id")
+	}
+	if _, hasDefs := wrapper["$defs"].(map[string]any); !hasDefs {
+		t.Fatal("Luna wire schema requires a root $defs table")
+	}
+	assertStrictObjects(t, wrapper)
 	properties, _ := wrapper["properties"].(map[string]any)
-	assertAuthoredSchema(t, properties["result"], "luna-result.schema.json")
+	result, _ := properties["result"].(map[string]any)
+	if result["type"] != "object" {
+		t.Fatalf("Luna result wire schema = %#v", result)
+	}
+	if _, hasAllOf := result["allOf"]; hasAllOf {
+		t.Fatal("Luna result wire schema must not retain authored allOf")
+	}
 	canonical, _ := properties["canonical_event"].(map[string]any)
 	anyOf, _ := canonical["anyOf"].([]any)
 	if len(anyOf) != 2 {
 		t.Fatalf("Luna canonical_event schema = %#v", canonical)
 	}
-	assertAuthoredSchema(t, anyOf[0], "canonical-event.schema.json")
+	canonBody, _ := anyOf[0].(map[string]any)
+	if _, hasAllOf := canonBody["allOf"]; hasAllOf {
+		t.Fatal("canonical_event wire schema must not retain authored allOf")
+	}
 	if nullSchema, _ := anyOf[1].(map[string]any); nullSchema["type"] != "null" {
 		t.Fatalf("Luna nullable canonical_event schema = %#v", anyOf[1])
 	}
@@ -443,6 +461,163 @@ func TestStrictSchemaLeavesNoUntypedConstOrEnum(t *testing.T) {
 			t.Fatalf("%s: %s", route.file, violation)
 		}
 	}
+	// Luna wire schema is purpose-built (not loadStructuredOutputSchema).
+	luna, err := loadLunaStructuredOutputSchema(testSchemaDir(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lunaDoc any
+	if err := json.Unmarshal(luna.document, &lunaDoc); err != nil {
+		t.Fatal(err)
+	}
+	if violation := findUntypedConstOrEnum(lunaDoc, luna.name); violation != "" {
+		t.Fatalf("luna wire: %s", violation)
+	}
+}
+
+// TestLunaWireSchemaIsOpenAIStrictCompatible guards the Parcel B design:
+// no allOf/if/then/else, every $ref resolves inside the document, and every
+// object/array/leaf that needs a type has one. Authored ontology files stay
+// untouched.
+func TestLunaWireSchemaIsOpenAIStrictCompatible(t *testing.T) {
+	beforeLuna, err := os.ReadFile(filepath.Join(testSchemaDir(t), "luna-result.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeCanon, err := os.ReadFile(filepath.Join(testSchemaDir(t), "canonical-event.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	schema, err := loadLunaStructuredOutputSchema(testSchemaDir(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterLuna, _ := os.ReadFile(filepath.Join(testSchemaDir(t), "luna-result.schema.json"))
+	afterCanon, _ := os.ReadFile(filepath.Join(testSchemaDir(t), "canonical-event.schema.json"))
+	if string(beforeLuna) != string(afterLuna) || string(beforeCanon) != string(afterCanon) {
+		t.Fatal("authored ontology schemas were modified")
+	}
+
+	var document any
+	if err := json.Unmarshal(schema.document, &document); err != nil {
+		t.Fatal(err)
+	}
+	assertStrictObjects(t, document)
+	if violation := findForbiddenStrictKeywords(document, "root"); violation != "" {
+		t.Fatal(violation)
+	}
+	if violation := findUntypedSchemaNode(document, "root"); violation != "" {
+		t.Fatal(violation)
+	}
+	defs := map[string]bool{}
+	if root, ok := document.(map[string]any); ok {
+		if raw, ok := root["$defs"].(map[string]any); ok {
+			for name := range raw {
+				defs[name] = true
+			}
+		}
+	}
+	if violation := findUnresolvedRef(document, "root", defs); violation != "" {
+		t.Fatal(violation)
+	}
+}
+
+func findForbiddenStrictKeywords(value any, path string) string {
+	switch node := value.(type) {
+	case map[string]any:
+		for _, key := range []string{"allOf", "if", "then", "else", "not"} {
+			if _, ok := node[key]; ok {
+				return "forbidden keyword " + key + " at " + path
+			}
+		}
+		for key, child := range node {
+			if violation := findForbiddenStrictKeywords(child, path+"."+key); violation != "" {
+				return violation
+			}
+		}
+	case []any:
+		for i, child := range node {
+			if violation := findForbiddenStrictKeywords(child, fmt.Sprintf("%s[%d]", path, i)); violation != "" {
+				return violation
+			}
+		}
+	}
+	return ""
+}
+
+// findUntypedSchemaNode reports schema objects that look like type constraints
+// but omit "type" (and are not pure $ref / anyOf containers).
+func findUntypedSchemaNode(value any, path string) string {
+	switch node := value.(type) {
+	case map[string]any:
+		if _, hasRef := node["$ref"]; hasRef {
+			return ""
+		}
+		if _, hasAnyOf := node["anyOf"]; hasAnyOf {
+			for i, child := range node["anyOf"].([]any) {
+				if violation := findUntypedSchemaNode(child, fmt.Sprintf("%s.anyOf[%d]", path, i)); violation != "" {
+					return violation
+				}
+			}
+			return ""
+		}
+		_, hasType := node["type"]
+		_, hasProperties := node["properties"]
+		_, hasItems := node["items"]
+		_, hasConst := node["const"]
+		_, hasEnum := node["enum"]
+		if (hasProperties || hasItems || hasConst || hasEnum) && !hasType {
+			return "untyped schema node at " + path
+		}
+		// Empty object with no type is invalid under strict mode.
+		if len(node) == 0 {
+			return "empty untyped schema node at " + path
+		}
+		for key, child := range node {
+			if key == "$defs" || key == "required" || key == "enum" || key == "const" {
+				continue
+			}
+			if violation := findUntypedSchemaNode(child, path+"."+key); violation != "" {
+				return violation
+			}
+		}
+	case []any:
+		for i, child := range node {
+			if violation := findUntypedSchemaNode(child, fmt.Sprintf("%s[%d]", path, i)); violation != "" {
+				return violation
+			}
+		}
+	}
+	return ""
+}
+
+func findUnresolvedRef(value any, path string, defs map[string]bool) string {
+	switch node := value.(type) {
+	case map[string]any:
+		if ref, ok := node["$ref"].(string); ok {
+			const head = "#/$defs/"
+			if !strings.HasPrefix(ref, head) {
+				return "non-local $ref " + ref + " at " + path
+			}
+			name := strings.TrimPrefix(ref, head)
+			if !defs[name] {
+				return "unresolved $ref " + ref + " at " + path
+			}
+		}
+		for key, child := range node {
+			if violation := findUnresolvedRef(child, path+"."+key, defs); violation != "" {
+				return violation
+			}
+		}
+	case []any:
+		for i, child := range node {
+			if violation := findUnresolvedRef(child, fmt.Sprintf("%s[%d]", path, i), defs); violation != "" {
+				return violation
+			}
+		}
+	}
+	return ""
 }
 
 func findUntypedConstOrEnum(value any, path string) string {

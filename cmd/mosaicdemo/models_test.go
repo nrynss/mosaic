@@ -263,10 +263,11 @@ func TestApplyCassetteRecordBanksLoadedPromptProvenance(t *testing.T) {
 	construct := contracts.AgentProviderSelection{
 		openaimodel.AgentTerra: contracts.ProviderLive,
 	}
-	terraClient, _, mode, _, err := applyCassette(
+	_, terraClient, _, mode, _, err := applyCassette(
 		cassette.ModeRecord,
 		modelEnv{CassetteStore: mem, CassetteDir: t.TempDir()},
-		inner, nil, construct,
+		nil, inner, nil, construct,
+		versionedPrompt{},
 		prompt,
 		versionedPrompt{},
 	)
@@ -330,8 +331,21 @@ func TestReplayPromptVersionsUsesBankedProvenance(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed sol: %v", err)
 	}
+	if err := mem.Put(ctx, &cassette.Recording{
+		SchemaVersion: cassette.SchemaVersion,
+		Key:           "luna/raw-seed/aaaaaaaaaaaaaaaa",
+		Agent:         cassette.AgentLuna,
+		PromptVersion: "v1.0.0",
+		PromptHash:    "luna999hash",
+		ResponseID:    "seed-l",
+	}); err != nil {
+		t.Fatalf("seed luna: %v", err)
+	}
 
-	terraPV, solPV := replayPromptVersions(ctx, modelEnv{CassetteStore: mem, CassetteDir: t.TempDir()})
+	lunaPV, terraPV, solPV := replayPromptVersions(ctx, modelEnv{CassetteStore: mem, CassetteDir: t.TempDir()})
+	if want := "v1.0.0+sha256:luna999hash"; lunaPV != want {
+		t.Fatalf("luna PV = %q, want %q", lunaPV, want)
+	}
 	if want := "v1.0.0+sha256:abc123terra"; terraPV != want {
 		t.Fatalf("terra PV = %q, want %q", terraPV, want)
 	}
@@ -341,9 +355,9 @@ func TestReplayPromptVersionsUsesBankedProvenance(t *testing.T) {
 
 	// Empty bank falls back to the opaque replay id (legacy recordings).
 	empty := cassette.NewMemoryStore()
-	terraPV, solPV = replayPromptVersions(ctx, modelEnv{CassetteStore: empty, CassetteDir: t.TempDir()})
-	if terraPV != cassetteReplayPromptVersion || solPV != cassetteReplayPromptVersion {
-		t.Fatalf("empty bank fallback = %q / %q, want %q", terraPV, solPV, cassetteReplayPromptVersion)
+	lunaPV, terraPV, solPV = replayPromptVersions(ctx, modelEnv{CassetteStore: empty, CassetteDir: t.TempDir()})
+	if lunaPV != cassetteReplayPromptVersion || terraPV != cassetteReplayPromptVersion || solPV != cassetteReplayPromptVersion {
+		t.Fatalf("empty bank fallback = %q / %q / %q, want %q", lunaPV, terraPV, solPV, cassetteReplayPromptVersion)
 	}
 }
 
@@ -677,10 +691,11 @@ func TestComposeModelsRecordModeWrapsLivePath(t *testing.T) {
 		openaimodel.AgentTerra: contracts.ProviderLive,
 		openaimodel.AgentSol:   contracts.ProviderLive,
 	}
-	terraClient, solClient, mode, _, err := applyCassette(
+	_, terraClient, solClient, mode, _, err := applyCassette(
 		cassette.ModeRecord,
 		modelEnv{CassetteStore: mem, CassetteDir: t.TempDir()},
-		terraInner, solInner, construct,
+		nil, terraInner, solInner, construct,
+		versionedPrompt{},
 		versionedPrompt{Provenance: "v1.0.0+sha256:abc"},
 		versionedPrompt{Provenance: "v1.0.0+sha256:def"},
 	)
@@ -762,13 +777,14 @@ func TestComposeModelsReplayModeDoesNotCallNetwork(t *testing.T) {
 	}
 
 	// Direct ModeReplay path: no inner, pre-seeded store, no network.
-	terraClient, solClient, mode, _, err := applyCassette(
+	lunaClient, terraClient, solClient, mode, _, err := applyCassette(
 		cassette.ModeReplay,
 		modelEnv{CassetteStore: mem, CassetteDir: t.TempDir()},
-		nil, nil,
+		nil, nil, nil,
 		contracts.AgentProviderSelection{},
-		versionedPrompt{}, versionedPrompt{},
+		versionedPrompt{}, versionedPrompt{}, versionedPrompt{},
 	)
+	_ = lunaClient
 	if err != nil {
 		t.Fatalf("applyCassette replay: %v", err)
 	}
