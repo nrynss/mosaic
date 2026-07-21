@@ -52,7 +52,8 @@ Rules:
 2. **Record** wraps only agents that are effectively live (provider `live` **and** key present). If mode is `live`/`record` but the key is missing or providers stay fixture, composition demotes to passthrough (same as existing provider fallback; refusals are not banked).
 3. **Replay** does **not** require `OPENAI_API_KEY`. Terra/Sol always use the FileStore; a missing recording returns `cassette.ErrReplayMiss` (never a silent network call).
 4. Per-agent `MOSAIC_TERRA_PROVIDER` / `MOSAIC_SOL_PROVIDER` still gate which agents are live when mode is live/record.
-5. Cassette mode is server-only env configuration (no UI secrets). Mode status is available on the composition bundle (`CassetteMode`) for a later capability/status surface (D2 “Replay last run”).
+5. Cassette mode is **process-level env only** (no UI secrets, no mid-process hot-swap). The UI surfaces `cassette_mode` from `/api/v1/version` and `/api/v1/advisories` and shows a mode pill (Fixture / Live recording / Replay).
+6. **“Refresh banked advice”** (UI) is enabled only when the process was started with `MOSAIC_SIM_MODE=replay`. It re-fetches advisories from the server; it does **not** re-bank a live run or change mode. True free Terra/Sol cassette use requires the process already in replay mode when those clients are invoked.
 
 Example — bank one run, then replay:
 

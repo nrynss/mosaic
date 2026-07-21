@@ -15,16 +15,26 @@ scenario** (or `POST /api/v1/simulation/start`) to drive progressive
 EventLog.Append + sync domain `ProcessBeat` until COP revision 9 and the
 fixture Terra/Sol continuum land for the active simulation session.
 
+**Beat SSE order (R1):** the server advances COP (OnBeat) **before** emitting
+the beat event on `/api/v1/simulation/stream`. The UI may reload COP on beat
+without flashing the previous revision for that step.
+
 | Env | Default | Effect |
 |-----|---------|--------|
 | `MOSAIC_SEED_ON_START` | off (`0`) | Progressive path: empty board until Play. Set `1` / `true` / `yes` / `on` for legacy bulk seed at boot (board at rev 9 immediately; ActiveSession isolation not wired). |
-| `MOSAIC_SIM_BEAT_SPACING` | `2.5s` | Equal inter-beat SSE pacing on the progressive path. Use `1ms` in automated e2e. Go duration or integer milliseconds. |
+| `MOSAIC_SIM_BEAT_SPACING` | `2.5s` | Equal inter-beat pacing on the progressive path. Use `1ms` in automated e2e. Go duration or integer milliseconds. |
+| `MOSAIC_SIM_MODE` | `fixture` | Process-level cassette mode: `fixture` / `live` (record) / `replay`. Not hot-swapped from the UI. |
+| `MOSAIC_CASSETTE_DIR` | temp / Compose `/tmp/mosaic-recordings` | Where live runs bank Terra/Sol responses for later `replay`. |
 
-**Reset vs durable store:** `POST /api/v1/simulation/reset` (and process
-restart without volume wipe) does **not** truncate the append-only store.
-Prior sessions' immutable records remain. Explicit **End** clears the active
-session so GET `/cop` and `/advisories` return the empty-board policy; durable
-history is still in Postgres/SQLite.
+**Session board vs durable history:** GET `/cop` and `/advisories` on the
+progressive path are **session-scoped** (Active session + materialization /
+advisory id index). Explicit **End** clears Active → empty board. **Reset**
+starts a new session id; it does **not** truncate the append-only store.
+Prior sessions’ immutable records remain in Postgres (or local SQLite).
+
+**Postgres vs SQLite:** Compose is Postgres. Local/e2e without a DSN use
+SQLite. Progressive SQLite still isolates the *board view* with an in-process
+session COP cache (`MemoryCOP`); durable rows stay on the file.
 
 ## Scope and prerequisites
 
@@ -75,7 +85,8 @@ Compose defines a **two-service** topology:
 Outside Compose, `mosaicdemo` defaults to a SQLite file under the process temp
 directory when `MOSAIC_DB_PATH` is unset. Pass a `postgres://` or
 `postgresql://` DSN to use Postgres instead. Do not mix: one process, one
-backend.
+backend. CI e2e uses SQLite for speed; the **decided durable topology** is
+Compose app + Postgres.
 
 This demo has no real data, privacy classification, retention workflow, or
 deletion automation. Its checked-in records are synthetic only.

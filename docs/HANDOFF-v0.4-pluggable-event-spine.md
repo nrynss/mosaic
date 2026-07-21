@@ -187,32 +187,33 @@ removes both problems.
 - A **`BeatExecutor`** (in the simulation package) runs each beat: `Append` the
   beat's frozen raw event to the `EventLog` → the projector advances a real
   revision → publish a COP snapshot → the UI reveals **progressively, for real**.
-- **Interactive progressive path (D1 + D1r residuals):** Play →
-  `session.Controller` (SSE + `BeatSpacing` + `Active`) → `OnBeat`:
-  1. `EventLog.Append` (`raw.event`, `IdempotencyKey=raw_event_id`) — Postgres
-     `pgstore` or SQLite `eventlog/memory`;
-  2. **Sync** domain `ProcessBeat` (P05 ingest + project + recover) before the
-     next beat waits — not a free-running multi-worker consumer for the demo;
-  3. Advisory continuum via `ContinueProgressive` when rev 7 / 9 first appear
+- **Interactive progressive path (D1 + D1r + D1h):** Play →
+  `session.Controller` (SSE + `BeatSpacing` + `Active`) → per beat:
+  1. **R1 order:** `OnBeat` first (so COP advances before clients reload), then
+     beat SSE. OnBeat failure skips that beat’s SSE and ends the session.
+  2. Inside OnBeat: `EventLog.Append` (`raw.event`, `IdempotencyKey=raw_event_id`)
+     — Postgres `pgstore` or SQLite transport-only `eventlog/memory`;
+  3. **Sync** domain `ProcessBeat` (P05 ingest + project + recover) — not a
+     free-running multi-worker consumer for the demo;
+  4. Advisory continuum via `ContinueProgressive` when rev 7 / 9 first appear
      (Terra@7, Sol@7, Terra obsolete@9). Multi-worker `EventConsumer.Run` remains
-     the scale path on Postgres; the sync handler is the interactive consumer.
-  4. **Session-scoped advisories (C3 seam):** progressive composition wires
-     `api.SessionAdvisoryView`; fixture stages and operator audits `Record` ids
-     against the active session so GET `/advisories` filters (empty when End
-     clears Active). Ontology schemas do not carry `session_id`.
-  5. **Timeline restart:** `ContinueProgressive` is intact without an in-memory
-     timeline when durable stages are complete; incomplete stages can recover
-     the current COP from the store via `RecoverCOP`.
-- At the beats that reach the advisory revisions, invoke the **real Terra/Sol
-  services** (live client or recorded/fixture — see modes). The existing staged
-  advisory logic in
-  [internal/reference/domesticdisturbance/simulator/fixture_advisory.go](../internal/reference/domesticdisturbance/simulator/fixture_advisory.go)
-  (`runTerraActive` rev7, `runSolRecommendation` rev7, `runTerraObsolete` rev9)
-  is reused; it already persists via the Terra/Sol services and accepts injectable
-  clients. Optional `MOSAIC_SEED_ON_START=1` restores bulk `runtime.Run()` for
-  non-progressive proofs (board visible at boot; ActiveSession not wired).
-  Equal beat pacing: `MOSAIC_SIM_BEAT_SPACING` (default 2.5s). Reset/End do not
-  wipe the append-only store.
+     the scale path on Postgres.
+  5. **Session-scoped board (C3 + R2):** progressive path wires
+     `ActiveSession` + session-keyed COP materialization (Postgres
+     `cop_read_model` or SQLite in-process `store.MemoryCOP`) via
+     `PreferMaterializedRecovery` with **no unscoped fallback** while Active is
+     set. Advisories use `SessionAdvisoryView` (Record on fixture stages).
+     Ontology schemas do not carry `session_id`. End clears Active → empty board.
+  6. **Timeline restart:** durable intact advisory stages need no in-memory
+     timeline; incomplete stages can recover current COP via `RecoverCOP`.
+- **Dual backend honesty:** Compose topology is **Postgres**. Local/e2e without a
+  DSN still use **SQLite** for zero-infra tests. Domain data is always one store
+  per process; SQLite progressive EventLog Append is memory transport only.
+- **Cassette UI (D2 + R3):** process-level `MOSAIC_SIM_MODE` only; “Refresh banked
+  advice” re-fetches when mode is `replay` — does not hot-swap mode or re-bank.
+- Optional `MOSAIC_SEED_ON_START=1` restores bulk `runtime.Run()` for non-progressive
+  proofs. Equal beat pacing: `MOSAIC_SIM_BEAT_SPACING` (default 2.5s). Reset/End
+  do not wipe the append-only store.
 
 ### 3.3 Three modes (cassette pattern)
 
@@ -408,7 +409,7 @@ Dependencies noted. Workstreams A→B are the foundation; C rides on them.
 |----|------|------|------|-------|--------|
 | D1 | Empty initial board + progressive-reveal verification | **L** | C2, C3 | d1-progressive-eventlog | Done (EventLog.Append + sync ProcessBeat; empty until Play) |
 | D1r | D1 residuals: e2e helper names, session-scoped advisories, docs, optional PG/timeline harden | **M** | D1 | d1-residuals | Done (scoped advisories + seeded helper names) |
-| D1h | D1/D2 harden R1–R4: SSE-after-process, SQLite session COP, Replay honesty, double review + docs | **M** | D1, D1r, D2 | d1h-r1-r4 | In progress |
+| D1h | D1/D2 harden R1–R4: SSE-after-process, SQLite session COP, Replay honesty, double review + docs | **M** | D1, D1r, D2 | d1h-r1-r4 | Done (R1 OnBeat→SSE; R2 MemoryCOP; R3 banked-advice copy; R4 pass) |
 | D2 | "Replay last run" button + mode/status surfacing | **M** | C5 | d2-replay-ui | Done (cassette_mode API + Replay UI) |
 
 ### Workstream E — Ops & pluggability proof
