@@ -179,6 +179,11 @@ func startMosaicDemo(t *testing.T, binary, root, databasePath, uiDirectory strin
 		"-asset-root", root,
 	)
 	command.Dir = root
+	// Fast equal-spacing for interactive Play; SEED_ON_START for legacy board-at-boot proofs.
+	command.Env = append(os.Environ(),
+		"MOSAIC_SIM_BEAT_SPACING=1ms",
+		"MOSAIC_SEED_ON_START=1",
+	)
 	output := &bytes.Buffer{}
 	command.Stdout = output
 	command.Stderr = output

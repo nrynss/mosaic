@@ -149,6 +149,40 @@ func resourceAvailability(cop map[string]any, resourceID, availability string) b
 	return false
 }
 
+func TestIngestBeatProgressiveAdvancesRevision(t *testing.T) {
+	ctx := context.Background()
+	service, _ := newTestService(t, ctx)
+	beats := service.Beats()
+	if len(beats) == 0 {
+		t.Fatal("no beats")
+	}
+	// First beat → revision 1
+	entry, err := service.IngestBeat(ctx, beats[0].BeatID)
+	if err != nil {
+		t.Fatalf("IngestBeat first: %v", err)
+	}
+	if entry.StateRevision != 1 {
+		t.Fatalf("first revision = %d, want 1", entry.StateRevision)
+	}
+	// Unknown beat fails closed
+	if _, err := service.IngestBeat(ctx, "no-such-beat"); err == nil {
+		t.Fatal("expected error for unknown beat")
+	}
+	// Full progressive walk reaches rev 9
+	for _, beat := range beats[1:] {
+		if _, err := service.IngestBeat(ctx, beat.BeatID); err != nil {
+			t.Fatalf("IngestBeat %s: %v", beat.BeatID, err)
+		}
+	}
+	recovered, err := service.Recover(ctx)
+	if err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	if recovered.StateRevision != 9 {
+		t.Fatalf("final revision = %d, want 9", recovered.StateRevision)
+	}
+}
+
 func TestServiceBeatsMatchScenario(t *testing.T) {
 	ctx := context.Background()
 	service, _ := newTestService(t, ctx)

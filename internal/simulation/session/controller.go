@@ -122,6 +122,13 @@ type Config struct {
 	// End calls Active.Clear so "no active session" yields an empty board.
 	// Natural beat completion leaves Active set so the final COP remains visible.
 	Active *ActiveSession
+
+	// OnBeat is invoked after each successful SSE beat emission (mutex released).
+	// Composition uses it for the progressive EventLog path: Append the raw
+	// event, then synchronously ingest+project (+ advisory continuum). A non-nil
+	// error stops further beats and ends the session cleanly (Active left set so
+	// partial progress remains visible). Nil means SSE-only emission.
+	OnBeat func(ctx context.Context, beat contracts.ScheduledBeat) error
 }
 
 // Controller is a session-scoped simulation lifecycle engine. Start/End/Reset
@@ -134,6 +141,7 @@ type Controller struct {
 	subscriberBuffer int
 	beatSpacing      time.Duration
 	active           *ActiveSession
+	onBeat           func(ctx context.Context, beat contracts.ScheduledBeat) error
 
 	mu        sync.RWMutex
 	session   contracts.SimulationSession
@@ -198,6 +206,7 @@ func New(config Config) (*Controller, error) {
 		subscriberBuffer: buf,
 		beatSpacing:      config.BeatSpacing,
 		active:           config.Active,
+		onBeat:           config.OnBeat,
 		session: contracts.SimulationSession{
 			Status: contracts.SessionPending,
 			Beats:  beats,
@@ -413,12 +422,20 @@ func (c *Controller) runBeats(
 			completed = false
 			break
 		}
+		// OnBeat runs after SSE emission with the controller mutex released so
+		// domain work (EventLog.Append + sync ingest) cannot deadlock Status/End.
+		if c.onBeat != nil {
+			if err := c.onBeat(ctx, beat); err != nil {
+				completed = false
+				break
+			}
+		}
 	}
 
-	if !completed {
-		return
-	}
-
+	// Natural completion and OnBeat/cancel failure both end the session cleanly.
+	// Active is left set (when present) so partial or final COP remains visible;
+	// only explicit End clears the epoch. When End/Reset already transitioned
+	// status, the SessionRunning guard is a no-op.
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.session.SessionID != sessionID || c.session.Status != contracts.SessionRunning {
@@ -429,6 +446,7 @@ func (c *Controller) runBeats(
 	c.publishLocked(contracts.StreamEventStatusChange, map[string]any{
 		"status": string(contracts.SessionEnded),
 	})
+	_ = completed // retained for readability of the loop above
 }
 
 // delayFor returns the wait from session start for the beat at sorted index i.

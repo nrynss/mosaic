@@ -512,38 +512,87 @@ func (s *Service) Ingest(ctx context.Context, raw gen.RawEvent) (ingestion.Outco
 	return s.ingestion.Ingest(ctx, raw)
 }
 
+// IngestBeat looks up one declared fixture beat by id, delivers its raw event
+// through P05, fails closed on dispatch errors, and returns the recovered COP
+// snapshot after that beat. Used by the progressive interactive path (one beat
+// at a time) instead of bulk Run.
+func (s *Service) IngestBeat(ctx context.Context, beatID string) (TimelineEntry, error) {
+	if s == nil || s.fixture == nil {
+		return TimelineEntry{}, errors.New("simulator is not configured")
+	}
+	beatID = strings.TrimSpace(beatID)
+	if beatID == "" {
+		return TimelineEntry{}, errors.New("beat id is required")
+	}
+	var beat Beat
+	found := false
+	for _, candidate := range s.fixture.Beats {
+		if candidate.BeatID == beatID {
+			beat = candidate
+			found = true
+			break
+		}
+	}
+	if !found {
+		return TimelineEntry{}, fmt.Errorf("unknown fixture beat %q", beatID)
+	}
+	raw, exists := s.fixture.RawEvent(beat.RawEventID)
+	if !exists {
+		return TimelineEntry{}, fmt.Errorf("fixture beat %q is missing raw event %q", beat.BeatID, beat.RawEventID)
+	}
+	outcome, err := s.Ingest(ctx, raw)
+	if err != nil {
+		return TimelineEntry{}, fmt.Errorf("ingest beat %q: %w", beat.BeatID, err)
+	}
+	if outcome.DispatchError != nil {
+		return TimelineEntry{}, fmt.Errorf("dispatch beat %q: %w", beat.BeatID, outcome.DispatchError)
+	}
+	projected, err := s.Recover(ctx)
+	if err != nil {
+		return TimelineEntry{}, fmt.Errorf("recover after beat %q: %w", beat.BeatID, err)
+	}
+	return TimelineEntry{
+		Beat:             beat,
+		RawEventID:       outcome.RawEventID,
+		LifecycleStatus:  outcome.Status,
+		Duplicate:        outcome.Duplicate,
+		LunaResultID:     outcome.LunaResultID,
+		CanonicalEventID: outcome.CanonicalEventID,
+		StateRevision:    projected.StateRevision,
+		COP:              cloneCOP(projected.COP),
+	}, nil
+}
+
+// RawEventPayload returns the JSON-serialized fixture raw event for Append to
+// the EventLog seam. Composition loads payloads by raw_event_id without reading
+// domain store rows that may not exist yet.
+func (s *Service) RawEventPayload(rawEventID string) ([]byte, error) {
+	if s == nil || s.fixture == nil {
+		return nil, errors.New("simulator is not configured")
+	}
+	raw, exists := s.fixture.RawEvent(strings.TrimSpace(rawEventID))
+	if !exists {
+		return nil, fmt.Errorf("unknown raw event %q", rawEventID)
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("encode raw event %q: %w", rawEventID, err)
+	}
+	return encoded, nil
+}
+
 // Run publishes one structured timeline entry after every declared beat, then
 // verifies the persisted expected outcome and checkpoint recovery boundary.
 func (s *Service) Run(ctx context.Context) (RunResult, error) {
 	result := RunResult{ScenarioID: s.fixture.ScenarioID, Timeline: make([]TimelineEntry, 0, len(s.fixture.Beats))}
 	for _, beat := range s.fixture.Beats {
-		raw, exists := s.fixture.RawEvent(beat.RawEventID)
-		if !exists {
-			return RunResult{}, fmt.Errorf("fixture beat %q is missing raw event %q", beat.BeatID, beat.RawEventID)
-		}
-		outcome, err := s.Ingest(ctx, raw)
+		entry, err := s.IngestBeat(ctx, beat.BeatID)
 		if err != nil {
-			return RunResult{}, fmt.Errorf("ingest beat %q: %w", beat.BeatID, err)
+			return RunResult{}, err
 		}
-		if outcome.DispatchError != nil {
-			return RunResult{}, fmt.Errorf("dispatch beat %q: %w", beat.BeatID, outcome.DispatchError)
-		}
-		projected, err := s.Recover(ctx)
-		if err != nil {
-			return RunResult{}, fmt.Errorf("recover after beat %q: %w", beat.BeatID, err)
-		}
-		result.Timeline = append(result.Timeline, TimelineEntry{
-			Beat:             beat,
-			RawEventID:       outcome.RawEventID,
-			LifecycleStatus:  outcome.Status,
-			Duplicate:        outcome.Duplicate,
-			LunaResultID:     outcome.LunaResultID,
-			CanonicalEventID: outcome.CanonicalEventID,
-			StateRevision:    projected.StateRevision,
-			COP:              cloneCOP(projected.COP),
-		})
-		result.StateRevision = projected.StateRevision
-		result.COP = cloneCOP(projected.COP)
+		result.Timeline = append(result.Timeline, entry)
+		result.StateRevision = entry.StateRevision
+		result.COP = cloneCOP(entry.COP)
 	}
 	verification, err := s.Verify(ctx)
 	if err != nil {

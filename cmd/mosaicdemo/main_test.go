@@ -26,11 +26,13 @@ func TestNewApplicationSeedsFixtureOnlyOnce(t *testing.T) {
 	root := repositoryRoot(t)
 	ui := makeDashboard(t)
 	database := filepath.Join(t.TempDir(), "mosaic.db")
+	// Legacy bulk-seed path for retained-restart proofs.
 	configuration := config{
 		ListenAddress: "127.0.0.1:0",
 		DatabasePath:  database,
 		UIDirectory:   ui,
 		AssetRoot:     root,
+		SeedOnStart:   true,
 	}
 
 	first, err := newApplication(context.Background(), configuration)
@@ -73,6 +75,48 @@ func TestNewApplicationSeedsFixtureOnlyOnce(t *testing.T) {
 	if len(history.Insights) != 2 || len(history.Recommendations) != 1 || len(history.ModelRuns) != 3 || len(history.AuditRecords) != 2 {
 		t.Fatalf("advisory history after two starts = %#v", history)
 	}
+}
+
+func TestNewApplicationEmptyBoardUntilPlay(t *testing.T) {
+	root := repositoryRoot(t)
+	ui := makeDashboard(t)
+	database := filepath.Join(t.TempDir(), "mosaic-progressive.db")
+	app, err := newApplication(context.Background(), config{
+		ListenAddress: "127.0.0.1:0",
+		DatabasePath:  database,
+		UIDirectory:   ui,
+		AssetRoot:     root,
+		// SeedOnStart false (default): progressive path
+		BeatSpacing: time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("compose application: %v", err)
+	}
+	t.Cleanup(func() { _ = app.close() })
+
+	// Boot: empty COP (state_revision 0).
+	assertEmptyCOP(t, app.handler)
+
+	// Play scenario through the composed controller.
+	if app.simulation == nil {
+		t.Fatal("simulation controller is nil")
+	}
+	if _, err := app.simulation.Start(context.Background()); err != nil {
+		t.Fatalf("simulation Start: %v", err)
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if app.simulation.Status().Status == contracts.SessionEnded {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if app.simulation.Status().Status != contracts.SessionEnded {
+		t.Fatalf("session status = %q, want ended", app.simulation.Status().Status)
+	}
+
+	assertFixtureCOP(t, app.handler)
+	assertFixtureAdvisories(t, app.handler)
 }
 
 func TestNewApplicationRejectsPartialAdvisoryHistory(t *testing.T) {
@@ -122,6 +166,7 @@ func TestNewApplicationRejectsPartialAdvisoryHistory(t *testing.T) {
 		DatabasePath:  databasePath,
 		UIDirectory:   makeDashboard(t),
 		AssetRoot:     root,
+		SeedOnStart:   true, // bulk seed path validates advisory integrity at boot
 	})
 	if !errors.Is(err, simulator.ErrPartialAdvisoryStage) {
 		t.Fatalf("partial advisory startup error = %v, want %v", err, simulator.ErrPartialAdvisoryStage)
@@ -287,9 +332,8 @@ func TestNewApplicationWiresSimulationModelsAndRecurrence(t *testing.T) {
 		t.Fatalf("simulation status = %d: %s", statusResp.Code, statusResp.Body.String())
 	}
 
-	// Fixture startup COP remains revision 9.
-	assertFixtureCOP(t, app.handler)
-	assertFixtureAdvisories(t, app.handler)
+	// Progressive default: empty board until Play (no bulk seed).
+	assertEmptyCOP(t, app.handler)
 }
 
 func TestNewApplicationLiveSelectionOnlyWithSecret(t *testing.T) {
@@ -302,6 +346,7 @@ func TestNewApplicationLiveSelectionOnlyWithSecret(t *testing.T) {
 		DatabasePath:  filepath.Join(t.TempDir(), "fallback.db"),
 		UIDirectory:   ui,
 		AssetRoot:     root,
+		SeedOnStart:   true,
 		ModelEnv: modelEnv{
 			APIKey: "",
 			Luna:   contracts.ProviderLive,
@@ -325,6 +370,7 @@ func TestNewApplicationLiveSelectionOnlyWithSecret(t *testing.T) {
 		DatabasePath:  filepath.Join(t.TempDir(), "live.db"),
 		UIDirectory:   ui,
 		AssetRoot:     root,
+		SeedOnStart:   true,
 		ModelEnv: modelEnv{
 			APIKey: "test-key",
 			Luna:   contracts.ProviderLive,
@@ -356,6 +402,19 @@ func assertFixtureCOP(t *testing.T, handler http.Handler) {
 	}
 	if !strings.Contains(response.Body.String(), `"state_revision":9`) {
 		t.Fatalf("COP did not contain expected fixture revision: %s", response.Body.String())
+	}
+}
+
+func assertEmptyCOP(t *testing.T, handler http.Handler) {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "http://mosaic.test/api/v1/cop", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("COP status = %d: %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"state_revision":0`) {
+		t.Fatalf("expected empty COP revision 0: %s", response.Body.String())
 	}
 }
 

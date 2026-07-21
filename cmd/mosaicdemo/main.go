@@ -25,13 +25,24 @@ import (
 
 	"mosaic.local/mosaic/internal/api"
 	"mosaic.local/mosaic/internal/contracts"
+	"mosaic.local/mosaic/internal/eventlog"
+	"mosaic.local/mosaic/internal/eventlog/memory"
 	"mosaic.local/mosaic/internal/pgstore"
 	"mosaic.local/mosaic/internal/recurrence"
+	"mosaic.local/mosaic/internal/reference/domesticdisturbance"
 	"mosaic.local/mosaic/internal/reference/registry"
+	"mosaic.local/mosaic/internal/simulation"
 	"mosaic.local/mosaic/internal/simulation/session"
 	"mosaic.local/mosaic/internal/store"
 	"mosaic.local/mosaic/internal/stream"
 )
+
+// progressiveDomain is the optional interactive beat processor exposed by the
+// domestic-disturbance runtime. Composition type-asserts profile.Runtime to it.
+type progressiveDomain interface {
+	ProcessBeat(ctx context.Context, beatID string) error
+	RawEventPayload(rawEventID string) ([]byte, error)
+}
 
 const (
 	defaultListenAddress    = "127.0.0.1:8080"
@@ -56,6 +67,14 @@ type config struct {
 	// compute an "estimated remaining" figure on /api/v1/model-usage. Unset
 	// or invalid values leave this nil, which omits budget fields entirely.
 	DemoBudgetUSD *float64
+	// SeedOnStart bulk-runs the fixture at boot (legacy). Default false: the
+	// board stays empty until Play drives progressive EventLog beats.
+	// Env: MOSAIC_SEED_ON_START=1|true|yes|on
+	SeedOnStart bool
+	// BeatSpacing is equal inter-beat SSE pacing for the interactive controller.
+	// Zero means use simulation.DefaultBeatSpacing via BeatSpacingFromEnv path;
+	// composition always sets a positive spacing from env/defaults.
+	BeatSpacing time.Duration
 }
 
 type application struct {
@@ -112,7 +131,19 @@ func parseConfig(args []string, getenv func(string) string) (config, error) {
 		RecurrenceArea:   area,
 		RecurrenceWindow: window,
 		DemoBudgetUSD:    parseDemoBudgetUSD(getenv("MOSAIC_DEMO_BUDGET_USD")),
+		SeedOnStart:      parseSeedOnStart(getenv("MOSAIC_SEED_ON_START")),
+		BeatSpacing:      simulation.ParseBeatSpacing(getenv(simulation.EnvBeatSpacing)),
 	})
+}
+
+// parseSeedOnStart interprets MOSAIC_SEED_ON_START. Default is false (progressive).
+func parseSeedOnStart(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 // parseDemoBudgetUSD parses the optional MOSAIC_DEMO_BUDGET_USD env var as a
@@ -262,19 +293,29 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 		}
 	}
 
+	// Active session epoch (C3): empty board until Play; natural end leaves
+	// Active set so the final progressive COP remains visible.
+	activeSession := session.NewActiveSession()
+
 	// Compose builds the profile's deterministic scenario, fixture advisory
-	// replay, and evidence resolver over the single durable store. Run then
-	// seeds them: P05's durable source idempotency means a later start verifies
-	// and recovers the original history without appending duplicate events or
-	// advisory records.
-	domainRuntime, err := selected.Compose(ctx, records, configuration.AssetRoot)
+	// continuum, and evidence resolver over the single durable store. Active is
+	// passed so Postgres materialization writes session-scoped COP keys.
+	composeCtx := domesticdisturbance.WithActiveSession(ctx, activeSession)
+	domainRuntime, err := selected.Compose(composeCtx, records, configuration.AssetRoot)
 	if err != nil {
 		_ = closeDatabase()
 		return nil, fmt.Errorf("compose domain profile %q: %w", selected.ID(), err)
 	}
-	if err := domainRuntime.Run(ctx); err != nil {
-		_ = closeDatabase()
-		return nil, fmt.Errorf("seed domain profile %q: %w", selected.ID(), err)
+
+	// Default: no bulk seed — board empty until Play. Optional MOSAIC_SEED_ON_START
+	// restores bulk Run for non-progressive proofs (and skips ActiveSession
+	// isolation so the seeded board is visible at boot).
+	seedOnStart := configuration.SeedOnStart
+	if seedOnStart {
+		if err := domainRuntime.Run(ctx); err != nil {
+			_ = closeDatabase()
+			return nil, fmt.Errorf("seed domain profile %q: %w", selected.ID(), err)
+		}
 	}
 
 	schedule, ok := domainRuntime.(contracts.SimulationSchedule)
@@ -282,13 +323,66 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 		_ = closeDatabase()
 		return nil, fmt.Errorf("domain profile %q does not expose a simulation beat schedule", selected.ID())
 	}
-	// Active session holder tracks Start/Reset/End for C3. Read ports do not
-	// yet scope on ActiveSessionSource here: PreferMaterializedRecovery stays
-	// legacy (fallback) so the bulk-seeded COP remains visible until progressive
-	// BeatExecutor composition lands. Composition for empty-until-Play sets
-	// api.Config.ActiveSession and SessionScopedCOP in a later wiring pass.
-	activeSession := session.NewActiveSession()
-	simController, err := session.New(session.Config{Schedule: schedule, Active: activeSession})
+
+	// EventLog transport: Postgres store implements Append; SQLite demos use an
+	// in-memory log. Domain data always stays on the single durable store (E1).
+	var beatLog eventlog.EventLog
+	if isPostgres {
+		if pg, ok := domainStore.(*pgstore.Store); ok {
+			beatLog = pg
+		}
+	}
+	if beatLog == nil {
+		beatLog = memory.New()
+	}
+
+	// Progressive OnBeat: EventLog.Append then sync domain ProcessBeat
+	// (ingest+project+advisory continuum). Documented: EventLog is the append
+	// seam; the sync handler is the interactive consumer (not multi-worker Run).
+	var onBeat func(context.Context, contracts.ScheduledBeat) error
+	if progressive, ok := domainRuntime.(progressiveDomain); ok {
+		partitionKey := selected.ID()
+		onBeat = func(beatCtx context.Context, beat contracts.ScheduledBeat) error {
+			payload, err := progressive.RawEventPayload(beat.RawEventID)
+			if err != nil {
+				return err
+			}
+			if err := beatLog.Append(beatCtx, eventlog.EventEnvelope{
+				PartitionKey:   partitionKey,
+				IdempotencyKey: beat.RawEventID,
+				Type:           simulation.EventTypeRawEvent,
+				Payload:        payload,
+			}); err != nil {
+				return fmt.Errorf("event log append beat %q: %w", beat.BeatID, err)
+			}
+			if err := progressive.ProcessBeat(beatCtx, beat.BeatID); err != nil {
+				return fmt.Errorf("process beat %q: %w", beat.BeatID, err)
+			}
+			return nil
+		}
+	}
+
+	beatSpacing := configuration.BeatSpacing
+	if beatSpacing <= 0 {
+		beatSpacing = simulation.DefaultBeatSpacing
+	}
+	// Seed-on-start legacy path keeps relative schedule delays (no equal spacing
+	// flood control required — board is already final). Progressive uses spacing.
+	sessionCfg := session.Config{
+		Schedule: schedule,
+		Active:   activeSession,
+		OnBeat:   onBeat,
+	}
+	if !seedOnStart {
+		sessionCfg.BeatSpacing = beatSpacing
+		sessionCfg.Active = activeSession
+	} else {
+		// Legacy seed: leave Active nil so GET /cop shows the seeded board
+		// without requiring Play. Controller still works for SSE overlay.
+		sessionCfg.Active = nil
+		sessionCfg.OnBeat = nil
+	}
+	simController, err := session.New(sessionCfg)
 	if err != nil {
 		_ = closeDatabase()
 		return nil, fmt.Errorf("compose simulation controller: %w", err)
@@ -315,11 +409,22 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 	}
 	detector := recurrence.NewDetector(area, window, time.Now)
 
-	// Recovery: Postgres prefers the materialized COP when the seed path
-	// warmed it via MaterializingProjector; SQLite always falls back to
-	// deterministic checkpoint replay.
+	// Recovery: progressive path scopes on ActiveSession (empty until Play).
+	// Postgres prefers session-scoped materialization; SQLite uses domain recover
+	// gated by ActiveSession on the API Server.
 	recovery := api.RecoveryReader(domainRuntime)
-	if preferMaterialized != nil {
+	var apiActive contracts.ActiveSessionSource
+	if !seedOnStart {
+		apiActive = activeSession
+		if preferMaterialized != nil {
+			scoped := pgstore.NewSessionScopedCOP(preferMaterialized, activeSession)
+			recovery = api.PreferMaterializedRecovery{
+				Materialized: scoped,
+				Active:       activeSession,
+				// No unscoped Fallback when Active is set (PreferMaterializedRecovery).
+			}
+		}
+	} else if preferMaterialized != nil {
 		recovery = api.PreferMaterializedRecovery{
 			Materialized: preferMaterialized,
 			Fallback:     domainRuntime,
@@ -344,6 +449,7 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 		BriefingRequester: models.BriefingRequester,
 		APIKeyConfigured:  strings.TrimSpace(configuration.ModelEnv.APIKey) != "",
 		DemoBudgetUSD:     configuration.DemoBudgetUSD,
+		ActiveSession:     apiActive,
 	})
 	if err != nil {
 		_ = closeDatabase()

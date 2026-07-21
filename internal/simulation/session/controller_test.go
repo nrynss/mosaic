@@ -580,6 +580,55 @@ func TestStatusCopyIsIndependent(t *testing.T) {
 	}
 }
 
+func TestOnBeatInvokedInOrderAfterEachEmission(t *testing.T) {
+	var mu sync.Mutex
+	var seen []string
+	ctrl := newTestController(t, testBeats(), func(cfg *Config) {
+		cfg.OnBeat = func(_ context.Context, beat contracts.ScheduledBeat) error {
+			mu.Lock()
+			seen = append(seen, beat.BeatID)
+			mu.Unlock()
+			return nil
+		}
+	})
+	if _, err := ctrl.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	waitStatus(t, ctrl, contracts.SessionEnded, time.Second)
+	mu.Lock()
+	defer mu.Unlock()
+	// testBeats order fields: beat-a(1), beat-b(2), beat-c(3)
+	want := []string{"beat-a", "beat-b", "beat-c"}
+	if !equalStrings(seen, want) {
+		t.Fatalf("OnBeat order = %v, want %v", seen, want)
+	}
+}
+
+func TestOnBeatErrorStopsFurtherBeatsAndEndsSession(t *testing.T) {
+	var mu sync.Mutex
+	var seen []string
+	ctrl := newTestController(t, testBeats(), func(cfg *Config) {
+		cfg.OnBeat = func(_ context.Context, beat contracts.ScheduledBeat) error {
+			mu.Lock()
+			seen = append(seen, beat.BeatID)
+			mu.Unlock()
+			if beat.BeatID == "beat-a" {
+				return context.Canceled
+			}
+			return nil
+		}
+	})
+	if _, err := ctrl.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	waitStatus(t, ctrl, contracts.SessionEnded, time.Second)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 1 || seen[0] != "beat-a" {
+		t.Fatalf("OnBeat seen = %v, want only beat-a", seen)
+	}
+}
+
 func waitStatus(t *testing.T, ctrl *Controller, want contracts.SessionStatus, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)

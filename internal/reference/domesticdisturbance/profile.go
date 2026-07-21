@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sync"
 
 	"mosaic.local/mosaic/internal/api"
 	"mosaic.local/mosaic/internal/contracts"
@@ -15,6 +16,28 @@ import (
 	"mosaic.local/mosaic/internal/reference/domesticdisturbance/simulator"
 	"mosaic.local/mosaic/internal/store"
 )
+
+// activeSessionContextKey carries an optional ActiveSessionSource into Compose
+// so Postgres materialization can write session-scoped COP keys (C3/D1).
+type activeSessionContextKey struct{}
+
+// WithActiveSession attaches the active-session holder for Compose. Nil is a
+// no-op. Composition creates the holder before Compose so MaterializingProjector
+// and PreferMaterializedRecovery share the same epoch pointer.
+func WithActiveSession(ctx context.Context, active contracts.ActiveSessionSource) context.Context {
+	if active == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, activeSessionContextKey{}, active)
+}
+
+func activeSessionFromContext(ctx context.Context) contracts.ActiveSessionSource {
+	if ctx == nil {
+		return nil
+	}
+	active, _ := ctx.Value(activeSessionContextKey{}).(contracts.ActiveSessionSource)
+	return active
+}
 
 const ID = dataset.DomesticDisturbance
 
@@ -48,7 +71,7 @@ func (domainProfile) Validate(assetRoot string) error {
 }
 
 func (domainProfile) Compose(ctx context.Context, repository contracts.ImmutableRecordRepository, assetRoot string) (profile.Runtime, error) {
-	domain, wrapProjector, resolver, err := bindDomainStore(repository)
+	domain, wrapProjector, resolver, err := bindDomainStore(repository, activeSessionFromContext(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -81,8 +104,8 @@ func (domainProfile) Compose(ctx context.Context, repository contracts.Immutable
 // bindDomainStore accepts either durable backend and wires optional COP
 // materialization + evidence resolution for that backend only. No dual-store
 // path is offered: Compose fails closed when the repository is neither SQLite
-// nor Postgres.
-func bindDomainStore(repository contracts.ImmutableRecordRepository) (
+// nor Postgres. When active is set on Postgres, materialization is session-keyed.
+func bindDomainStore(repository contracts.ImmutableRecordRepository, active contracts.ActiveSessionSource) (
 	simulator.DomainStore,
 	func(contracts.Projector) contracts.Projector,
 	api.EvidenceResolver,
@@ -106,8 +129,12 @@ func bindDomainStore(repository contracts.ImmutableRecordRepository) (
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("compose governed evidence resolver: %w", err)
 		}
+		var copRepo contracts.COPReadModelRepository = backend
+		if active != nil {
+			copRepo = pgstore.NewSessionScopedCOP(backend, active)
+		}
 		wrap := func(inner contracts.Projector) contracts.Projector {
-			return pgstore.NewMaterializingProjector(inner, backend)
+			return pgstore.NewMaterializingProjector(inner, copRepo)
 		}
 		return backend, wrap, resolver, nil
 	default:
@@ -121,6 +148,11 @@ type runtime struct {
 	advisory  *simulator.AdvisoryReplay
 	resolver  api.EvidenceResolver
 	assetRoot string
+
+	// Progressive path: accumulate timeline snapshots so advisory stages can
+	// reuse historical rev-7/rev-9 COPs without re-running bulk seed.
+	mu       sync.Mutex
+	timeline []simulator.TimelineEntry
 }
 
 var _ profile.Runtime = (*runtime)(nil)
@@ -138,7 +170,42 @@ func (r *runtime) Run(ctx context.Context) error {
 	if _, err := r.advisory.Replay(ctx, timeline); err != nil {
 		return err
 	}
+	// Keep progressive timeline in sync when bulk seed is used (optional path).
+	r.mu.Lock()
+	r.timeline = append([]simulator.TimelineEntry(nil), run.Timeline...)
+	r.mu.Unlock()
 	return nil
+}
+
+// ProcessBeat ingests one scheduled beat through the real P05 pipeline, recovers
+// the COP, and runs progressive advisory stages when revisions 7 and/or 9 first
+// become available. Idempotent via P05 source identity and durable advisory
+// stage classification. This is the sync consumer for the interactive EventLog
+// path (composition Appends first, then calls ProcessBeat).
+func (r *runtime) ProcessBeat(ctx context.Context, beatID string) error {
+	if r == nil || r.scenario == nil || r.advisory == nil {
+		return errors.New("domain runtime is not configured")
+	}
+	entry, err := r.scenario.IngestBeat(ctx, beatID)
+	if err != nil {
+		return err
+	}
+	r.mu.Lock()
+	r.timeline = append(r.timeline, entry)
+	timeline := append([]simulator.TimelineEntry(nil), r.timeline...)
+	r.mu.Unlock()
+	if _, err := r.advisory.ContinueProgressive(ctx, timeline); err != nil {
+		return err
+	}
+	return nil
+}
+
+// RawEventPayload returns fixture raw-event JSON for EventLog.Append.
+func (r *runtime) RawEventPayload(rawEventID string) ([]byte, error) {
+	if r == nil || r.scenario == nil {
+		return nil, errors.New("domain runtime is not configured")
+	}
+	return r.scenario.RawEventPayload(rawEventID)
 }
 
 func (r *runtime) Recover(ctx context.Context) (contracts.ProjectionResult, error) {

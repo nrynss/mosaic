@@ -318,6 +318,62 @@ func TestFixtureAdvisoryReplayRequiresTimelineSnapshots(t *testing.T) {
 	}
 }
 
+func TestContinueProgressiveLandsAdvisoriesAtRev7AndRev9(t *testing.T) {
+	ctx := context.Background()
+	service, database := newTestService(t, ctx)
+	replay := mustAdvisoryReplay(t, database)
+	beats := service.Beats()
+	var timeline []TimelineEntry
+
+	// No COP yet → no-op
+	if result, err := replay.ContinueProgressive(ctx, nil); err != nil || len(result.StagesRun) != 0 {
+		t.Fatalf("empty progressive = %#v err=%v", result, err)
+	}
+
+	for _, beat := range beats {
+		entry, err := service.IngestBeat(ctx, beat.BeatID)
+		if err != nil {
+			t.Fatalf("IngestBeat %s: %v", beat.BeatID, err)
+		}
+		timeline = append(timeline, entry)
+		result, err := replay.ContinueProgressive(ctx, timeline)
+		if err != nil {
+			t.Fatalf("ContinueProgressive after %s: %v", beat.BeatID, err)
+		}
+		switch {
+		case entry.StateRevision == 7 && entry.LifecycleStatus != "quarantined":
+			// First time we hit rev 7 (repaired road beat): terra+briefing+sol
+			if len(result.StagesRun) == 0 && len(result.StagesSkipped) < 3 {
+				// May be first landing — stages should run or already skipped
+				history, _ := database.ReadAdvisoryHistory(ctx)
+				if len(history.Insights) == 0 {
+					t.Fatalf("expected rev7 advisories after beat %s: stages=%#v", beat.BeatID, result)
+				}
+			}
+		case entry.StateRevision == 9:
+			history, err := database.ReadAdvisoryHistory(ctx)
+			if err != nil {
+				t.Fatalf("history: %v", err)
+			}
+			assertFixtureAdvisoryHistory(t, history)
+		}
+	}
+	// Final: all five stages present
+	history, err := database.ReadAdvisoryHistory(ctx)
+	if err != nil {
+		t.Fatalf("final history: %v", err)
+	}
+	assertFixtureAdvisoryHistory(t, history)
+	// Idempotent second pass
+	result, err := replay.ContinueProgressive(ctx, timeline)
+	if err != nil {
+		t.Fatalf("second progressive: %v", err)
+	}
+	if !result.IntactRestart {
+		t.Fatalf("expected intact restart, got %#v", result)
+	}
+}
+
 func TestFixtureAdvisoryReplayRollsBackInsightPairOnWriteFailure(t *testing.T) {
 	ctx := context.Background()
 	service, database := newTestService(t, ctx)

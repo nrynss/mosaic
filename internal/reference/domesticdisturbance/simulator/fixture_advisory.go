@@ -101,19 +101,51 @@ func (r *AdvisoryReplay) Replay(ctx context.Context, timeline []TimelineEntry) (
 	if r == nil || r.store == nil || r.fixture == nil {
 		return AdvisoryReplayResult{}, errors.New("advisory replay is not configured")
 	}
+	cop7, err := copAtRevision(timeline, 7)
+	if err != nil {
+		return AdvisoryReplayResult{}, err
+	}
+	cop9, err := copAtRevision(timeline, 9)
+	if err != nil {
+		return AdvisoryReplayResult{}, err
+	}
+	return r.replayWithCOPs(ctx, cop7, cop9, true)
+}
+
+// ContinueProgressive runs only the advisory stages whose COP revision is
+// available in timeline. Stages that depend on rev 7 run once the timeline has
+// a rev-7 snapshot; rev-9 stages wait until rev 9 is present. Durable stage
+// classification keeps restarts idempotent (intact stages are skipped).
+//
+// Used by the interactive progressive path so Terra@rev7 + Sol@rev7 land when
+// the COP first reaches revision 7, and Terra obsolete@rev9 when it reaches 9 —
+// not only after bulk Run.
+func (r *AdvisoryReplay) ContinueProgressive(ctx context.Context, timeline []TimelineEntry) (AdvisoryReplayResult, error) {
+	if r == nil || r.store == nil || r.fixture == nil {
+		return AdvisoryReplayResult{}, errors.New("advisory replay is not configured")
+	}
+	var cop7, cop9 map[string]any
+	if c, err := copAtRevision(timeline, 7); err == nil {
+		cop7 = c
+	}
+	if c, err := copAtRevision(timeline, 9); err == nil {
+		cop9 = c
+	}
+	if cop7 == nil && cop9 == nil {
+		return AdvisoryReplayResult{ScenarioID: r.fixture.ScenarioID}, nil
+	}
+	requireBoth := cop7 != nil && cop9 != nil
+	return r.replayWithCOPs(ctx, cop7, cop9, requireBoth)
+}
+
+// replayWithCOPs is the shared stage runner. When requireBoth is true (bulk
+// Replay), missing COPs are already rejected by the caller. When false
+// (progressive), only stages whose COP is available are attempted.
+func (r *AdvisoryReplay) replayWithCOPs(ctx context.Context, cop7, cop9 map[string]any, requireBoth bool) (AdvisoryReplayResult, error) {
 	result := AdvisoryReplayResult{
 		ScenarioID:    r.fixture.ScenarioID,
 		StagesRun:     make([]string, 0, 5),
 		StagesSkipped: make([]string, 0, 5),
-	}
-
-	cop7, err := copAtRevision(timeline, 7)
-	if err != nil {
-		return result, err
-	}
-	cop9, err := copAtRevision(timeline, 9)
-	if err != nil {
-		return result, err
 	}
 
 	history, err := r.store.ReadAdvisoryHistory(ctx)
@@ -150,35 +182,46 @@ func (r *AdvisoryReplay) Replay(ctx context.Context, timeline []TimelineEntry) (
 		return result, nil
 	}
 
-	if statuses[0] == stageAbsent {
-		if err := r.runTerraActive(ctx, cop7, active); err != nil {
-			return result, err
+	// Rev-7 stages require a rev-7 COP (progressive may not have it yet).
+	if cop7 != nil {
+		if statuses[0] == stageAbsent {
+			if err := r.runTerraActive(ctx, cop7, active); err != nil {
+				return result, err
+			}
+			result.StagesRun = append(result.StagesRun, stageNames[0])
 		}
-		result.StagesRun = append(result.StagesRun, stageNames[0])
+		if statuses[1] == stageAbsent {
+			if err := r.appendAudit(ctx, briefingAudit); err != nil {
+				return result, err
+			}
+			result.StagesRun = append(result.StagesRun, stageNames[1])
+		}
+		if statuses[2] == stageAbsent {
+			if err := r.runSolRecommendation(ctx, cop7, active, recommendation); err != nil {
+				return result, err
+			}
+			result.StagesRun = append(result.StagesRun, stageNames[2])
+		}
+	} else if requireBoth {
+		return result, fmt.Errorf("%w: missing COP snapshot for revision 7", ErrAdvisoryTimeline)
 	}
-	if statuses[1] == stageAbsent {
-		if err := r.appendAudit(ctx, briefingAudit); err != nil {
-			return result, err
+
+	// Rev-9 stages require a rev-9 COP.
+	if cop9 != nil {
+		if statuses[3] == stageAbsent {
+			if err := r.runTerraObsolete(ctx, cop9, active, obsolete); err != nil {
+				return result, err
+			}
+			result.StagesRun = append(result.StagesRun, stageNames[3])
 		}
-		result.StagesRun = append(result.StagesRun, stageNames[1])
-	}
-	if statuses[2] == stageAbsent {
-		if err := r.runSolRecommendation(ctx, cop7, active, recommendation); err != nil {
-			return result, err
+		if statuses[4] == stageAbsent {
+			if err := r.appendAudit(ctx, ackAudit); err != nil {
+				return result, err
+			}
+			result.StagesRun = append(result.StagesRun, stageNames[4])
 		}
-		result.StagesRun = append(result.StagesRun, stageNames[2])
-	}
-	if statuses[3] == stageAbsent {
-		if err := r.runTerraObsolete(ctx, cop9, active, obsolete); err != nil {
-			return result, err
-		}
-		result.StagesRun = append(result.StagesRun, stageNames[3])
-	}
-	if statuses[4] == stageAbsent {
-		if err := r.appendAudit(ctx, ackAudit); err != nil {
-			return result, err
-		}
-		result.StagesRun = append(result.StagesRun, stageNames[4])
+	} else if requireBoth {
+		return result, fmt.Errorf("%w: missing COP snapshot for revision 9", ErrAdvisoryTimeline)
 	}
 	return result, nil
 }

@@ -187,13 +187,23 @@ removes both problems.
 - A **`BeatExecutor`** (in the simulation package) runs each beat: `Append` the
   beat's frozen raw event to the `EventLog` → the projector advances a real
   revision → publish a COP snapshot → the UI reveals **progressively, for real**.
+- **Interactive progressive path (D1, implemented):** Play →
+  `session.Controller` (SSE + `BeatSpacing` + `Active`) → `OnBeat`:
+  1. `EventLog.Append` (`raw.event`, `IdempotencyKey=raw_event_id`) — Postgres
+     `pgstore` or SQLite `eventlog/memory`;
+  2. **Sync** domain `ProcessBeat` (P05 ingest + project + recover) before the
+     next beat waits — not a free-running multi-worker consumer for the demo;
+  3. Advisory continuum via `ContinueProgressive` when rev 7 / 9 first appear
+     (Terra@7, Sol@7, Terra obsolete@9). Multi-worker `EventConsumer.Run` remains
+     the scale path on Postgres; the sync handler is the interactive consumer.
 - At the beats that reach the advisory revisions, invoke the **real Terra/Sol
   services** (live client or recorded/fixture — see modes). The existing staged
   advisory logic in
   [internal/reference/domesticdisturbance/simulator/fixture_advisory.go](../internal/reference/domesticdisturbance/simulator/fixture_advisory.go)
   (`runTerraActive` rev7, `runSolRecommendation` rev7, `runTerraObsolete` rev9)
   is reused; it already persists via the Terra/Sol services and accepts injectable
-  clients.
+  clients. Optional `MOSAIC_SEED_ON_START=1` restores bulk `runtime.Run()` for
+  non-progressive proofs (board visible at boot; ActiveSession not wired).
 
 ### 3.3 Three modes (cassette pattern)
 
@@ -387,7 +397,7 @@ Dependencies noted. Workstreams A→B are the foundation; C rides on them.
 ### Workstream D — UI
 | ID | Task | Size | Deps | Claim | Status |
 |----|------|------|------|-------|--------|
-| D1 | Empty initial board + progressive-reveal verification | **L** | C2, C3 | d1-progressive-eventlog | In progress (EventLog path + advisories) |
+| D1 | Empty initial board + progressive-reveal verification | **L** | C2, C3 | d1-progressive-eventlog | In review (EventLog.Append + sync process; see §3.2) |
 | D2 | "Replay last run" button + mode/status surfacing | **M** | C5 | — | Todo |
 
 ### Workstream E — Ops & pluggability proof
