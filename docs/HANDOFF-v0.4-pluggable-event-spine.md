@@ -387,7 +387,7 @@ Dependencies noted. Workstreams A→B are the foundation; C rides on them.
 ### Workstream D — UI
 | ID | Task | Size | Deps | Claim | Status |
 |----|------|------|------|-------|--------|
-| D1 | Empty initial board + progressive-reveal verification | **S** | C2, C3 | Coordinator | In progress |
+| D1 | Empty initial board + progressive-reveal verification | **L** | C2, C3 | d1-progressive-eventlog | In progress (EventLog path + advisories) |
 | D2 | "Replay last run" button + mode/status surfacing | **M** | C5 | — | Todo |
 
 ### Workstream E — Ops & pluggability proof
