@@ -373,13 +373,13 @@ Dependencies noted. Workstreams A→B are the foundation; C rides on them.
 | B2 | `EventLog.Append` on Postgres (INSERT + idempotency unique constraint) | **M** | A1, B1 | b2-pg-eventlog-append | Done (`pgstore.Store.Append`) |
 | B3 | `EventConsumer` via `SKIP LOCKED`, per-partition ordered, checkpointed; atomic project+position; multi-worker | **L** | A2, B2 | b3-pg-event-consumer | Done (`pgstore.EventConsumer`, advisory locks) |
 | B4 | `EventBus` via `LISTEN/NOTIFY`; replace in-process broker behind the interface | **M** | A1, B1 | b4-pg-event-bus | Done (`pgstore.EventBus` LISTEN/NOTIFY) |
-| B5 | Materialized COP read-model table maintained by projector; `GET /cop` reads it | **M** | B3 | — | Todo |
+| B5 | Materialized COP read-model table maintained by projector; `GET /cop` reads it | **M** | B3 | b5-materialized-cop | In progress |
 
 ### Workstream C — Simulation isolation & modes
 | ID | Task | Size | Deps | Claim | Status |
 |----|------|------|------|-------|--------|
 | C1 | Extract simulation into its own package/module; enforce dependency direction | **M** | — | c1-sim-extract | Done |
-| C2 | `BeatExecutor` — per-beat real `Append`; cumulative pacing + `MOSAIC_SIM_BEAT_SPACING`; optional burst mode | **M** | B2, C1 | — | Todo |
+| C2 | `BeatExecutor` — per-beat real `Append`; cumulative pacing + `MOSAIC_SIM_BEAT_SPACING`; optional burst mode | **M** | B2, C1 | c2-beat-executor | In progress |
 | C3 | Session isolation — `session_id` epoch; scoped recovery/COP/advisories; active-session indirection in API | **L** | B1, B5 | — | Todo |
 | C4 | Cassette — record/replay decorator around Terra/Sol `StructuredClient`; recording persistence keyed by beat/revision | **L** | C1 | — | Todo |
 | C5 | Three-mode wiring (Live / Replay / Fixture) + config + provider selection | **M** | C4 | — | Todo |
