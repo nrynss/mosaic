@@ -408,6 +408,7 @@ Dependencies noted. Workstreams A→B are the foundation; C rides on them.
 |----|------|------|------|-------|--------|
 | D1 | Empty initial board + progressive-reveal verification | **L** | C2, C3 | d1-progressive-eventlog | Done (EventLog.Append + sync ProcessBeat; empty until Play) |
 | D1r | D1 residuals: e2e helper names, session-scoped advisories, docs, optional PG/timeline harden | **M** | D1 | d1-residuals | Done (scoped advisories + seeded helper names) |
+| D1h | D1/D2 harden R1–R4: SSE-after-process, SQLite session COP, Replay honesty, double review + docs | **M** | D1, D1r, D2 | d1h-r1-r4 | In progress |
 | D2 | "Replay last run" button + mode/status surfacing | **M** | C5 | d2-replay-ui | Done (cassette_mode API + Replay UI) |
 
 ### Workstream E — Ops & pluggability proof
