@@ -379,3 +379,162 @@ func TestParseMode(t *testing.T) {
 		t.Fatal("expected error for unknown mode")
 	}
 }
+
+// --- prompt provenance (H6) ---
+
+func TestJoinAndBankedPromptProvenance(t *testing.T) {
+	if got := cassette.JoinPromptProvenance("v1.0.0", "deadbeef"); got != "v1.0.0+sha256:deadbeef" {
+		t.Fatalf("Join = %q", got)
+	}
+	if got := cassette.JoinPromptProvenance("v1.0.0", ""); got != "v1.0.0" {
+		t.Fatalf("Join version-only = %q", got)
+	}
+	if got := cassette.JoinPromptProvenance("", "deadbeef"); got != "" {
+		t.Fatalf("Join empty version = %q", got)
+	}
+
+	recs := []*cassette.Recording{
+		{Agent: cassette.AgentSol, PromptVersion: "v0.9.0", PromptHash: "aaa"},
+		{Agent: cassette.AgentTerra, PromptVersion: "v1.0.0", PromptHash: "deadbeef"},
+		{Agent: cassette.AgentTerra, PromptVersion: "v2.0.0", PromptHash: "ignored"},
+	}
+	if got := cassette.BankedPromptProvenance(recs, cassette.AgentTerra); got != "v1.0.0+sha256:deadbeef" {
+		t.Fatalf("terra banked = %q", got)
+	}
+	if got := cassette.BankedPromptProvenance(recs, cassette.AgentSol); got != "v0.9.0+sha256:aaa" {
+		t.Fatalf("sol banked = %q", got)
+	}
+	if got := cassette.BankedPromptProvenance(recs, "luna"); got != "" {
+		t.Fatalf("missing agent banked = %q", got)
+	}
+}
+
+func TestTerraRecordBanksAndReplayRestoresPromptProvenance(t *testing.T) {
+	store := cassette.NewMemoryStore()
+	inner := &countingTerra{
+		resp: terra.Response{
+			InsightJSON: json.RawMessage(`{"insight_id":"insight-prov"}`),
+			ResponseID:  "resp-prov",
+		},
+	}
+	req := sampleTerraRequest()
+	const wantVersion = "v1.0.0"
+	const wantHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+	recorder := cassette.NewTerra(cassette.ModeRecord, store, inner)
+	recorder.PromptVersion = wantVersion
+	recorder.PromptHash = wantHash
+	if _, err := recorder.Assess(context.Background(), req); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+
+	key, _, err := cassette.TerraKey(req, cassette.KeyMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := store.Get(context.Background(), key)
+	if err != nil {
+		t.Fatalf("get banked: %v", err)
+	}
+	if rec.PromptVersion != wantVersion || rec.PromptHash != wantHash {
+		t.Fatalf("banked provenance = %q / %q, want %q / %q", rec.PromptVersion, rec.PromptHash, wantVersion, wantHash)
+	}
+	if rec.PromptVersion == "" || rec.PromptHash == "" {
+		t.Fatal("record path must bank non-empty prompt_version and prompt_hash")
+	}
+
+	// List must surface the banked recording for compose-time provenance join.
+	listed, err := store.List(context.Background())
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if got := cassette.BankedPromptProvenance(listed, cassette.AgentTerra); got != cassette.JoinPromptProvenance(wantVersion, wantHash) {
+		t.Fatalf("list→banked = %q", got)
+	}
+
+	replayer := cassette.NewTerra(cassette.ModeReplay, store, nil)
+	if replayer.PromptVersion != "" || replayer.PromptHash != "" {
+		t.Fatal("replayer should start with empty provenance fields")
+	}
+	if _, err := replayer.Assess(context.Background(), req); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if replayer.PromptVersion != wantVersion || replayer.PromptHash != wantHash {
+		t.Fatalf("replay did not restore decorator provenance: %q / %q", replayer.PromptVersion, replayer.PromptHash)
+	}
+}
+
+func TestSolRecordBanksAndReplayRestoresPromptProvenance(t *testing.T) {
+	store := cassette.NewMemoryStore()
+	inner := &countingSol{
+		resp: sol.Response{
+			RecommendationJSON: json.RawMessage(`{"recommendation_id":"rec-prov"}`),
+			ResponseID:         "resp-sol-prov",
+		},
+	}
+	req := sampleSolRequest()
+	const wantVersion = "v1.0.0"
+	const wantHash = "solhashdeadbeef"
+
+	recorder := cassette.NewSol(cassette.ModeRecord, store, inner)
+	recorder.PromptVersion = wantVersion
+	recorder.PromptHash = wantHash
+	if _, err := recorder.Brief(context.Background(), req); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+
+	key, _, err := cassette.SolKey(req, cassette.KeyMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := store.Get(context.Background(), key)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if rec.PromptVersion != wantVersion || rec.PromptHash != wantHash {
+		t.Fatalf("banked = %q / %q", rec.PromptVersion, rec.PromptHash)
+	}
+
+	replayer := cassette.NewSol(cassette.ModeReplay, store, nil)
+	if _, err := replayer.Brief(context.Background(), req); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if replayer.PromptVersion != wantVersion || replayer.PromptHash != wantHash {
+		t.Fatalf("replay restore = %q / %q", replayer.PromptVersion, replayer.PromptHash)
+	}
+}
+
+func TestFileStoreListIncludesPromptProvenance(t *testing.T) {
+	dir := t.TempDir()
+	store, err := cassette.NewFileStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inner := &countingTerra{
+		resp: terra.Response{
+			InsightJSON: json.RawMessage(`{"insight_id":"i-list"}`),
+			ResponseID:  "list-resp",
+		},
+	}
+	req := sampleTerraRequest()
+	recorder := cassette.NewTerra(cassette.ModeRecord, store, inner)
+	recorder.PromptVersion = "v1.0.0"
+	recorder.PromptHash = "filehash"
+	if _, err := recorder.Assess(context.Background(), req); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+
+	// Fresh FileStore instance (process restart).
+	store2, err := cassette.NewFileStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed, err := store2.List(context.Background())
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	got := cassette.BankedPromptProvenance(listed, cassette.AgentTerra)
+	if got != "v1.0.0+sha256:filehash" {
+		t.Fatalf("file banked provenance = %q", got)
+	}
+}

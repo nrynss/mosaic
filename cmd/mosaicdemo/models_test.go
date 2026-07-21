@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"mosaic.local/mosaic/internal/contracts"
+	"mosaic.local/mosaic/internal/ontology/gen"
 	"mosaic.local/mosaic/internal/openaimodel"
 	"mosaic.local/mosaic/internal/reference/domesticdisturbance/simulator"
 	"mosaic.local/mosaic/internal/simulation/cassette"
@@ -235,6 +236,200 @@ func TestSplitPromptProvenance(t *testing.T) {
 	v, h = splitPromptProvenance("plain")
 	if v != "plain" || h != "" {
 		t.Fatalf("plain split = %q, %q", v, h)
+	}
+}
+
+func TestApplyCassetteRecordBanksLoadedPromptProvenance(t *testing.T) {
+	// Prove ModeRecord banks non-empty prompt_version + prompt_hash from a real
+	// loadVersionedPrompt provenance string (not only manual field assignment).
+	ctx := context.Background()
+	root := repositoryRoot(t)
+	prompt, err := loadVersionedPrompt(root, openaimodel.AgentTerra, "v1.0.0")
+	if err != nil {
+		t.Fatalf("load terra prompt: %v", err)
+	}
+	wantVersion, wantHash := splitPromptProvenance(prompt.Provenance)
+	if wantVersion == "" || wantHash == "" {
+		t.Fatalf("loaded provenance must split to non-empty version+hash: %q", prompt.Provenance)
+	}
+
+	mem := cassette.NewMemoryStore()
+	inner := &countingTerraClient{
+		resp: terra.Response{
+			InsightJSON: json.RawMessage(`{"insight_id":"ins-bank"}`),
+			ResponseID:  "bank-resp",
+		},
+	}
+	construct := contracts.AgentProviderSelection{
+		openaimodel.AgentTerra: contracts.ProviderLive,
+	}
+	terraClient, _, mode, _, err := applyCassette(
+		cassette.ModeRecord,
+		modelEnv{CassetteStore: mem, CassetteDir: t.TempDir()},
+		inner, nil, construct,
+		prompt,
+		versionedPrompt{},
+	)
+	if err != nil {
+		t.Fatalf("applyCassette: %v", err)
+	}
+	if mode != cassette.ModeRecord {
+		t.Fatalf("mode = %s", mode)
+	}
+
+	req := terra.Request{
+		StateRevision: 3,
+		SerializedCOP: json.RawMessage(`{"revision":3,"incidents":[]}`),
+	}
+	if _, err := terraClient.Assess(ctx, req); err != nil {
+		t.Fatalf("Assess: %v", err)
+	}
+
+	recs, err := mem.List(ctx)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("recordings = %d, want 1", len(recs))
+	}
+	rec := recs[0]
+	if rec.PromptVersion != wantVersion || rec.PromptHash != wantHash {
+		t.Fatalf("banked provenance = %q / %q, want %q / %q (from %q)",
+			rec.PromptVersion, rec.PromptHash, wantVersion, wantHash, prompt.Provenance)
+	}
+	if rec.PromptVersion == "" || rec.PromptHash == "" {
+		t.Fatal("ModeRecord must not omit prompt_version / prompt_hash when provenance is loaded")
+	}
+	if joined := cassette.JoinPromptProvenance(rec.PromptVersion, rec.PromptHash); joined != prompt.Provenance {
+		t.Fatalf("rejoined banked = %q, want full provenance %q", joined, prompt.Provenance)
+	}
+}
+
+func TestReplayPromptVersionsUsesBankedProvenance(t *testing.T) {
+	ctx := context.Background()
+	mem := cassette.NewMemoryStore()
+	if err := mem.Put(ctx, &cassette.Recording{
+		SchemaVersion: cassette.SchemaVersion,
+		Key:           "terra/rev1/deadbeefdeadbeef",
+		Agent:         cassette.AgentTerra,
+		StateRevision: 1,
+		PromptVersion: "v1.0.0",
+		PromptHash:    "abc123terra",
+		ResponseID:    "seed-t",
+	}); err != nil {
+		t.Fatalf("seed terra: %v", err)
+	}
+	if err := mem.Put(ctx, &cassette.Recording{
+		SchemaVersion: cassette.SchemaVersion,
+		Key:           "sol/rev1/cafebabecafebabe",
+		Agent:         cassette.AgentSol,
+		StateRevision: 1,
+		PromptVersion: "v1.0.0",
+		PromptHash:    "def456sol",
+		ResponseID:    "seed-s",
+	}); err != nil {
+		t.Fatalf("seed sol: %v", err)
+	}
+
+	terraPV, solPV := replayPromptVersions(ctx, modelEnv{CassetteStore: mem, CassetteDir: t.TempDir()})
+	if want := "v1.0.0+sha256:abc123terra"; terraPV != want {
+		t.Fatalf("terra PV = %q, want %q", terraPV, want)
+	}
+	if want := "v1.0.0+sha256:def456sol"; solPV != want {
+		t.Fatalf("sol PV = %q, want %q", solPV, want)
+	}
+
+	// Empty bank falls back to the opaque replay id (legacy recordings).
+	empty := cassette.NewMemoryStore()
+	terraPV, solPV = replayPromptVersions(ctx, modelEnv{CassetteStore: empty, CassetteDir: t.TempDir()})
+	if terraPV != cassetteReplayPromptVersion || solPV != cassetteReplayPromptVersion {
+		t.Fatalf("empty bank fallback = %q / %q, want %q", terraPV, solPV, cassetteReplayPromptVersion)
+	}
+}
+
+func TestComposeModelsReplayModelRunUsesBankedPromptProvenance(t *testing.T) {
+	// End-to-end compose: ModeReplay + banked provenance → ModelRun.PromptVersion
+	// is the rejoined version+hash, not only mosaic-cassette-replay-v1.
+	ctx := context.Background()
+	root := repositoryRoot(t)
+	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "models-replay-prov.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	prompt, err := loadVersionedPrompt(root, openaimodel.AgentTerra, "v1.0.0")
+	if err != nil {
+		t.Fatalf("load prompt: %v", err)
+	}
+	wantVersion, wantHash := splitPromptProvenance(prompt.Provenance)
+	wantProvenance := prompt.Provenance
+
+	mem := cassette.NewMemoryStore()
+	// Seed any terra recording with the loaded prompt provenance (compose scans List).
+	if err := mem.Put(ctx, &cassette.Recording{
+		SchemaVersion:      cassette.SchemaVersion,
+		Key:                "terra/rev7/aaaaaaaaaaaaaaaa",
+		Agent:              cassette.AgentTerra,
+		StateRevision:      7,
+		RequestFingerprint: strings.Repeat("a", 64),
+		PromptVersion:      wantVersion,
+		PromptHash:         wantHash,
+		ResponseID:         "replay-prov-resp",
+		InsightJSON:        json.RawMessage(`{"not":"a-valid-insight"}`),
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	bundle, err := composeModels(ctx, database, root,
+		filepath.Join(root, "datasets", simulator.DomesticDisturbance),
+		filepath.Join(root, "ontology"),
+		"supervisor-demo",
+		modelEnv{
+			CassetteModeRaw: "replay",
+			CassetteStore:   mem,
+			CassetteDir:     t.TempDir(),
+		},
+	)
+	if err != nil {
+		t.Fatalf("compose: %v", err)
+	}
+	if bundle.CassetteMode != "replay" {
+		t.Fatalf("CassetteMode = %q", bundle.CassetteMode)
+	}
+
+	// Valid input; cassette miss (seed key does not match request) still emits a
+	// ModelRun whose PromptVersion came from the banked List scan at compose.
+	out, assessErr := bundle.Terra.Assess(ctx, contracts.TerraInput{
+		StateRevision: 7,
+		COP: map[string]any{
+			"state_revision": int64(7),
+			"incidents":      []any{},
+		},
+		Evidence: []gen.Evidence{{
+			SchemaVersion: "1.0.0",
+			EvidenceID:    "ev-replay-prov",
+			TargetKind:    "canonical_event",
+			TargetID:      "evt-1",
+			Explanation:   "synthetic evidence for provenance test",
+			CreatedAt:     "2026-01-01T00:00:00Z",
+		}},
+	})
+	if assessErr == nil {
+		t.Fatal("expected Assess error on cassette miss or invalid insight")
+	}
+	if out.ModelRun.ModelRunID == "" {
+		t.Fatalf("expected a ModelRun even on failure; assessErr=%v", assessErr)
+	}
+	if out.ModelRun.PromptVersion != wantProvenance {
+		t.Fatalf("ModelRun.PromptVersion = %q, want banked %q (not %q); assessErr=%v",
+			out.ModelRun.PromptVersion, wantProvenance, cassetteReplayPromptVersion, assessErr)
+	}
+	if out.ModelRun.PromptVersion == cassetteReplayPromptVersion {
+		t.Fatal("replay lost banked provenance — ModelRun used opaque fallback only")
+	}
+	if !strings.Contains(out.ModelRun.PromptVersion, wantVersion) || !strings.Contains(out.ModelRun.PromptVersion, wantHash) {
+		t.Fatalf("ModelRun.PromptVersion %q missing version/hash pieces", out.ModelRun.PromptVersion)
 	}
 }
 

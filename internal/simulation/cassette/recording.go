@@ -21,7 +21,12 @@ var ErrInnerRequired = errors.New("cassette: inner StructuredClient is required"
 var ErrStoreRequired = errors.New("cassette: store is required")
 
 // Recording is the persisted envelope for one Terra or Sol StructuredClient call.
-// PromptVersion and PromptHash are H6 hooks; C4 may leave them empty.
+//
+// PromptVersion and PromptHash bank the H1 prompt provenance used when the
+// response was recorded (split from "v1.0.0+sha256:<hex>"). ModeRecord copies
+// them from the decorator; ModeReplay restores them onto the decorator and
+// compose may rejoin them into ModelRun.PromptVersion via JoinPromptProvenance.
+// Older recordings may leave both empty.
 type Recording struct {
 	SchemaVersion      string          `json:"schema_version"`
 	Key                string          `json:"key"`

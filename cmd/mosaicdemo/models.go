@@ -359,17 +359,16 @@ func composeModels(
 	if construct[openaimodel.AgentTerra] == contracts.ProviderLive && terraPrompt.Provenance != "" {
 		terraPromptVersion = terraPrompt.Provenance
 	}
-	if effectiveMode == cassette.ModeReplay {
-		terraPromptVersion = "mosaic-cassette-replay-v1"
-		solProvider, solModel = providerLabels(contracts.ProviderFixture)
-		terraProvider, terraModel = providerLabels(contracts.ProviderFixture)
-	}
 	solPromptVersion := fixtureInteractivePromptVersion
 	if construct[openaimodel.AgentSol] == contracts.ProviderLive && solPrompt.Provenance != "" {
 		solPromptVersion = solPrompt.Provenance
 	}
 	if effectiveMode == cassette.ModeReplay {
-		solPromptVersion = "mosaic-cassette-replay-v1"
+		// Prefer banked recording provenance (version+sha256:hash) over a generic
+		// opaque id so ModelRun remains attributable to the recorded prompt (H6).
+		terraPromptVersion, solPromptVersion = replayPromptVersions(ctx, env)
+		solProvider, solModel = providerLabels(contracts.ProviderFixture)
+		terraProvider, terraModel = providerLabels(contracts.ProviderFixture)
 	}
 
 	terraService, err := terra.New(terra.Config{
@@ -499,7 +498,7 @@ func openCassetteStore(env modelEnv) (cassette.Store, string, error) {
 }
 
 // splitPromptProvenance splits "v1.0.0+sha256:hex" into version and hash for
-// cassette Recording provenance fields (H6 prep).
+// cassette Recording provenance fields.
 func splitPromptProvenance(provenance string) (version, hash string) {
 	provenance = strings.TrimSpace(provenance)
 	const marker = "+sha256:"
@@ -507,6 +506,33 @@ func splitPromptProvenance(provenance string) (version, hash string) {
 		return provenance[:i], provenance[i+len(marker):]
 	}
 	return provenance, ""
+}
+
+// cassetteReplayPromptVersion is the fallback ModelRun.PromptVersion when
+// ModeReplay has no banked prompt_version/prompt_hash on any recording.
+const cassetteReplayPromptVersion = "mosaic-cassette-replay-v1"
+
+// replayPromptVersions resolves honest Terra/Sol PromptVersion strings for
+// ModeReplay from banked cassette recordings. Falls back to
+// cassetteReplayPromptVersion when provenance was not recorded (legacy banks).
+func replayPromptVersions(ctx context.Context, env modelEnv) (terraPV, solPV string) {
+	terraPV = cassetteReplayPromptVersion
+	solPV = cassetteReplayPromptVersion
+	store, _, err := openCassetteStore(env)
+	if err != nil || store == nil {
+		return terraPV, solPV
+	}
+	recs, err := store.List(ctx)
+	if err != nil {
+		return terraPV, solPV
+	}
+	if p := cassette.BankedPromptProvenance(recs, cassette.AgentTerra); p != "" {
+		terraPV = p
+	}
+	if p := cassette.BankedPromptProvenance(recs, cassette.AgentSol); p != "" {
+		solPV = p
+	}
+	return terraPV, solPV
 }
 
 func cloneSelection(in contracts.AgentProviderSelection) contracts.AgentProviderSelection {

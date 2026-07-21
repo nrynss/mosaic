@@ -41,11 +41,15 @@
 // request identity inputs; changing COP bytes, evidence set, insights (Sol),
 // beat_id, or revision produces a different key.
 //
-// # Prompt provenance (H6 hooks)
+// # Prompt provenance
 //
 // Recording entries carry optional prompt_version and prompt_hash fields.
-// C4 leaves them empty when unset; H6 will populate them so replayed runs keep
-// honest ModelRun provenance. The cassette does not load or hash prompts.
+// Composition sets them on the decorator from the loaded H1 provenance string
+// ("v1.0.0+sha256:<hex>") before ModeRecord; the decorator copies them onto
+// each new recording. ModeReplay restores them onto the decorator after Get.
+// JoinPromptProvenance / BankedPromptProvenance rejoin banked fields for
+// ModelRun.PromptVersion under replay. The cassette does not load or hash
+// prompts itself — that remains composition's responsibility.
 //
 // # Storage
 //

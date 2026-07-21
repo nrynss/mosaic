@@ -16,7 +16,7 @@ import (
 //	client := &cassette.SolCassette{Inner: live, Mode: cassette.ModeRecord, Store: store}
 //
 // Set BeatID, PromptVersion, and PromptHash on the decorator between calls when
-// the simulation needs beat-scoped keys or H6 provenance fields.
+// the simulation needs beat-scoped keys or prompt provenance fields.
 type SolCassette struct {
 	Inner sol.StructuredClient
 	Mode  Mode
@@ -25,8 +25,9 @@ type SolCassette struct {
 	// BeatID is optional simulation context mixed into the recording key.
 	BeatID string
 
-	// PromptVersion and PromptHash are H6 hooks copied onto new recordings.
-	// Leave empty until prompt provenance wiring lands.
+	// PromptVersion and PromptHash are copied onto new recordings in ModeRecord.
+	// ModeReplay overwrites them from the banked recording after a successful Get
+	// so callers can read back honest provenance.
 	PromptVersion string
 	PromptHash    string
 
@@ -81,6 +82,9 @@ func (c *SolCassette) replay(ctx context.Context, key string) (sol.Response, err
 	if err != nil {
 		return sol.Response{}, err
 	}
+	// Restore banked prompt provenance onto the decorator for honest readback.
+	c.PromptVersion = rec.PromptVersion
+	c.PromptHash = rec.PromptHash
 	return sol.Response{
 		RecommendationJSON: cloneRaw(rec.RecommendationJSON),
 		ResponseID:         rec.ResponseID,

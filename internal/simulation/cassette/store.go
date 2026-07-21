@@ -15,6 +15,10 @@ import (
 type Store interface {
 	Get(ctx context.Context, key string) (*Recording, error)
 	Put(ctx context.Context, rec *Recording) error
+	// List returns deep copies of all banked recordings (order is undefined).
+	// Used at compose time under ModeReplay to recover prompt provenance for
+	// ModelRun.PromptVersion without a per-call terra/sol contract change.
+	List(ctx context.Context) ([]*Recording, error)
 }
 
 // MemoryStore is an in-memory Store suitable for tests and short-lived demos.
@@ -60,6 +64,20 @@ func (s *MemoryStore) Put(_ context.Context, rec *Recording) error {
 	}
 	s.byKey[rec.Key] = cloneRecording(rec)
 	return nil
+}
+
+// List returns deep copies of every recording in the store.
+func (s *MemoryStore) List(_ context.Context) ([]*Recording, error) {
+	if s == nil {
+		return nil, ErrStoreRequired
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*Recording, 0, len(s.byKey))
+	for _, rec := range s.byKey {
+		out = append(out, cloneRecording(rec))
+	}
+	return out, nil
 }
 
 // Len reports how many recordings are stored (tests / diagnostics).
@@ -149,6 +167,52 @@ func (s *FileStore) Put(_ context.Context, rec *Recording) error {
 		return fmt.Errorf("cassette: rename %s: %w", path, err)
 	}
 	return nil
+}
+
+// List walks Dir for *.json recording files and returns decoded deep copies.
+// Missing Dir is an empty list (not an error) so compose-time provenance scan
+// is safe before any Put.
+func (s *FileStore) List(_ context.Context) ([]*Recording, error) {
+	if s == nil || strings.TrimSpace(s.Dir) == "" {
+		return nil, ErrStoreRequired
+	}
+	info, err := os.Stat(s.Dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("cassette: stat store dir: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("cassette: store path is not a directory: %s", s.Dir)
+	}
+
+	var out []*Recording
+	walkErr := filepath.Walk(s.Dir, func(path string, fi os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if fi == nil || fi.IsDir() {
+			return nil
+		}
+		if filepath.Ext(path) != ".json" || strings.HasSuffix(path, ".tmp") {
+			return nil
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return fmt.Errorf("cassette: read %s: %w", path, readErr)
+		}
+		var rec Recording
+		if decodeErr := json.Unmarshal(data, &rec); decodeErr != nil {
+			return fmt.Errorf("cassette: decode %s: %w", path, decodeErr)
+		}
+		out = append(out, cloneRecording(&rec))
+		return nil
+	})
+	if walkErr != nil {
+		return nil, walkErr
+	}
+	return out, nil
 }
 
 func (s *FileStore) pathForKey(key string) (string, error) {
