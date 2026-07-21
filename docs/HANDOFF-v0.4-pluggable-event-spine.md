@@ -259,6 +259,43 @@ revision 9 (beat 8 quarantines and does not project).
 metadata blip. The frozen dataset is **not** edited — timing is presentation and
 lives in the simulation path.
 
+### 3.7 Agent prompts, structured output, and prompt provenance (Live mode)
+
+Fixture/Replay modes do not call the model, so this is a **Live-mode** concern —
+but Live (and the recorded run you bank from it) is only as good as this, and
+today it is the weakest link. Current state:
+
+- **Two divergent prompt sources.** Curated
+  [prompts/terra/v1.0.0.md](../prompts/terra/v1.0.0.md) and
+  [prompts/sol/v1.0.0.md](../prompts/sol/v1.0.0.md) are detailed and disciplined
+  but **orphaned** — the live path uses thin inline Go constants
+  (`terraInstructions` / `solInstructions` / `lunaInstructions` in
+  [internal/openaimodel](../internal/openaimodel/terra.go)), not the files.
+- **Luna has no curated prompt and the thinnest inline one** — yet it is the most
+  demanding agent (entity extraction, schema-valid canonical events,
+  accept/repair/quarantine decisions). The quarantine → repair → late-delivery
+  narrative depends on Luna behaving.
+- **No real schema enforcement on the wire.** The OpenAI structured-output format
+  is a stub (`type: object, additionalProperties: true, strict: false` in
+  [transport.go](../internal/openaimodel/transport.go)) — it does **not** send
+  `insight/recommendation/luna_result.schema.json`. Output correctness rests
+  entirely on the prompt; the service validators then reject malformed output as
+  `invalid`. Expect a high invalid/refused rate in Live mode today.
+- **Prompt provenance is broken.** `ModelRun.PromptVersion` records
+  `"mosaicdemo-interactive-v1"`, which corresponds to no retrievable artifact
+  (files are `v1.0.0`; inline constants are unversioned). A provenance-first
+  system currently cannot answer "which exact prompt produced this Insight?"
+
+**Target design:** one versioned source of truth loaded from `assetRoot` at
+composition (the code already reserves this —
+`_ = assetRoot // reserved for future profile-relative prompt assets` in
+[cmd/mosaicdemo/models.go](../cmd/mosaicdemo/models.go)); the real JSON schema sent
+as the **strict** structured-output format; and `ModelRun.PromptVersion` recorded
+as **file version + content hash**, so every live decision traces to an exact,
+retrievable prompt. The cassette captures prompt version + hash so replayed runs
+keep honest provenance. **Fixture mode stays prompt-independent — the
+guaranteed-safe demo path.**
+
 ---
 
 ## 4. UI changes (minimal)
@@ -353,8 +390,21 @@ Dependencies noted. Workstreams A→B are the foundation; C rides on them.
 |----|------|------|------|
 | G1 | Playwright capture keyed off real intermediate rail states + synthetic cursor + paced holds | **M** | C2, C3, D2 |
 
+### Workstream H — Agent prompts & structured output (Live-mode quality)
+| ID | Task | Size | Deps |
+|----|------|------|------|
+| H1 | Single prompt source of truth: load versioned prompt files from `assetRoot` at composition; remove inline-constant divergence; record honest `PromptVersion` = file version + content hash in `ModelRun` | **M** | — |
+| H2 | Author a proper **Luna** prompt (new artifact) grounded in the ontology: entity kinds, canonical event types, ID conventions, repair-vs-quarantine policy, evidence citation, injection resistance | **L** | H1 |
+| H3 | Reconcile + strengthen **Terra** and **Sol** prompts: make the curated `.md` the loaded source; enrich with domain vocabulary + schema-field expectations; keep existing claim/lifecycle/safety discipline | **M** | H1 |
+| H4 | Send the **real JSON schema** as the OpenAI structured-output format (`strict: true`) for insight/recommendation/luna_result — API-side shape enforcement so the prompt carries semantics, not structure | **M** | — |
+| H5 | Prompt **eval harness**: run each prompt against fixture inputs; assert schema-valid + expected semantics; regression guard against prompt drift | **M** | H2, H3, H4 |
+| H6 | Cassette records prompt version + content hash so replayed runs keep honest provenance | **S** | C4, H1 |
+
 **Critical path:** A1 → A2 → B2 → B3 → B5 → C3 → D1 → G1. Cassette (C4/C5) runs in
-parallel at the client layer. E2 gates the "pluggable" claim and should land with A1.
+parallel at the client layer. E2 gates the "pluggable" claim and should land with
+A1. **Workstream H gates Live-mode quality** — H1/H4 are prerequisites for a
+usable "bank one live run" workflow; Fixture mode is unaffected and remains the
+safe path if H slips.
 
 ---
 
