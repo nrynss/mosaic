@@ -422,7 +422,7 @@ Dependencies noted. Workstreams A→B are the foundation; C rides on them.
 ### Workstream F — Tests & docs
 | ID | Task | Size | Deps | Claim | Status |
 |----|------|------|------|-------|--------|
-| F1 | Simulation-driven progressive projection; session replay isolation; live/recorded/fixture parity; framework-untouched proof | **L** | C3, C5 | f1-tests agent | In progress |
+| F1 | Simulation-driven progressive projection; session replay isolation; live/recorded/fixture parity; framework-untouched proof | **L** | C3, C5 | f1-tests agent | Done (`5ee153c` progressive/session/mode/honesty proofs) |
 | F2 | Update `demo-script.md` / `demo-video.md` for the now-real reveal | **S** | D1 | — | Todo |
 
 ### Workstream G — Capture (original goal)
@@ -438,7 +438,7 @@ Dependencies noted. Workstreams A→B are the foundation; C rides on them.
 | H3 | Reconcile + strengthen **Terra** and **Sol** prompts: make the curated `.md` the loaded source; enrich with domain vocabulary + schema-field expectations; keep existing claim/lifecycle/safety discipline | **M** | H1 | h3 agent | Done |
 | H4 | Send the **real JSON schema** as the OpenAI structured-output format (`strict: true`) for insight/recommendation/luna_result — API-side shape enforcement so the prompt carries semantics, not structure | **M** | — | h4 agent | Done |
 | H5 | Prompt **eval harness**: run each prompt against fixture inputs; assert schema-valid + expected semantics; regression guard against prompt drift | **M** | H2, H3, H4 | h5 agent | Done |
-| H6 | Cassette records prompt version + content hash so replayed runs keep honest provenance | **S** | C4, H1 | h6-cassette agent | In progress |
+| H6 | Cassette records prompt version + content hash so replayed runs keep honest provenance | **S** | C4, H1 | h6-cassette agent | Done (`0f311bb` bank+restore provenance) |
 
 **Critical path:** A1 → A2 → B2 → B3 → B5 → C3 → D1 → G1. Cassette (C4/C5) runs in
 parallel at the client layer. E2 gates the "pluggable" claim and should land with
