@@ -8,6 +8,9 @@ node_modules/
 .env
 .worktrees/
 
+# Local cassette recordings (banked live runs; do not commit secrets)
+/recordings/
+
 # Playwright
 /test-results/
 /playwright-report/
