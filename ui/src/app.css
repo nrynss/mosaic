@@ -439,6 +439,26 @@ textarea { resize: vertical; }
 }
 .timer-display strong { color: var(--ok); }
 
+.cassette-mode-pill {
+  margin-left: 0.65rem;
+  padding: 0.12rem 0.4rem;
+  border: 1px solid var(--line-strong);
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.cassette-mode-pill strong { color: var(--ink); font-weight: 700; }
+.cassette-mode-pill[data-mode="replay"] { border-color: var(--info); color: var(--info); }
+.cassette-mode-pill[data-mode="replay"] strong { color: var(--info); }
+.cassette-mode-pill[data-mode="record"] { border-color: var(--ok); color: var(--ok); }
+.cassette-mode-pill[data-mode="record"] strong { color: var(--ok); }
+.cassette-mode-pill[data-mode="passthrough"] { border-color: var(--line-strong); }
+
 .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; min-width: 0; }
 
 .simulation-controls-bar button {
@@ -610,8 +630,13 @@ textarea { resize: vertical; }
 }
 
 .mode-badge[data-mode="live"] { color: var(--ok); }
+.mode-badge[data-mode="record"] { color: var(--ok); }
+.mode-badge[data-mode="replay"] { color: var(--info); }
+.mode-badge[data-mode="passthrough"],
 .mode-badge[data-mode="fixture_composed"], .mode-badge[data-mode="fixture-composed"], .mode-badge[data-mode="fixture"] { color: var(--ink-dim); }
 .mode-badge[data-mode="unavailable"] { color: var(--alert); }
+
+.cassette-indicator { border-color: rgba(82, 184, 216, 0.35); }
 
 .budget-indicator { border-color: rgba(232, 163, 61, 0.5); }
 .budget-badge { color: var(--amber); border: 0; padding: 0; font-size: 0.6rem; text-transform: none; letter-spacing: 0; }
@@ -1289,6 +1314,13 @@ textarea { resize: vertical; }
 .status-list dd[data-state="ready"], .status-list dd[data-state="live"] { color: var(--ok); }
 .status-list dd[data-state="error"], .status-list dd[data-state="reconnecting"] { color: var(--alert); }
 .status-list dd[data-state="degraded"] { color: var(--warn); }
+.drawer-code {
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  font-weight: 500;
+  color: var(--ink-dim);
+  word-break: break-all;
+}
 
 .scrollable-list { max-height: 130px; overflow-y: auto; }
 

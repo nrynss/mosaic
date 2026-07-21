@@ -192,6 +192,13 @@ type Config struct {
 	// is active (legacy). When ActiveSession reports inactive, advisories are
 	// empty regardless of this field.
 	SessionAdvisories *SessionAdvisoryView
+	// CassetteMode is the process-level Terra/Sol cassette mode set at startup
+	// (passthrough | record | replay). Empty means passthrough. Surfaced on
+	// public status/advisories JSON for the operator UI (D2); not hot-swappable.
+	CassetteMode string
+	// CassetteDir is optional FileStore path used when mode is record/replay.
+	// Surfaced only for developer status; may be empty under passthrough.
+	CassetteDir string
 }
 
 // Server composes the v0.1 HTTP handlers. It reads a COP only through the P06
@@ -221,6 +228,8 @@ type Server struct {
 	demoBudgetUSD     *float64
 	activeSession     contracts.ActiveSessionSource
 	sessionAdvisories *SessionAdvisoryView
+	cassetteMode      string
+	cassetteDir       string
 }
 
 // New rejects partial deterministic/evidence wiring while providing public
@@ -264,6 +273,10 @@ func New(config Config) (*Server, error) {
 	if config.Usage == nil {
 		config.Usage = usage.Global
 	}
+	cassetteMode := strings.TrimSpace(strings.ToLower(config.CassetteMode))
+	if cassetteMode == "" {
+		cassetteMode = "passthrough"
+	}
 	startedAt := config.Clock().UTC()
 	return &Server{
 		recovery:          config.Recovery,
@@ -290,6 +303,8 @@ func New(config Config) (*Server, error) {
 		demoBudgetUSD:     config.DemoBudgetUSD,
 		activeSession:     config.ActiveSession,
 		sessionAdvisories: config.SessionAdvisories,
+		cassetteMode:      cassetteMode,
+		cassetteDir:       strings.TrimSpace(config.CassetteDir),
 	}, nil
 }
 
@@ -342,11 +357,25 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	payload := map[string]any{
 		"version":           s.version,
 		"api_version":       "v1",
 		"openai_configured": s.apiKeyConfigured,
-	}, nil)
+		"cassette_mode":     s.effectiveCassetteMode(),
+	}
+	if s.cassetteDir != "" {
+		payload["cassette_dir"] = s.cassetteDir
+	}
+	writeJSON(w, http.StatusOK, payload, nil)
+}
+
+// effectiveCassetteMode returns the process-level cassette mode for public JSON.
+// Empty composition defaults to passthrough (fixture path).
+func (s *Server) effectiveCassetteMode() string {
+	if s == nil || s.cassetteMode == "" {
+		return "passthrough"
+	}
+	return s.cassetteMode
 }
 
 // handleModelUsage reports a server-process-local estimate of OpenAI spend.
@@ -815,7 +844,7 @@ func (s *Server) handleAdvisories(w http.ResponseWriter, r *http.Request) {
 			if s.advisoryMode == "fixture_composed" || s.advisoryMode == "fixture-composed" {
 				advStatus = "fixture-composed"
 			}
-			writeJSON(w, http.StatusOK, emptyAdvisoryPayload(advStatus, s.providerHints()), nil)
+			writeJSON(w, http.StatusOK, s.withCassetteMode(emptyAdvisoryPayload(advStatus, s.providerHints())), nil)
 			return
 		}
 	}
@@ -953,5 +982,6 @@ func (s *Server) handleAdvisories(w http.ResponseWriter, r *http.Request) {
 		"audit_records":   history.AuditRecords,
 		"model_runs":      advisoryModelRuns,
 		"providers":       s.providerHints(),
+		"cassette_mode":   s.effectiveCassetteMode(),
 	}, nil)
 }

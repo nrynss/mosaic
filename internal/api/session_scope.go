@@ -155,6 +155,8 @@ func filterAuditRecords(in []gen.AuditRecord, allow map[string]struct{}) []gen.A
 }
 
 // emptyAdvisoryPayload is the board-empty advisories response body.
+// providers may be a map[string]string; cassette mode is filled by the caller
+// via withCassetteMode when composing the full empty payload.
 func emptyAdvisoryPayload(status string, providers any) map[string]any {
 	if status == "" {
 		status = "unavailable"
@@ -167,6 +169,15 @@ func emptyAdvisoryPayload(status string, providers any) map[string]any {
 		"model_runs":      []map[string]any{},
 		"providers":       providers,
 	}
+}
+
+// withCassetteMode adds the process-level cassette_mode field to an advisories payload.
+func (s *Server) withCassetteMode(payload map[string]any) map[string]any {
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	payload["cassette_mode"] = s.effectiveCassetteMode()
+	return payload
 }
 
 // emptyCOPResult is the board-empty projection used when no session is active.

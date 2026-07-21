@@ -14,10 +14,15 @@
     loadAdvisories,
     selectEvidence,
     modelUsage = null,
+    cassetteMode = 'passthrough',
     auditTargetID = $bindable(),
     auditTargetKind = $bindable(),
     onPrefillMaintenance
   } = $props();
+
+  let effectiveCassetteMode = $derived(
+    advisories?.cassette_mode || cassetteMode || 'passthrough'
+  );
 
   let activeIncident = $derived(arrayOf(cop?.cop?.incidents || cop?.incidents)[0]);
   let claimItems = $derived(makeClaimItems(cop?.cop || cop));
@@ -144,14 +149,14 @@
       </div>
     </div>
     <div class="analyze-action">
-      <ModelModeIndicator providers={advisories?.providers} {modelUsage} />
+      <ModelModeIndicator providers={advisories?.providers} {modelUsage} cassetteMode={effectiveCassetteMode} />
       <button class="analyze-button" onclick={loadAdvisories} disabled={advisoriesState === 'loading'}>
         {#if advisoriesState === 'loading'}
           Refreshing advice…
         {:else}
           Refresh advice
         {/if}
-        <HelpTip text="Loads the latest assessments and recommendations for this synthetic call. With “AI on”, Terra/Sol may call OpenAI; with “Demo pack”, you only see pre-built scenario advice." label="About Refresh advice" />
+        <HelpTip text="Re-polls / re-loads current assessments and recommendations for this synthetic call (operator analyze path when live). Not the same as “Replay last run”, which only means free banked-cassette semantics when the process was started with MOSAIC_SIM_MODE=replay." label="About Refresh advice" />
       </button>
     </div>
   </div>

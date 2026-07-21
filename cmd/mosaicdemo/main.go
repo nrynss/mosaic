@@ -462,6 +462,8 @@ func newApplication(ctx context.Context, configuration config) (*application, er
 		DemoBudgetUSD:     configuration.DemoBudgetUSD,
 		ActiveSession:     apiActive,
 		SessionAdvisories: sessionAdvisories,
+		CassetteMode:      models.CassetteMode,
+		CassetteDir:       models.CassetteDir,
 	})
 	if err != nil {
 		_ = closeDatabase()

@@ -16,6 +16,8 @@
   let health = $state({ state: 'idle', detail: 'Not checked' });
   let version = $state({ state: 'idle', detail: 'Not checked' });
   let openaiConfigured = $state(false);
+  let cassetteMode = $state('passthrough');
+  let cassetteDir = $state('');
   let modelUsage = $state(null);
   let modelUsageState = $state('idle');
   let cop = $state(null);
@@ -130,6 +132,9 @@
       : { state: 'error', detail: versionResult.reason.message };
     if (versionResult.status === 'fulfilled') {
       openaiConfigured = !!versionResult.value?.openai_configured;
+      const mode = String(versionResult.value?.cassette_mode || '').trim().toLowerCase();
+      cassetteMode = mode || 'passthrough';
+      cassetteDir = String(versionResult.value?.cassette_dir || '').trim();
     }
     if (modelUsageResult.status === 'fulfilled') {
       modelUsage = modelUsageResult.value;
@@ -173,6 +178,9 @@
     advisoriesError = '';
     try {
       advisories = await readEnvelope('advisories');
+      if (advisories?.cassette_mode) {
+        cassetteMode = String(advisories.cassette_mode).trim().toLowerCase() || cassetteMode;
+      }
       if (advisories?.status === 'unavailable') {
         advisoriesState = 'unavailable';
       } else {
@@ -766,6 +774,8 @@
       {readEnvelope}
       bind:actionState
       bind:actionMessage
+      {cassetteMode}
+      {loadAdvisories}
     />
 
     <!-- Tab switcher navigation -->
@@ -793,6 +803,7 @@
         {loadAdvisories}
         {selectEvidence}
         {modelUsage}
+        {cassetteMode}
         bind:auditTargetID
         bind:auditTargetKind
         onPrefillMaintenance={prefillMaintenance}
@@ -871,6 +882,8 @@
   {operationsPresentation}
   {modelUsage}
   {modelUsageState}
+  {cassetteMode}
+  {cassetteDir}
   bind:apiBaseInput
   {applyAPIBase}
   loadOperations={() => loadOperations()}
