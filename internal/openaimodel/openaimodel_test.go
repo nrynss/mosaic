@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -381,6 +382,91 @@ func TestStrictSchemaTransformsOptionalFieldsWithoutChangingAuthoredSchema(t *te
 	if len(types) != 2 || types[0] != "string" || types[1] != "null" {
 		t.Fatalf("optional property was not nullable: %#v", optional)
 	}
+}
+
+func TestStrictSchemaInfersTypeForConstAndEnumLeaves(t *testing.T) {
+	authored := json.RawMessage(`{
+		"type": "object",
+		"required": ["schema_version", "level", "count", "flag", "mixed"],
+		"properties": {
+			"schema_version": {"const": "1.0.0"},
+			"level": {"enum": ["low", "medium", "high"]},
+			"count": {"const": 3},
+			"flag": {"const": true},
+			"mixed": {"enum": ["auto", 0]}
+		}
+	}`)
+	strict, err := strictCompatibleSchema(authored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(strict, &document); err != nil {
+		t.Fatal(err)
+	}
+	props, _ := document["properties"].(map[string]any)
+	cases := map[string]any{
+		"schema_version": "string",
+		"level":          "string",
+		"count":          "integer",
+		"flag":           "boolean",
+	}
+	for name, want := range cases {
+		node, _ := props[name].(map[string]any)
+		if node["type"] != want {
+			t.Fatalf("%s type = %#v, want %q", name, node["type"], want)
+		}
+	}
+	mixed, _ := props["mixed"].(map[string]any)
+	types, _ := mixed["type"].([]any)
+	if len(types) != 2 || types[0] != "string" || types[1] != "integer" {
+		t.Fatalf("mixed enum type = %#v, want [\"string\",\"integer\"]", mixed["type"])
+	}
+}
+
+// TestStrictSchemaLeavesNoUntypedConstOrEnum is the OpenAI-strict-mode regression
+// guard: every const/enum node in each authored ontology output schema must carry
+// a type on the wire, or the live Responses API rejects the request with HTTP 400
+// invalid_json_schema (the bug that made all three live agents fail).
+func TestStrictSchemaLeavesNoUntypedConstOrEnum(t *testing.T) {
+	routes := []schemaRoute{insightSchemaRoute, recommendationSchemaRoute, lunaResultSchemaRoute}
+	for _, route := range routes {
+		schema, err := loadStructuredOutputSchema(testSchemaDir(t), route)
+		if err != nil {
+			t.Fatalf("load %s: %v", route.file, err)
+		}
+		var document any
+		if err := json.Unmarshal(schema.document, &document); err != nil {
+			t.Fatal(err)
+		}
+		if violation := findUntypedConstOrEnum(document, route.name); violation != "" {
+			t.Fatalf("%s: %s", route.file, violation)
+		}
+	}
+}
+
+func findUntypedConstOrEnum(value any, path string) string {
+	switch node := value.(type) {
+	case map[string]any:
+		_, hasType := node["type"]
+		_, hasConst := node["const"]
+		_, hasEnum := node["enum"]
+		if (hasConst || hasEnum) && !hasType {
+			return "untyped const/enum node at " + path
+		}
+		for key, child := range node {
+			if violation := findUntypedConstOrEnum(child, path+"."+key); violation != "" {
+				return violation
+			}
+		}
+	case []any:
+		for i, child := range node {
+			if violation := findUntypedConstOrEnum(child, fmt.Sprintf("%s[%d]", path, i)); violation != "" {
+				return violation
+			}
+		}
+	}
+	return ""
 }
 
 func TestWithoutNullObjectProperties(t *testing.T) {

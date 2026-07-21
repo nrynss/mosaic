@@ -160,6 +160,7 @@ func makeSchemaStrict(value any) error {
 			sort.Strings(keys)
 			node["required"] = keys
 		}
+		inferStrictLeafType(node)
 		for _, child := range node {
 			if err := makeSchemaStrict(child); err != nil {
 				return err
@@ -173,6 +174,73 @@ func makeSchemaStrict(value any) error {
 		}
 	}
 	return nil
+}
+
+// inferStrictLeafType assigns a JSON Schema "type" to a const/enum leaf node
+// that omits one. OpenAI strict structured-output mode requires every schema
+// node to declare a type, but an authored ontology schema legally omits it when
+// a const or enum already pins the value (e.g. "schema_version": {"const":
+// "1.0.0"} or a "low"/"medium"/"high" enum). Without this, OpenAI rejects the
+// whole request with HTTP 400 invalid_json_schema. The authored schema is never
+// modified; only this wire copy gains the type OpenAI demands. A mixed-type enum
+// becomes a JSON Schema type array so the constraint stays honest.
+func inferStrictLeafType(node map[string]any) {
+	if _, ok := node["type"]; ok {
+		return
+	}
+	var samples []any
+	if constValue, ok := node["const"]; ok {
+		samples = append(samples, constValue)
+	}
+	if enumValues, ok := node["enum"].([]any); ok {
+		samples = append(samples, enumValues...)
+	}
+	if len(samples) == 0 {
+		return
+	}
+	seen := map[string]bool{}
+	var ordered []string
+	for _, sample := range samples {
+		name := jsonSchemaTypeName(sample)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		ordered = append(ordered, name)
+	}
+	switch len(ordered) {
+	case 0:
+		// No inferable scalar type; leave untouched rather than guess.
+	case 1:
+		node["type"] = ordered[0]
+	default:
+		types := make([]any, len(ordered))
+		for i, name := range ordered {
+			types[i] = name
+		}
+		node["type"] = types
+	}
+}
+
+// jsonSchemaTypeName maps a decoded JSON scalar to its JSON Schema type name.
+// JSON numbers decode as float64; a whole value reports "integer" to match
+// authored integer constraints, everything else "number".
+func jsonSchemaTypeName(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return "string"
+	case bool:
+		return "boolean"
+	case float64:
+		if typed == float64(int64(typed)) {
+			return "integer"
+		}
+		return "number"
+	case nil:
+		return "null"
+	default:
+		return ""
+	}
 }
 
 func requiredPropertyNames(raw any) map[string]bool {
