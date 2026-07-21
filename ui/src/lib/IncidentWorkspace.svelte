@@ -124,13 +124,13 @@
   }
 </script>
 
-<div class="incident-workspace-container">
+<div class="incident-workspace-container" data-testid="incident-workspace">
   <!-- Active Incident details bar at the top -->
-  <div class="active-incident-banner">
+  <div class="active-incident-banner" data-testid="active-incident-banner">
     <div class="incident-meta-grid">
       <div class="meta-item">
         <span class="meta-label">Call / incident</span>
-        <span class="meta-val"><code>{activeIncident?.incident_id || 'Not on board yet'}</code></span>
+        <span class="meta-val" data-testid="active-incident-id"><code>{activeIncident?.incident_id || 'Not on board yet'}</code></span>
       </div>
       <div class="meta-item">
         <span class="meta-label">Where</span>
@@ -142,12 +142,18 @@
       </div>
       <div class="meta-item">
         <span class="meta-label">Demo clock</span>
-        <span class="meta-val elapsed-val">{formatTime(elapsedSeconds)}</span>
+        <span class="meta-val elapsed-val" data-testid="workspace-demo-clock">{formatTime(elapsedSeconds)}</span>
       </div>
     </div>
     <div class="analyze-action">
       <ModelModeIndicator providers={advisories?.providers} {modelUsage} />
-      <button class="analyze-button" onclick={loadAdvisories} disabled={advisoriesState === 'loading'}>
+      <button
+        class="analyze-button"
+        data-testid="refresh-advice"
+        data-state={advisoriesState}
+        onclick={loadAdvisories}
+        disabled={advisoriesState === 'loading'}
+      >
         {#if advisoriesState === 'loading'}
           Refreshing advice…
         {:else}
@@ -171,7 +177,7 @@
 
   <!-- Main Ledger content split layout (Facts vs Advisories) -->
   <div class="workspace-grid">
-    <section class="ledger-column facts-column" aria-labelledby="cop-title">
+    <section class="ledger-column facts-column" data-testid="cop-board" aria-labelledby="cop-title">
       <div class="column-header">
         <div>
           <p class="eyebrow">
@@ -180,7 +186,10 @@
           </p>
           <h2 id="cop-title">
             Picture update
-            <span>#{cop?.state_revision ?? cop?.cop?.state_revision ?? '—'}</span>
+            <span
+              data-testid="cop-revision"
+              data-revision={String(cop?.state_revision ?? cop?.cop?.state_revision ?? '')}
+            >#{cop?.state_revision ?? cop?.cop?.state_revision ?? '—'}</span>
           </h2>
         </div>
         <div class="revision-meta">
@@ -189,21 +198,21 @@
         </div>
       </div>
 
-      <div class="claim-key" aria-label="How to read the board">
-        <span class="key-item reported"><i></i>Fact from the scenario</span>
-        <span class="key-item assessed"><i></i>Suggested assessment</span>
-        <span class="key-item recommended"><i></i>Suggestion for you</span>
+      <div class="claim-key" data-testid="cop-claim-key" aria-label="How to read the board">
+        <span class="key-item reported" data-testid="claim-key-reported"><i></i>Fact from the scenario</span>
+        <span class="key-item assessed" data-testid="claim-key-assessed"><i></i>Suggested assessment</span>
+        <span class="key-item recommended" data-testid="claim-key-recommended"><i></i>Suggestion for you</span>
       </div>
 
       {#if copState === 'loading' || copState === 'idle'}
-        <div class="empty-state" aria-live="polite">Loading the incident board…</div>
+        <div class="empty-state" data-testid="cop-empty" data-state="loading" aria-live="polite">Loading the incident board…</div>
       {:else if copState === 'error'}
-        <div class="empty-state error-state" role="alert">
+        <div class="empty-state error-state" data-testid="cop-empty" data-state="error" role="alert">
           <strong>Incident board unavailable</strong>
           <p>{copError}</p>
         </div>
       {:else if claimItems.length === 0}
-        <div class="empty-state">
+        <div class="empty-state" data-testid="cop-empty" data-state="empty">
           <strong>No facts on the board yet.</strong>
           <p>
             Press <strong>Play scenario</strong> above to run the synthetic domestic-disturbance call.
@@ -211,22 +220,32 @@
           </p>
         </div>
       {:else}
-        <ol class="claim-ledger" aria-label="Current incident facts">
+        <ol class="claim-ledger" data-testid="cop-claim-ledger" aria-label="Current incident facts">
           {#each claimItems as item (item.kind + item.id)}
-            <li class="claim-item {item.class}">
+            <li
+              class="claim-item {item.class}"
+              data-testid="cop-claim-row"
+              data-kind={item.kind}
+              data-entity-id={item.id}
+              data-claim-class={item.class}
+            >
               <span class="ledger-pin" aria-hidden="true"></span>
               <div class="claim-time">{formatTimestamp(item.timestamp)}</div>
               <article>
                 <div class="claim-topline">
-                  <p class="claim-class">{claimLabel(item.class)}</p>
-                  <span class="entity-kind">{item.kind}</span>
+                  <p class="claim-class" data-testid="cop-claim-class" data-claim-class={item.class}>{claimLabel(item.class)}</p>
+                  <span class="entity-kind" data-testid="cop-entity-kind">{item.kind}</span>
                 </div>
-                <h3>{item.title}</h3>
-                <p>{item.detail}</p>
+                <h3 data-testid="cop-claim-title">{item.title}</h3>
+                <p data-testid="cop-claim-detail">{item.detail}</p>
                 <div class="claim-footer">
-                  <code>{item.id}</code>
+                  <code data-testid="cop-claim-id">{item.id}</code>
                   {#if item.evidence.id}
-                    <button class="evidence-button" onclick={() => selectEvidence(item.evidence.kind, item.evidence.id, `${item.kind} · ${item.id}`)}>
+                    <button
+                      class="evidence-button"
+                      data-testid="cop-show-source"
+                      onclick={() => selectEvidence(item.evidence.kind, item.evidence.id, `${item.kind} · ${item.id}`)}
+                    >
                       Show source
                     </button>
                   {:else}
@@ -241,11 +260,11 @@
     </section>
 
     <!-- Advisories section -->
-    <section class="ledger-column advisories-column">
+    <section class="ledger-column advisories-column" data-testid="advisories-panel" data-state={advisoriesState}>
       {#if advisoriesState === 'loading'}
-        <div class="empty-state" aria-live="polite">Loading advice…</div>
+        <div class="empty-state" data-testid="advisories-empty" data-state="loading" aria-live="polite">Loading advice…</div>
       {:else if advisoriesState === 'unavailable'}
-        <div class="advisory-composition" data-state="unavailable">
+        <div class="advisory-composition" data-testid="advisory-composition" data-state="unavailable">
           <div class="advisory-column">
             <p class="claim-class assessed">Suggested assessment</p>
             <div class="empty-advisory-state" data-state="unavailable">
@@ -262,7 +281,7 @@
           </div>
         </div>
       {:else if advisoriesState === 'empty'}
-        <div class="advisory-composition" data-state="empty">
+        <div class="advisory-composition" data-testid="advisory-composition" data-state="empty">
           <div class="advisory-column">
             <p class="claim-class assessed">Suggested assessment</p>
             <div class="empty-advisory-state" data-state="empty">
@@ -283,36 +302,47 @@
           <button
             type="button"
             class="history-toggle"
+            data-testid="advice-history-toggle"
+            data-show-history={showHistory ? 'true' : 'false'}
             aria-pressed={showHistory}
             onclick={() => (showHistory = !showHistory)}
           >
             {showHistory ? 'Hide past advice' : 'Show past advice'}
           </button>
-          <p class="advisory-mode-badge" data-mode={advisories.status || 'unavailable'}>
+          <p
+            class="advisory-mode-badge"
+            data-testid="advice-source-badge"
+            data-mode={advisories.status || 'unavailable'}
+          >
             Advice source: {advisories.status && advisories.status.includes('live') ? 'Live AI' : 'Demo pack'}
           </p>
         </div>
 
-        <div class="advisory-composition" data-state="ready">
-          <div class="advisory-column">
-            <p class="claim-class assessed">Suggested assessment</p>
+        <div class="advisory-composition" data-testid="advisory-composition" data-state="ready">
+          <div class="advisory-column" data-testid="advice-insights-column">
+            <p class="claim-class assessed" data-testid="claim-class-assessed">Suggested assessment</p>
             {#if hasCurrentInsight}
               <!-- Current assessment rendered below -->
             {:else}
-              <div class="empty-advisory-state" data-state="superseded">
+              <div class="empty-advisory-state" data-testid="advice-insight-empty" data-state="superseded">
                 <h3>Earlier assessment is now out of date</h3>
                 <p>The road-opening correction made the earlier access warning out of date — that is part of the demo story.</p>
               </div>
             {/if}
 
             {#each visibleInsights as ins (ins.insight_id)}
-              <div class="advisory-card assessed-card" data-status={ins.status}>
+              <div
+                class="advisory-card assessed-card"
+                data-testid="advice-insight-card"
+                data-insight-id={ins.insight_id}
+                data-status={ins.status}
+              >
                 <div class="card-header">
-                  <strong>{ins.insight_id}</strong>
-                  <span class="status-badge" data-status={ins.status}>{ins.status.replaceAll('_', ' ')}</span>
+                  <strong data-testid="advice-insight-id">{ins.insight_id}</strong>
+                  <span class="status-badge" data-testid="advice-insight-status" data-status={ins.status}>{ins.status.replaceAll('_', ' ')}</span>
                 </div>
                 <div class="card-body">
-                  <ul>
+                  <ul data-testid="advice-insight-assertions">
                     {#each arrayOf(ins.assertions) as assertion}
                       <li>{assertion}</li>
                     {/each}
@@ -324,10 +354,14 @@
                   {/if}
                 </div>
                 <div class="card-footer">
-                  <button class="evidence-button" onclick={() => selectEvidence('insight', ins.insight_id, `Assessment · ${ins.insight_id}`)}>
+                  <button
+                    class="evidence-button"
+                    data-testid="advice-insight-evidence"
+                    onclick={() => selectEvidence('insight', ins.insight_id, `Assessment · ${ins.insight_id}`)}
+                  >
                     Show source
                   </button>
-                  <button class="prefill-button" onclick={() => { auditTargetID = ins.insight_id; auditTargetKind = 'insight'; }}>
+                  <button class="prefill-button" data-testid="advice-insight-use-decision" onclick={() => { auditTargetID = ins.insight_id; auditTargetKind = 'insight'; }}>
                     Use in my decision
                   </button>
                 </div>
@@ -335,31 +369,40 @@
             {/each}
           </div>
 
-          <div class="advisory-column">
-            <p class="claim-class recommended">Suggestion for you</p>
+          <div class="advisory-column" data-testid="advice-recommendations-column">
+            <p class="claim-class recommended" data-testid="claim-class-recommended">Suggestion for you</p>
             {#if hasCurrentRecommendation}
               <!-- Current recommendation rendered below -->
             {:else}
-              <div class="empty-advisory-state" data-state="not-current">
+              <div class="empty-advisory-state" data-testid="advice-recommendation-empty" data-state="not-current">
                 <h3>No still-current recommendation</h3>
                 <p>Earlier advice may be marked not current after the road reopened. You can still open it for history.</p>
               </div>
             {/if}
 
             {#each visibleRecommendations as rec (rec.recommendation_id)}
-              <div class="advisory-card recommended-card" data-status={rec.status}>
+              <div
+                class="advisory-card recommended-card"
+                data-testid="advice-recommendation-card"
+                data-recommendation-id={rec.recommendation_id}
+                data-status={rec.status}
+              >
                 <div class="card-header">
-                  <strong>{rec.recommendation_id}</strong>
-                  <span class="status-badge" data-status={rec.status}>{rec.status.replaceAll('_', ' ')}</span>
+                  <strong data-testid="advice-recommendation-id">{rec.recommendation_id}</strong>
+                  <span class="status-badge" data-testid="advice-recommendation-status" data-status={rec.status}>{rec.status.replaceAll('_', ' ')}</span>
                 </div>
                 <div class="card-body">
-                  <p>{rec.text}</p>
+                  <p data-testid="advice-recommendation-text">{rec.text}</p>
                 </div>
                 <div class="card-footer">
-                  <button class="evidence-button" onclick={() => selectEvidence('recommendation', rec.recommendation_id, `Recommendation · ${rec.recommendation_id}`)}>
+                  <button
+                    class="evidence-button"
+                    data-testid="advice-recommendation-evidence"
+                    onclick={() => selectEvidence('recommendation', rec.recommendation_id, `Recommendation · ${rec.recommendation_id}`)}
+                  >
                     Show source
                   </button>
-                  <button class="prefill-button" onclick={() => { auditTargetID = rec.recommendation_id; auditTargetKind = 'recommendation'; }}>
+                  <button class="prefill-button" data-testid="advice-recommendation-use-decision" onclick={() => { auditTargetID = rec.recommendation_id; auditTargetKind = 'recommendation'; }}>
                     Use in my decision
                   </button>
                 </div>

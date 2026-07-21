@@ -162,7 +162,7 @@
   }
 </script>
 
-<section class="model-actions" aria-label="Operator model actions">
+<section class="model-actions" data-testid="model-actions" aria-label="Operator model actions">
   <div class="panel-section-header">
     <span class="eyebrow">
       Ask the models
@@ -210,12 +210,19 @@
         Request briefing (Sol)
       </button>
     </div>
-    <p class="hint subtle" class:problem={!copReadyForModel && loadState === 'ready'}>
+    <p
+      class="hint subtle"
+      class:problem={!copReadyForModel && loadState === 'ready'}
+      data-testid="model-cop-gate"
+      data-ready={copReadyForModel ? 'true' : 'false'}
+      data-cop-revision={liveCOP ?? ''}
+      data-expected-revision={expectedCOP}
+    >
       {#if copReadyForModel}
-        COP rev {liveCOP} matches Terra/Sol bank (rev {expectedCOP}). Mode: <code>{cassetteMode || 'unknown'}</code>
+        COP rev {liveCOP} matches Terra/Sol bank (rev {expectedCOP}). Mode: <code data-testid="model-cassette-mode">{cassetteMode || 'unknown'}</code>
       {:else}
         Terra/Sol disabled until COP rev {expectedCOP} (current: {liveCOP ?? '—'}) — play the scenario first.
-        Mode: <code>{cassetteMode || 'unknown'}</code>
+        Mode: <code data-testid="model-cassette-mode">{cassetteMode || 'unknown'}</code>
       {/if}
     </p>
 
@@ -280,7 +287,7 @@
   {/if}
 
   {#if actionMessage}
-    <p class="action-status" aria-live="polite">{actionMessage}</p>
+    <p class="action-status" data-testid="model-action-status" data-state={actionState} aria-live="polite">{actionMessage}</p>
   {/if}
 
   <ModelResultCard

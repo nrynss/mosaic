@@ -120,7 +120,14 @@
 </script>
 
 {#if result || error}
-  <article class="model-result-card" data-testid="model-result-card" data-agent={agent} data-beat={beatId || undefined}>
+  <article
+    class="model-result-card"
+    data-testid="model-result-card"
+    data-agent={agent}
+    data-beat={beatId || undefined}
+    data-status={status || ''}
+    data-executed={executed ? 'true' : 'false'}
+  >
     <header class="result-header">
       <div class="result-title-row">
         <span class="agent-tag">{agent || 'model'}</span>
@@ -131,6 +138,7 @@
           class="status-pill"
           data-tone={statusTone}
           data-testid="model-result-status"
+          data-status={status || ''}
         >
           {status || 'unknown'}
         </span>
@@ -140,7 +148,7 @@
       </span>
     </header>
 
-    <p class="boundary-line" class:executed={executed}>
+    <p class="boundary-line" class:executed={executed} data-testid="model-result-boundary" data-executed={executed ? 'true' : 'false'}>
       {#if executed}
         Unexpected: marked executed. Board should never change from model output.
       {:else}

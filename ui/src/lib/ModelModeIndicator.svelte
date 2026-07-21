@@ -42,24 +42,24 @@
   }
 </script>
 
-<div class="model-modes-container" aria-label="AI mode for this demo">
-  <div class="mode-indicator" data-agent="luna">
+<div class="model-modes-container" data-testid="model-mode-indicator" aria-label="AI mode for this demo">
+  <div class="mode-indicator" data-agent="luna" data-testid="mode-indicator-luna">
     <span class="agent-label">Luna · events</span>
-    <span class="mode-badge" data-mode={lunaProvider}>
+    <span class="mode-badge" data-testid="mode-badge-luna" data-mode={lunaProvider} data-agent="luna">
       {modeLabel(lunaProvider)}
     </span>
     <HelpTip text={modeTip('luna', lunaProvider)} label="About Luna" />
   </div>
-  <div class="mode-indicator" data-agent="terra">
+  <div class="mode-indicator" data-agent="terra" data-testid="mode-indicator-terra">
     <span class="agent-label">Terra · assess</span>
-    <span class="mode-badge" data-mode={terraProvider}>
+    <span class="mode-badge" data-testid="mode-badge-terra" data-mode={terraProvider} data-agent="terra">
       {modeLabel(terraProvider)}
     </span>
     <HelpTip text={modeTip('terra', terraProvider)} label="About Terra" />
   </div>
-  <div class="mode-indicator" data-agent="sol">
+  <div class="mode-indicator" data-agent="sol" data-testid="mode-indicator-sol">
     <span class="agent-label">Sol · brief</span>
-    <span class="mode-badge" data-mode={solProvider}>
+    <span class="mode-badge" data-testid="mode-badge-sol" data-mode={solProvider} data-agent="sol">
       {modeLabel(solProvider)}
     </span>
     <HelpTip text={modeTip('sol', solProvider)} label="About Sol" />
