@@ -397,7 +397,7 @@ Dependencies noted. Workstreams A→B are the foundation; C rides on them.
 ### Workstream D — UI
 | ID | Task | Size | Deps | Claim | Status |
 |----|------|------|------|-------|--------|
-| D1 | Empty initial board + progressive-reveal verification | **L** | C2, C3 | d1-progressive-eventlog | In review (EventLog.Append + sync process; see §3.2) |
+| D1 | Empty initial board + progressive-reveal verification | **L** | C2, C3 | d1-progressive-eventlog | Done (EventLog.Append + sync ProcessBeat; empty until Play) |
 | D2 | "Replay last run" button + mode/status surfacing | **M** | C5 | — | Todo |
 
 ### Workstream E — Ops & pluggability proof
