@@ -6,6 +6,7 @@ package contracts
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"mosaic.local/mosaic/internal/ontology/gen"
@@ -79,15 +80,31 @@ type ProjectionResult struct {
 	Checkpoint    gen.Checkpoint
 }
 
-// DefaultCOPReadModelKey is the active COP materialization key until session
-// isolation (C3) introduces per-session epochs. Callers that do not yet scope
-// by session always read and write this key.
+// DefaultCOPReadModelKey is the legacy single-row materialization key used when
+// session isolation is not composed. Prefer SessionCOPReadModelKey when an
+// active simulation session is the recovery scope.
 const DefaultCOPReadModelKey = "default"
+
+// SessionCOPReadModelKey returns the materialization key for a simulation
+// session epoch. Empty sessionID maps to DefaultCOPReadModelKey so callers can
+// pass through without inventing a second empty-key convention.
+func SessionCOPReadModelKey(sessionID string) string {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return DefaultCOPReadModelKey
+	}
+	return sessionID
+}
 
 // COPReadModelRepository is the mutable system-of-record COP snapshot used for
 // cheap GET /cop. It is separate from append-only checkpoints (recovery) and
 // from the event log (transport). Implementations UPSERT one row per key;
 // missing rows are reported as (zero, false, nil), not an error.
+//
+// The default Load/Save pair uses DefaultCOPReadModelKey. Session isolation
+// (C3) uses LoadCOPReadModelKey / SaveCOPReadModelKey with
+// SessionCOPReadModelKey(sessionID) so concurrent sessions never clobber each
+// other's materialization.
 //
 // Save is expected to join an ambient WithinTransaction when one is present so
 // project+position+materialize can commit atomically on the Postgres consumer
@@ -95,6 +112,19 @@ const DefaultCOPReadModelKey = "default"
 type COPReadModelRepository interface {
 	LoadCOPReadModel(ctx context.Context) (ProjectionResult, bool, error)
 	SaveCOPReadModel(ctx context.Context, result ProjectionResult) error
+	LoadCOPReadModelKey(ctx context.Context, key string) (ProjectionResult, bool, error)
+	SaveCOPReadModelKey(ctx context.Context, key string, result ProjectionResult) error
+}
+
+// ActiveSessionSource resolves the simulation session epoch the API should
+// show. Composition shares one holder between the simulation lifecycle
+// (Start/Reset/End) and read ports (COP, advisories, recovery).
+//
+// When active is false (or the source is not composed), session-scoped read
+// ports return an empty board rather than a global/default materialization.
+type ActiveSessionSource interface {
+	// ActiveSessionID returns the active session id and whether one is set.
+	ActiveSessionID() (sessionID string, active bool)
 }
 
 // ProjectorDispatcher schedules a committed canonical event for its deterministic projector.

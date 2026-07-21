@@ -55,11 +55,46 @@ func (copReadModelFixture) LoadCOPReadModel(context.Context) (ProjectionResult, 
 	return ProjectionResult{}, false, nil
 }
 func (copReadModelFixture) SaveCOPReadModel(context.Context, ProjectionResult) error { return nil }
+func (copReadModelFixture) LoadCOPReadModelKey(context.Context, string) (ProjectionResult, bool, error) {
+	return ProjectionResult{}, false, nil
+}
+func (copReadModelFixture) SaveCOPReadModelKey(context.Context, string, ProjectionResult) error {
+	return nil
+}
 
 func TestCOPReadModelRepositoryRemainsLoadSaveSeam(t *testing.T) {
 	var _ COPReadModelRepository = copReadModelFixture{}
 	if DefaultCOPReadModelKey != "default" {
 		t.Fatalf("DefaultCOPReadModelKey = %q, want default", DefaultCOPReadModelKey)
+	}
+	if SessionCOPReadModelKey("sim-abc") != "sim-abc" {
+		t.Fatalf("SessionCOPReadModelKey = %q, want sim-abc", SessionCOPReadModelKey("sim-abc"))
+	}
+	if SessionCOPReadModelKey("") != DefaultCOPReadModelKey {
+		t.Fatalf("empty session key = %q, want %q", SessionCOPReadModelKey(""), DefaultCOPReadModelKey)
+	}
+	if SessionCOPReadModelKey("  ") != DefaultCOPReadModelKey {
+		t.Fatalf("whitespace session key = %q, want %q", SessionCOPReadModelKey("  "), DefaultCOPReadModelKey)
+	}
+}
+
+type activeSessionFixture struct {
+	id     string
+	active bool
+}
+
+func (a activeSessionFixture) ActiveSessionID() (string, bool) { return a.id, a.active }
+
+func TestActiveSessionSourceSeam(t *testing.T) {
+	var _ ActiveSessionSource = activeSessionFixture{}
+	src := activeSessionFixture{id: "sim-1", active: true}
+	id, ok := src.ActiveSessionID()
+	if !ok || id != "sim-1" {
+		t.Fatalf("ActiveSessionID = (%q, %v), want (sim-1, true)", id, ok)
+	}
+	inactive := activeSessionFixture{}
+	if _, ok := inactive.ActiveSessionID(); ok {
+		t.Fatal("inactive fixture reported active")
 	}
 }
 

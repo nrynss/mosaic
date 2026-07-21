@@ -2,6 +2,13 @@
 // controller. It owns session lifecycle (start/status/end/reset) and emits
 // schedule-driven beats on a session-scoped stream.
 //
+// # Session epochs (C3)
+//
+// A simulation session is a durable epoch identified by SessionID. Optional
+// Config.Active (*ActiveSession) is the in-process pointer composition shares
+// with API read ports: Start/Reset set it, explicit End clears it (empty board).
+// Natural beat completion leaves Active set so the final COP remains visible.
+//
 // This package lives under internal/simulation. Framework packages
 // (ingestion, store, terra, sol, luna, ontology, contracts, stream, api
 // production code, projectors, …) must never import it — simulation imports
@@ -109,6 +116,12 @@ type Config struct {
 	// so existing tests and callers remain unchanged. Composition should set
 	// this from simulation.BeatSpacingFromEnv() for the interactive demo.
 	BeatSpacing time.Duration
+
+	// Active is the optional in-process session epoch holder shared with API
+	// read ports (C3). When set, Start/Reset call Active.Set(sessionID) and
+	// End calls Active.Clear so "no active session" yields an empty board.
+	// Natural beat completion leaves Active set so the final COP remains visible.
+	Active *ActiveSession
 }
 
 // Controller is a session-scoped simulation lifecycle engine. Start/End/Reset
@@ -120,6 +133,7 @@ type Controller struct {
 	newSessionID     func() string
 	subscriberBuffer int
 	beatSpacing      time.Duration
+	active           *ActiveSession
 
 	mu        sync.RWMutex
 	session   contracts.SimulationSession
@@ -183,6 +197,7 @@ func New(config Config) (*Controller, error) {
 		newSessionID:     newID,
 		subscriberBuffer: buf,
 		beatSpacing:      config.BeatSpacing,
+		active:           config.Active,
 		session: contracts.SimulationSession{
 			Status: contracts.SessionPending,
 			Beats:  beats,
@@ -244,6 +259,10 @@ func (c *Controller) End(ctx context.Context) (contracts.SimulationSession, erro
 		c.publishLocked(contracts.StreamEventStatusChange, map[string]any{
 			"status": string(contracts.SessionEnded),
 		})
+	}
+	// Explicit End clears the active epoch so API read ports return an empty board.
+	if c.active != nil {
+		c.active.Clear()
 	}
 	return c.snapshotLocked(), nil
 }
@@ -334,6 +353,12 @@ func (c *Controller) startLocked() (contracts.SimulationSession, error) {
 		Beats:     beats,
 	}
 	c.sequence = 0
+
+	// Publish the new epoch before beat emission so concurrent COP/advisory
+	// reads resolve the correct materialization key immediately.
+	if c.active != nil {
+		c.active.Set(sessionID)
+	}
 
 	runCtx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})

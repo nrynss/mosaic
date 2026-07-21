@@ -123,6 +123,126 @@ func TestCOPReadModelUpsertAdvancesRevision(t *testing.T) {
 	}
 }
 
+func TestCOPReadModelKeyIsolationAcrossSessions(t *testing.T) {
+	// Two session keys must not clobber each other (C3 acceptance).
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	keyA := contracts.SessionCOPReadModelKey("sim-a")
+	keyB := contracts.SessionCOPReadModelKey("sim-b")
+	if err := s.SaveCOPReadModelKey(ctx, keyA, sampleProjection(1, "session-a")); err != nil {
+		t.Fatalf("save A: %v", err)
+	}
+	if err := s.SaveCOPReadModelKey(ctx, keyB, sampleProjection(7, "session-b")); err != nil {
+		t.Fatalf("save B: %v", err)
+	}
+
+	gotA, foundA, err := s.LoadCOPReadModelKey(ctx, keyA)
+	if err != nil || !foundA {
+		t.Fatalf("load A: found=%v err=%v", foundA, err)
+	}
+	gotB, foundB, err := s.LoadCOPReadModelKey(ctx, keyB)
+	if err != nil || !foundB {
+		t.Fatalf("load B: found=%v err=%v", foundB, err)
+	}
+	if gotA.StateRevision != 1 || gotA.COP["label"] != "session-a" {
+		t.Fatalf("A = %#v", gotA)
+	}
+	if gotB.StateRevision != 7 || gotB.COP["label"] != "session-b" {
+		t.Fatalf("B = %#v", gotB)
+	}
+
+	// Advance A only — B must stay intact.
+	if err := s.SaveCOPReadModelKey(ctx, keyA, sampleProjection(3, "session-a-v2")); err != nil {
+		t.Fatalf("save A v2: %v", err)
+	}
+	gotB2, _, err := s.LoadCOPReadModelKey(ctx, keyB)
+	if err != nil {
+		t.Fatalf("reload B: %v", err)
+	}
+	if gotB2.StateRevision != 7 || gotB2.COP["label"] != "session-b" {
+		t.Fatalf("B clobbered: %#v", gotB2)
+	}
+	gotA2, _, err := s.LoadCOPReadModelKey(ctx, keyA)
+	if err != nil {
+		t.Fatalf("reload A: %v", err)
+	}
+	if gotA2.StateRevision != 3 || gotA2.COP["label"] != "session-a-v2" {
+		t.Fatalf("A not updated: %#v", gotA2)
+	}
+}
+
+func TestSessionScopedCOPRoutesLoadSaveToActiveKey(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	active := &stubActive{id: "sim-scoped", ok: true}
+	scoped := NewSessionScopedCOP(s, active)
+
+	if err := scoped.SaveCOPReadModel(ctx, sampleProjection(4, "scoped")); err != nil {
+		t.Fatalf("SaveCOPReadModel: %v", err)
+	}
+
+	// Default key must remain empty.
+	_, foundDefault, err := s.LoadCOPReadModel(ctx)
+	if err != nil {
+		t.Fatalf("load default: %v", err)
+	}
+	if foundDefault {
+		t.Fatal("session save must not write DefaultCOPReadModelKey")
+	}
+
+	got, found, err := s.LoadCOPReadModelKey(ctx, contracts.SessionCOPReadModelKey("sim-scoped"))
+	if err != nil || !found {
+		t.Fatalf("load session key: found=%v err=%v", found, err)
+	}
+	if got.StateRevision != 4 || got.COP["label"] != "scoped" {
+		t.Fatalf("got %#v", got)
+	}
+
+	viaScoped, found, err := scoped.LoadCOPReadModel(ctx)
+	if err != nil || !found {
+		t.Fatalf("scoped load: found=%v err=%v", found, err)
+	}
+	if viaScoped.StateRevision != 4 {
+		t.Fatalf("scoped revision = %d", viaScoped.StateRevision)
+	}
+
+	// Clear active → load misses, save is no-op.
+	active.ok = false
+	_, found, err = scoped.LoadCOPReadModel(ctx)
+	if err != nil || found {
+		t.Fatalf("inactive load: found=%v err=%v", found, err)
+	}
+	if err := scoped.SaveCOPReadModel(ctx, sampleProjection(99, "nope")); err != nil {
+		t.Fatalf("inactive save: %v", err)
+	}
+	got, _, _ = s.LoadCOPReadModelKey(ctx, contracts.SessionCOPReadModelKey("sim-scoped"))
+	if got.StateRevision == 99 {
+		t.Fatal("inactive save must not overwrite session key")
+	}
+}
+
+func TestSessionEpochMigrationCreatesTables(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	for _, table := range []string{"session_epoch", "active_session_pointer", "session_advisory_index"} {
+		var regclass string
+		if err := s.Pool().QueryRow(ctx, "SELECT to_regclass($1)::text", table).Scan(&regclass); err != nil {
+			t.Fatalf("look up %s: %v", table, err)
+		}
+		if regclass == "" {
+			t.Fatalf("migration 0004 did not create %s", table)
+		}
+	}
+}
+
+type stubActive struct {
+	id string
+	ok bool
+}
+
+func (s *stubActive) ActiveSessionID() (string, bool) { return s.id, s.ok }
+
 func TestCOPReadModelSaveJoinsAmbientTransaction(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)

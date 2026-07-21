@@ -111,6 +111,8 @@ func TestOpenAppliesMigrationsAndRejectsHistoryMutation(t *testing.T) {
 		"event_log", "event_consumer_checkpoints",
 		// Materialized COP read model (migration 0003; B5).
 		"cop_read_model",
+		// Session epoch tables (migration 0004; C3).
+		"session_epoch", "active_session_pointer", "session_advisory_index",
 	}
 	for _, table := range tables {
 		var regclass string

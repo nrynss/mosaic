@@ -33,8 +33,8 @@ func (s *Store) LoadCOPReadModel(ctx context.Context) (contracts.ProjectionResul
 	return s.LoadCOPReadModelKey(ctx, contracts.DefaultCOPReadModelKey)
 }
 
-// LoadCOPReadModelKey loads the materialization for an explicit key. C3 can
-// pass a session-scoped key; until then callers use DefaultCOPReadModelKey.
+// LoadCOPReadModelKey loads the materialization for an explicit key. Session
+// isolation (C3) passes contracts.SessionCOPReadModelKey(sessionID).
 func (s *Store) LoadCOPReadModelKey(ctx context.Context, key string) (contracts.ProjectionResult, bool, error) {
 	key = strings.TrimSpace(key)
 	if key == "" {

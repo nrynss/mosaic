@@ -181,6 +181,17 @@ type Config struct {
 	// MOSAIC_DEMO_BUDGET_USD). When nil, the model-usage response omits
 	// budget/remaining fields entirely.
 	DemoBudgetUSD *float64
+	// ActiveSession is the optional simulation session epoch for read-port
+	// isolation (C3). When set, GET /cop and GET /advisories return an empty
+	// board unless a session is active. Prefer composing the same holder the
+	// simulation controller updates on Start/Reset/End.
+	ActiveSession contracts.ActiveSessionSource
+	// SessionAdvisories is the optional in-memory session→advisory id index.
+	// When set with ActiveSession, advisories are filtered to the active
+	// epoch. Nil keeps unscoped AdvisoryHistoryReader behaviour when a session
+	// is active (legacy). When ActiveSession reports inactive, advisories are
+	// empty regardless of this field.
+	SessionAdvisories *SessionAdvisoryView
 }
 
 // Server composes the v0.1 HTTP handlers. It reads a COP only through the P06
@@ -208,6 +219,8 @@ type Server struct {
 	apiKeyConfigured  bool
 	usage             UsageReader
 	demoBudgetUSD     *float64
+	activeSession     contracts.ActiveSessionSource
+	sessionAdvisories *SessionAdvisoryView
 }
 
 // New rejects partial deterministic/evidence wiring while providing public
@@ -275,6 +288,8 @@ func New(config Config) (*Server, error) {
 		apiKeyConfigured:  config.APIKeyConfigured,
 		usage:             config.Usage,
 		demoBudgetUSD:     config.DemoBudgetUSD,
+		activeSession:     config.ActiveSession,
+		sessionAdvisories: config.SessionAdvisories,
 	}, nil
 }
 
@@ -577,6 +592,15 @@ func (s *Server) handleAuditAction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) recoverCOP(w http.ResponseWriter, r *http.Request) (contracts.ProjectionResult, bool) {
+	// Session isolation (C3): when an ActiveSessionSource is composed and no
+	// session is active, return an empty board without invoking recovery. When
+	// recovery itself is PreferMaterializedRecovery with Active set, this is
+	// redundant but keeps non-PreferMaterialized recovery paths honest.
+	if s.activeSession != nil {
+		if _, active := s.activeSession.ActiveSessionID(); !active {
+			return emptyCOPResult(), true
+		}
+	}
 	result, err := s.recovery.Recover(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, nil, apiError{Code: "cop_unavailable", Message: "deterministic COP recovery is unavailable"})
@@ -768,6 +792,17 @@ func (s *Server) handleAdvisories(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) || !s.authorize(w, r, ActionReadAdvisories) {
 		return
 	}
+	// No active session → empty advisories (C3 session isolation).
+	if s.activeSession != nil {
+		if _, active := s.activeSession.ActiveSessionID(); !active {
+			advStatus := "unavailable"
+			if s.advisoryMode == "fixture_composed" || s.advisoryMode == "fixture-composed" {
+				advStatus = "fixture-composed"
+			}
+			writeJSON(w, http.StatusOK, emptyAdvisoryPayload(advStatus, s.providerHints()), nil)
+			return
+		}
+	}
 	result, recovered := s.recoverCOP(w, r)
 	if !recovered {
 		return
@@ -776,6 +811,13 @@ func (s *Server) handleAdvisories(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, nil, apiError{Code: "advisory_history_unavailable", Message: "advisory history is unavailable"})
 		return
+	}
+	// Session-scoped advisory filter when both ActiveSession and the in-memory
+	// index are composed. Ontology records do not carry session_id.
+	if s.activeSession != nil && s.sessionAdvisories != nil {
+		if sessionID, active := s.activeSession.ActiveSessionID(); active {
+			history = s.sessionAdvisories.Filter(sessionID, history)
+		}
 	}
 
 	// Filter Insights and Recommendations by recovered revision
