@@ -70,6 +70,7 @@
         class: 'reported_fact',
         kind: 'Incident',
         id: incident.incident_id,
+        status: String(incident.status || ''),
         title: `${incident.category || 'Incident'} · ${incident.status || 'status unknown'}`,
         detail: `Location ${incident.location_id || 'not recorded'}`,
         timestamp: incident.opened_at,
@@ -81,6 +82,7 @@
         class: 'reported_fact',
         kind: 'Unit',
         id: unit.unit_id,
+        status: String(unit.availability || ''),
         title: `${unit.availability || 'status unknown'} · ${unit.unit_id}`,
         detail: unit.incident_id ? `Linked to ${unit.incident_id}` : 'No incident link recorded',
         timestamp: unit.updated_at,
@@ -92,6 +94,7 @@
         class: 'reported_fact',
         kind: 'Resource',
         id: resource.resource_id,
+        status: String(resource.availability || ''),
         title: `${resource.availability || 'status unknown'} · ${resource.resource_id}`,
         detail: resource.incident_id ? `Linked to ${resource.incident_id}` : 'No incident link recorded',
         timestamp: resource.updated_at,
@@ -103,6 +106,7 @@
         class: 'reported_fact',
         kind: 'Road',
         id: road.road_id,
+        status: String(road.status || ''),
         title: `${road.status || 'status unknown'} · ${road.name || road.road_id}`,
         detail: 'Current effective road condition',
         timestamp: road.updated_at,
@@ -114,6 +118,7 @@
         class: 'reported_fact',
         kind: 'Weather',
         id: weather.weather_alert_id,
+        status: String(weather.status || ''),
         title: `${weather.status || 'status unknown'} · ${weather.severity || 'unspecified'} alert`,
         detail: weather.summary || 'Weather alert status',
         timestamp: weather.updated_at,
@@ -228,6 +233,7 @@
               data-kind={item.kind}
               data-entity-id={item.id}
               data-claim-class={item.class}
+              data-status={item.status || ''}
             >
               <span class="ledger-pin" aria-hidden="true"></span>
               <div class="claim-time">{formatTimestamp(item.timestamp)}</div>

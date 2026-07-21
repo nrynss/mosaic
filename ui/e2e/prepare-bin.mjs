@@ -2,9 +2,16 @@
 /**
  * Build mosaicdemo into ui/.e2e-bin/ for Playwright webServer.
  * Cross-platform (Windows → .exe).
+ *
+ * Rebuilds when:
+ *   - --force / MOSAIC_E2E_REBUILD=1
+ *   - binary missing
+ *   - any watched Go source (cmd/mosaicdemo, internal, go.mod/sum) is newer than the binary
+ *
+ * Fast path: binary present and up-to-date → skip go build.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -18,8 +25,66 @@ const outPath = path.join(outDir, binName);
 mkdirSync(outDir, { recursive: true });
 
 const force = process.argv.includes('--force') || process.env.MOSAIC_E2E_REBUILD === '1';
-if (existsSync(outPath) && !force) {
-  console.log(`e2e binary ready: ${outPath}`);
+
+/** @param {string} dir */
+function collectFiles(dir, acc = []) {
+  if (!existsSync(dir)) return acc;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === 'testdata' || entry.name === 'vendor' || entry.name.startsWith('.')) {
+        continue;
+      }
+      collectFiles(full, acc);
+      continue;
+    }
+    if (entry.isFile() && (entry.name.endsWith('.go') || entry.name === 'go.mod' || entry.name === 'go.sum')) {
+      acc.push(full);
+    }
+  }
+  return acc;
+}
+
+function latestSourceMtimeMs() {
+  const roots = [
+    path.join(repoRoot, 'cmd', 'mosaicdemo'),
+    path.join(repoRoot, 'internal'),
+    path.join(repoRoot, 'go.mod'),
+    path.join(repoRoot, 'go.sum'),
+  ];
+  let latest = 0;
+  for (const root of roots) {
+    if (!existsSync(root)) continue;
+    const st = statSync(root);
+    if (st.isFile()) {
+      latest = Math.max(latest, st.mtimeMs);
+      continue;
+    }
+    for (const file of collectFiles(root)) {
+      try {
+        latest = Math.max(latest, statSync(file).mtimeMs);
+      } catch {
+        // ignore transient races
+      }
+    }
+  }
+  return latest;
+}
+
+function needsRebuild() {
+  if (force) return true;
+  if (!existsSync(outPath)) return true;
+  const binMtime = statSync(outPath).mtimeMs;
+  const srcMtime = latestSourceMtimeMs();
+  if (srcMtime > binMtime) {
+    console.log('e2e binary stale (Go sources newer) — rebuilding');
+    return true;
+  }
+  return false;
+}
+
+if (!needsRebuild()) {
+  console.log(`e2e binary ready (up to date): ${outPath}`);
   process.exit(0);
 }
 

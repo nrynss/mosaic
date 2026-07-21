@@ -1,104 +1,139 @@
-# Mosaic demo dashboard
+# Mosaic demo dashboard (UI)
 
-This is the deliberately small, local Svelte surface for the Mosaic synthetic
-demonstration. It is an evidence ledger and public operations receipt, not an
-operational command surface: it displays a deterministic COP, preserves the
-difference between reported facts and derived claims, and can only create the
-existing immutable briefing-request and review audit records with
-`executed: false`.
+Svelte + Vite front end for the Mosaic interactive operator demo. The built
+`dist/` is served by `mosaicdemo` in production and in CI.
 
-## Design notes
-
-The interface is organized as a case folio rather than a metrics dashboard.
-The left rail carries public-demo and connection context; the centre is a
-chronological evidence ledger; the right rail resolves one cited artifact at a
-time. The ledger spine is intentional: durable canonical order is the product's
-real explanatory structure.
-
-- **Palette:** Harbor `#173342`, Paper `#edf3f2`, Ink `#17202a`, Signal
-  `#c9872f`, Tide `#8db9c7`, and Review `#7d5266`.
-- **Type:** Iowan Old Style / Palatino for contextual headings, Aptos / Segoe
-  UI for reading, and Cascadia Code / ui-monospace for IDs and state revisions.
-- **Signature:** a single evidence ledger spine whose markers are claim-class
-  colors. Opening a marker resolves that item through the public evidence
-  API; it does not reveal raw source payload bytes.
-
-The first sketch used a dark command-centre treatment and a grid of status
-cards. It was rejected because it made synthetic state look operational and
-buried the distinction between observations and assessment. The quieter folio
-layout keeps one memorable structural device while leaving enough space for
-uncertainty, unavailable data, and the human review boundary.
-
-## Operations receipt design notes
-
-The P18 panel serves a demo evaluator who needs to answer one question: **what
-was actually observed and what can this single-instance build truthfully do?**
-It is deliberately a receipt from the deterministic system, rather than an
-admin dashboard or an agent-control surface.
-
-- **Tokens:** it extends the existing Harbor `#173342`, Paper `#edf3f2`, Ink
-  `#17202a`, Signal `#c9872f`, Tide `#8db9c7`, and Review `#7d5266` palette.
-  The receipt borrows the ledger’s fine grid and uses Tide, Signal, and Review
-  only to distinguish fixture/composed/recovered/unavailable statements.
-- **Type:** Iowan Old Style / Palatino keeps contextual headings human-scale;
-  Aptos / Segoe UI keeps the explanatory copy legible; Cascadia Code /
-  ui-monospace identifies immutable counts, modes, and timestamps without
-  suggesting a command terminal.
-- **Layout:** the operations receipt follows the COP ledger, so a reader first
-  sees the source-derived state and then its bounded operational provenance.
-  Its compact sequence is timestamped observation → durable/lifecycle counts →
-  model-run outcome record → capability docket.
-- **Signature:** the clipped deterministic recovery stamp is the one visual
-  risk. It works like a paper receipt mark: a claim of recovery is conspicuous,
-  specific to its observation, and visibly separate from the unavailable
-  capabilities around it.
-
-The initial idea used a bank of green status tiles. It was revised because
-“healthy” tiles would make a local fixture look like a production control room.
-The final docket treats each capability as an evidence statement, names the
-missing Terra/Sol transport and reconciliation worker, and never calls an LLM
-repair process self-healing.
-
-## Run locally
-
-Requirements: Node.js 20+ and a Mosaic API on `http://127.0.0.1:8080` (or an
-equivalent reverse proxy).
+## Quick start (dev)
 
 ```powershell
 cd ui
-npm install
+npm ci
 npm run dev
 ```
 
-The development server proxies `/api` to `http://127.0.0.1:8080` by default,
-so the dashboard starts against the relative API base `/api/v1`. Change the
-proxy target for a different local API process:
+Point a local `mosaicdemo` at this Vite origin (or use the full demo binary with
+`-ui-dir` after `npm run build`).
+
+## Quality
 
 ```powershell
-$env:MOSAIC_API_PROXY_TARGET = 'http://127.0.0.1:9090'
-npm run dev
+npm run check    # svelte-check
+npm run build    # production bundle → dist/
 ```
 
-For a same-origin production build, set the API base only when necessary:
+---
+
+## Playwright E2E (fixture + replay)
+
+Deterministic browser tests drive the **built** UI served by `mosaicdemo` — the
+same path as production. No live OpenAI; no Vite-dev-server-only coverage.
+
+| Project | What it proves |
+|---------|----------------|
+| **fixture** | Demo script board flows (play → COP → advice → handoffs → history) |
+| **walkthrough** | One full narrative take with **video + trace always on** |
+| **replay** | Terra / Sol / Luna UI buttons hit the **cassette bank** at $0 |
+
+### Install once
 
 ```powershell
-$env:VITE_MOSAIC_API_BASE_URL = '/api/v1'
-npm run build
+cd ui
+npm ci
+npx playwright install chromium
 ```
 
-An absolute API URL is supported by the in-app connection field and build
-environment. It must be served with an appropriate browser CORS policy; the
-local Vite proxy avoids that requirement in development.
-
-## Checks
+### Run the suite
 
 ```powershell
-npm run check
-npm run build
+cd ui
+
+# Full path: build UI, force-rebuild Go binary, run all projects
+npm run test:e2e
+
+# Faster re-run (smart binary rebuild if Go sources changed)
+npm run test:e2e:run
+
+# Visible browser / Playwright UI
+npm run test:e2e:headed
+npm run test:e2e:ui
+
+# Recording take only
+npm run test:e2e:walkthrough
+
+# Slice by project
+npm run test:e2e:fixture
+npm run test:e2e:replay
 ```
 
-The dashboard calls the public `health`, `version`, COP, operations, evidence,
-stream, briefing, and audit-action endpoints. It adds no browser identity header
-or auth control. SSE uses `fetch` rather than `EventSource` so its reader can be
-cleanly cancelled and reconnected with bounded backoff; it always accepts the
-API's next `cop.snapshot` as authoritative.
+Always run from **`ui/`** so the local `@playwright/test` is used.
+
+### What happens under the hood
+
+1. `vite build` → `ui/dist`
+2. `go build` → `ui/.e2e-bin/mosaicdemo[.exe]`  
+   - Full `test:e2e` **always** rebuilds (`e2e:prepare:force`)  
+   - `test:e2e:run` rebuilds only if Go sources are **newer** than the binary
+3. Playwright starts **two** `mosaicdemo` processes:
+   - fixture → `http://127.0.0.1:18080`
+   - replay → `http://127.0.0.1:18081` + `testdata/demo/cassettes`
+4. Specs wait on **state** (`data-revision`, `data-status`, HTTP responses) — not fixed sleeps
+
+### Environment
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `MOSAIC_E2E_FIXTURE_PORT` | `18080` | Fixture server |
+| `MOSAIC_E2E_REPLAY_PORT` | `18081` | Replay server |
+| `MOSAIC_E2E_REUSE` | unset | Set `1` only to reuse an already-running server |
+| `MOSAIC_E2E_REBUILD` | unset | Force Go rebuild in `e2e:prepare` |
+| `MOSAIC_E2E_ALLOW_AMBIENT_PROVIDERS` | unset | Set `1` to keep shell `MOSAIC_*_PROVIDER` (not recommended) |
+
+The start script **clears `OPENAI_API_KEY`** and **forces** Luna/Terra/Sol providers to
+`fixture` unless the ambient escape hatch is set. Temp SQLite DBs live under the OS
+temp dir and are removed on process exit (stale files cleaned after ~6h).
+
+### Artifacts
+
+| Path | Contents |
+|------|----------|
+| `ui/test-results/` | Failures (and walkthrough video/trace) — gitignored |
+| `ui/playwright-report/` | HTML report — gitignored |
+| `ui/.e2e-bin/` | Local demo binary — gitignored |
+
+```powershell
+npx playwright show-report
+npx playwright show-trace test-results/**/trace.zip
+```
+
+### Specs map
+
+| File | Flow |
+|------|------|
+| `e2e/01-load-modes.spec.ts` | Connection + fixture mode badges |
+| `e2e/02-play-scenario.spec.ts` | Play → COP rev 9 |
+| `e2e/03-cop-walk.spec.ts` | Claim-class + entity `data-status` |
+| `e2e/04-refresh-advice.spec.ts` | Advisories + supersession, board unchanged |
+| `e2e/05-handoffs.spec.ts` | Dispatch/maintenance `executed:false` |
+| `e2e/06-decision-history.spec.ts` | Audit rows for **actions taken** |
+| `e2e/07-demo-walkthrough.spec.ts` | Full narrative recording |
+| `e2e/replay-model-actions.spec.ts` | Banked Terra/Sol/Luna (incl. quarantine) |
+
+### Selectors
+
+Prefer `data-testid` and state attributes (`data-status`, `data-revision`,
+`data-executed`, `data-mode`). Do not assert on CSS classes or churnable marketing copy.
+
+Extended runbook (troubleshooting, CI, selector policy):
+
+→ [`docs/runbook/playwright-demo-e2e.md`](../docs/runbook/playwright-demo-e2e.md)
+
+### CI
+
+GitHub Actions: [`.github/workflows/playwright.yml`](../.github/workflows/playwright.yml)  
+Runs headless Chromium and uploads report + test-results **on failure**.
+
+### Safety
+
+- Synthetic data only  
+- No live OpenAI spend in this suite  
+- Handoffs and model actions stay `executed: false` (board does not mutate)  

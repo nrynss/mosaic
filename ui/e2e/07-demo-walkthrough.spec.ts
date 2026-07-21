@@ -18,9 +18,7 @@ test.describe('Demo walkthrough', () => {
 
     await playScenarioToRevision9(page);
     await expect(claimRow(page, 'Incident', 'incident-domestic-001')).toBeVisible();
-    await expect(claimRow(page, 'Road', 'road-brook-lane').getByTestId('cop-claim-title')).toContainText(
-      /open/i,
-    );
+    await expect(claimRow(page, 'Road', 'road-brook-lane')).toHaveAttribute('data-status', /^open$/i);
 
     await page.getByTestId('refresh-advice').click();
     await expect(insightCard(page, 'insight-domestic-access-001')).toBeVisible();
@@ -29,18 +27,25 @@ test.describe('Demo walkthrough', () => {
       /superseded|not_current|obsolete/,
     );
 
-    await page.getByTestId('dispatch-note').fill('Walkthrough: unit on scene (synthetic).');
+    const dispatchNote = `Walkthrough: unit on scene (synthetic) ${Date.now()}`;
+    await page.getByTestId('dispatch-note').fill(dispatchNote);
     await page.getByTestId('dispatch-save').click();
     await expect(page.getByTestId('dispatch-result')).toHaveAttribute('data-executed', 'false');
 
-    await page.getByTestId('maintenance-note').fill('Walkthrough: Brook Lane note (synthetic).');
+    const maintenanceNote = `Walkthrough: Brook Lane note (synthetic) ${Date.now()}`;
+    await page.getByTestId('maintenance-note').fill(maintenanceNote);
     await page.getByTestId('maintenance-save').click();
     await expect(page.getByTestId('maintenance-result')).toHaveAttribute('data-executed', 'false');
 
     await page.getByTestId('refresh-advice').click();
     await page.getByTestId('tab-decision-history').click();
     await expect(page.getByTestId('decision-history')).toBeVisible();
-    await expect(page.getByTestId('audit-record-row').first()).toBeVisible({ timeout: 20_000 });
+    await expect(
+      page.locator('[data-testid="audit-record-row"]').filter({ hasText: dispatchNote }),
+    ).toBeVisible({ timeout: 20_000 });
+    await expect(
+      page.locator('[data-testid="audit-record-row"]').filter({ hasText: maintenanceNote }),
+    ).toBeVisible();
     await expect(page.getByTestId('scenario-beat-row').first()).toBeVisible();
   });
 });

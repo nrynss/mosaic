@@ -44,17 +44,15 @@ export async function playScenarioToRevision9(page: Page) {
         const rev = await page.getByTestId('cop-revision').getAttribute('data-revision');
         const status = await page.getByTestId('run-status').getAttribute('data-status');
         const claims = await page.getByTestId('cop-claim-row').count();
-        const brookTitle = await page
-          .locator(
-            '[data-testid="cop-claim-row"][data-entity-id="road-brook-lane"] [data-testid="cop-claim-title"]',
-          )
-          .textContent()
+        const brookStatus = await page
+          .locator('[data-testid="cop-claim-row"][data-entity-id="road-brook-lane"]')
+          .getAttribute('data-status')
           .catch(() => '');
         return {
           status,
           rev,
           claims,
-          brookOpen: /open/i.test(brookTitle || ''),
+          brookOpen: String(brookStatus || '').toLowerCase() === 'open',
         };
       },
       { timeout: 45_000, intervals: [50, 100, 200, 500] },

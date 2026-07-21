@@ -73,6 +73,9 @@ export default defineConfig({
       },
     },
   ],
+  // Both servers always start so mixed project filters still work without
+  // reconfiguring. Fixture-only still boots replay (needs free REPLAY_PORT +
+  // cassette bank). Override ports via MOSAIC_E2E_FIXTURE_PORT / MOSAIC_E2E_REPLAY_PORT.
   webServer: [
     {
       command: `node e2e/start-demo.mjs --mode=fixture --port=${FIXTURE_PORT}`,

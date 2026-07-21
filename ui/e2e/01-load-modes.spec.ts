@@ -13,12 +13,11 @@ test.describe('Load + modes', () => {
     await expect(page.getByTestId('start-over')).toBeVisible();
     await expect(page.getByTestId('run-status')).toBeVisible();
 
-    // Mode badges default to fixture / demo pack (data-mode).
+    // Mode badges must report fixture (start-demo forces providers).
     for (const agent of ['luna', 'terra', 'sol'] as const) {
       const badge = page.getByTestId(`mode-badge-${agent}`);
       await expect(badge).toBeVisible();
-      const mode = await badge.getAttribute('data-mode');
-      expect(mode === 'fixture' || mode === 'mosaic-fixture' || mode === null || mode === '').toBeTruthy();
+      await expect(badge).toHaveAttribute('data-mode', /^(fixture|mosaic-fixture)$/);
     }
 
     // COP empty or zero before Play (seed off).

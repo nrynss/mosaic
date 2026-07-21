@@ -15,7 +15,7 @@ async function expectBankedModelResult(
   agent: string,
   opts: { beat?: string; status?: RegExp } = {},
 ) {
-  const statusRe = opts.status ?? /^(ok|accepted|repaired|quarantined|refused)$/i;
+  const statusRe = opts.status ?? /^(ok|accepted|repaired)$/i;
   await expect(page.getByTestId('model-result-card')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId('model-result-card')).toHaveAttribute('data-agent', agent);
   await expect(page.getByTestId('model-result-card')).toHaveAttribute('data-executed', 'false');
@@ -23,7 +23,10 @@ async function expectBankedModelResult(
     await expect(page.getByTestId('model-result-card')).toHaveAttribute('data-beat', opts.beat);
   }
   await expect(page.getByTestId('model-result-status')).toHaveText(statusRe);
+  await expect(page.getByTestId('model-result-status')).toHaveAttribute('data-status', statusRe);
   await expect(page.getByTestId('model-result-boundary')).toHaveAttribute('data-executed', 'false');
+  // Successful bank hits under replay must not be mislabeled as generic fixture.
+  await expect(page.getByTestId('model-provenance-badge')).toContainText(/replay \(banked\)/i);
 }
 
 /**
@@ -61,12 +64,9 @@ test.describe('Replay model actions', () => {
     const terraResp = await terraRespPromise;
     expect(terraResp.ok(), `terra HTTP ${terraResp.status()}`).toBeTruthy();
     const terraBody = await terraResp.json();
-    expect(terraBody?.data?.status).toMatch(/ok|accepted/i);
+    expect(terraBody?.data?.status).toMatch(/^ok$/i);
     expect(terraBody?.data?.executed).not.toBe(true);
     await expectBankedModelResult(page, 'terra');
-    await expect(page.getByTestId('model-provenance-badge')).toContainText(
-      /replay \(banked\)|banked|mosaic-fixture|fixture/i,
-    );
 
     // Board unchanged by model output.
     await expect(page.getByTestId('cop-revision')).toHaveAttribute('data-revision', revBefore!);
@@ -79,31 +79,35 @@ test.describe('Replay model actions', () => {
     const solResp = await solRespPromise;
     expect(solResp.ok(), `sol HTTP ${solResp.status()} body=${await solResp.text().catch(() => '')}`).toBeTruthy();
     const solBody = await solResp.json();
-    expect(solBody?.data?.status).toMatch(/ok|accepted/i);
+    expect(solBody?.data?.status).toMatch(/^ok$/i);
     expect(solBody?.data?.executed).not.toBe(true);
     await expectBankedModelResult(page, 'sol');
 
-    // Luna interpret on curated 911 beat.
+    // Luna interpret on curated 911 beat (accepted after fixture enrichment).
     const lunaRespPromise = waitOperatorPOST(page, 'interpret');
     await page.getByTestId('interpret-event-baseline-01-911-call').click();
     const lunaResp = await lunaRespPromise;
     expect(lunaResp.ok(), `luna HTTP ${lunaResp.status()}`).toBeTruthy();
     const lunaBody = await lunaResp.json();
-    expect(lunaBody?.data?.status).toMatch(/ok|accepted|repaired/i);
+    expect(lunaBody?.data?.status).toMatch(/^ok$/i);
     await expectBankedModelResult(page, 'luna', { beat: 'baseline-01-911-call' });
 
-    // Luna quarantine beat (fixture-08) — honest banked quarantine.
+    // Luna quarantine beat (fixture-08) — honest banked quarantine only.
     const qRespPromise = waitOperatorPOST(page, 'interpret');
     await page.getByTestId('interpret-event-fixture-08-quarantined-input').click();
     const qResp = await qRespPromise;
     expect(qResp.ok(), `luna quarantine HTTP ${qResp.status()}`).toBeTruthy();
     const qBody = await qResp.json();
-    expect(String(qBody?.data?.status || '')).toMatch(/quarantined|ok|accepted|repaired/i);
+    expect(String(qBody?.data?.status || '')).toMatch(/^quarantined$/i);
     await expect(page.getByTestId('model-result-card')).toHaveAttribute(
       'data-beat',
       'fixture-08-quarantined-input',
     );
+    await expect(page.getByTestId('model-result-card')).toHaveAttribute('data-status', /^quarantined$/i);
+    await expect(page.getByTestId('model-result-status')).toHaveAttribute('data-status', /^quarantined$/i);
     await expect(page.getByTestId('model-result-card')).toHaveAttribute('data-executed', 'false');
+    await expect(page.getByTestId('model-provenance-badge')).toContainText(/replay \(banked\)/i);
+    await expect(page.getByTestId('luna-quarantine-reason')).toBeVisible();
 
     // Final board still at rev 9.
     await expect(page.getByTestId('cop-revision')).toHaveAttribute('data-revision', revBefore!);

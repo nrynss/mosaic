@@ -5,10 +5,20 @@ the mosaicdemo server in **fixture/replay** mode (`$0`, offline). Primary purpos
 the demo narrative against regressions. Secondary: produce a repeatable demo
 walkthrough artifact (Playwright video/trace).
 
-**Branch:** `feat/v0.4-pluggable-event-spine`
+**Branch:** `feat/v0.4-pluggable-event-spine`  
+**Status:** ✅ **Implemented** (2026-07-21)  
+**Implementation commits:**
+- `f26f2c6` — data-testid selectors  
+- `f4ad58b` — Playwright suite (fixture + walkthrough + replay) + CI + runbook  
+- *(close-out)* — review fixes (stale binary, stricter asserts, providers, ports, docs + `ui/README.md`)
+
 **Why now:** the deterministic replay bank (demo cassette recorder, `1bb0974`) makes the
 whole app reproducible offline — the missing piece is browser-level coverage of the UI
-the audience actually sees.
+the audience actually sees. UI model wiring (§6.4) has also landed (`73f859a` / `a429300`),
+so the suite includes a **replay banked model** project.
+
+**How to use:** [`ui/README.md`](../../ui/README.md) · runbook
+[`docs/runbook/playwright-demo-e2e.md`](../runbook/playwright-demo-e2e.md)
 
 ---
 
@@ -147,22 +157,39 @@ decision.)
 
 ## 7. Acceptance criteria
 
-- [ ] `@playwright/test` + config added; `webServer` launches built mosaicdemo (fixture),
+- [x] `@playwright/test` + config added; `webServer` launches built mosaicdemo (fixture),
       waits on health.
-- [ ] `data-testid` selectors added for every element the specs assert on (separate commit).
-- [ ] Specs cover flows §4; all assertions wait on state, none on fixed timeouts.
-- [ ] Suite is deterministic: passes repeatedly, headless, no third-party network, no API key.
-- [ ] CI runs the suite headless and uploads report/trace/video on failure.
-- [ ] A "demo walkthrough" spec emits a video/trace artifact.
-- [ ] Runbook: local run + selector-update + recording-regeneration steps.
-- [ ] (Deferred) replay-backed flow that renders real banked model output — only after §6.4.
+- [x] `data-testid` selectors added for every element the specs assert on (separate commit
+      `f26f2c6`).
+- [x] Specs cover flows §4; all assertions wait on state, none on fixed timeouts.
+- [x] Suite is deterministic: headless, no third-party network, no API key; full `test:e2e`
+      force-rebuilds Go binary; smart rebuild on `test:e2e:run`.
+- [x] CI runs the suite headless and uploads report/trace/video on failure.
+- [x] A "demo walkthrough" spec emits a video/trace artifact.
+- [x] Runbook + `ui/README.md`: local run, selectors, recording, ports, safety.
+- [x] Replay-backed model flow (Terra/Sol/Luna bank + strict quarantine) — after §6.4 UI wiring.
+
+### Review close-out
+
+| # | Item | Fix |
+|---|------|-----|
+| 1 | Stale e2e binary | Smart mtime rebuild + force on full `test:e2e` |
+| 2 | Weak decision history | Count + match handoff **notes** after actions |
+| 3 | Loose provenance | Require `replay (banked)` on bank hits |
+| 4 | Loose quarantine | Strict `quarantined` + reason visible |
+| 5 | Busy ports | Preflight bind + clear env-override message |
+| 6 | Ambient live providers | Force `fixture` unless escape hatch |
+| 7 | Empty mode badge | Require `fixture\|mosaic-fixture` |
+| 8 | Copy-based COP status | `data-status` on claim rows |
+| 9 | Temp DB leak | Unlink on exit + stale cleanup |
+| 10 | Dual servers always | Documented; fixture-only still boots replay |
 
 ---
 
 ## 8. Non-goals
 - No live OpenAI calls in the Playwright suite (fixture/replay only).
 - No assertions on CSS/visible copy that may churn — assert on `data-testid` + semantic state.
-- UI wiring to trigger the operator/model endpoints (§6.4) is a separate parcel.
+- (Historical) UI wiring for operator endpoints was a separate parcel — **now landed**.
 
 ---
 

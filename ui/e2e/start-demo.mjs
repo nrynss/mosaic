@@ -11,10 +11,12 @@
  *   - ui/.e2e-bin/mosaicdemo[.exe] (npm run e2e:prepare)
  *
  * Paths are always absolute native paths (Windows-safe).
- * OPENAI_API_KEY is cleared so tests never hit live OpenAI.
+ * OPENAI_API_KEY is cleared; provider flags forced to fixture unless
+ * MOSAIC_E2E_ALLOW_AMBIENT_PROVIDERS=1.
  */
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { createServer } from 'node:net';
+import { existsSync, mkdirSync, readdirSync, unlinkSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,14 +51,63 @@ const bin = process.env.MOSAIC_E2E_BIN
 
 const uiDir = path.join(uiRoot, 'dist');
 const cassetteDir = path.join(repoRoot, 'testdata', 'demo', 'cassettes');
-// Unique DB per process so prior Terra/Sol insights cannot collide
-// ("Insight already exists") across Playwright runs on a fixed port.
 const dbDir = path.join(os.tmpdir(), 'mosaic-playwright-e2e');
 mkdirSync(dbDir, { recursive: true });
 const dbPath = path.join(
   dbDir,
   `demo-${mode}-${port}-${process.pid}-${Date.now()}.db`,
 );
+
+/** Fail fast with a clear message when the port is already taken. */
+async function assertPortFree(portNum) {
+  await new Promise((resolve, reject) => {
+    const server = createServer();
+    server.unref();
+    server.once('error', (err) => {
+      if (err && err.code === 'EADDRINUSE') {
+        reject(
+          new Error(
+            `port ${portNum} is already in use. Stop leftover mosaicdemo, or set MOSAIC_E2E_FIXTURE_PORT / MOSAIC_E2E_REPLAY_PORT to free ports.`,
+          ),
+        );
+        return;
+      }
+      reject(err);
+    });
+    server.listen(Number(portNum), '127.0.0.1', () => {
+      server.close((closeErr) => (closeErr ? reject(closeErr) : resolve()));
+    });
+  });
+}
+
+/** Best-effort cleanup of old e2e SQLite files (>6h). */
+function cleanupStaleTempDbs() {
+  try {
+    const cutoff = Date.now() - 6 * 60 * 60 * 1000;
+    for (const name of readdirSync(dbDir)) {
+      if (!name.startsWith('demo-') || !name.endsWith('.db')) continue;
+      const full = path.join(dbDir, name);
+      try {
+        if (statSync(full).mtimeMs < cutoff) unlinkSync(full);
+      } catch {
+        // ignore
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function unlinkDb() {
+  for (const suffix of ['', '-wal', '-shm']) {
+    const p = dbPath + suffix;
+    try {
+      if (existsSync(p)) unlinkSync(p);
+    } catch {
+      // ignore
+    }
+  }
+}
 
 if (!existsSync(bin)) {
   console.error(`mosaicdemo binary not found: ${bin}`);
@@ -73,6 +124,15 @@ if (mode === 'replay' && !existsSync(cassetteDir)) {
   process.exit(1);
 }
 
+cleanupStaleTempDbs();
+
+try {
+  await assertPortFree(port);
+} catch (err) {
+  console.error(`[start-demo] ${err.message || err}`);
+  process.exit(1);
+}
+
 // Strip ambient OpenAI key so fixture/replay cannot call live APIs.
 const env = { ...process.env };
 delete env.OPENAI_API_KEY;
@@ -84,10 +144,19 @@ env.MOSAIC_UI_DIR = uiDir;
 if (mode === 'replay') {
   env.MOSAIC_CASSETTE_DIR = cassetteDir;
 }
-// Keep provider flags off live for the e2e binary.
-env.MOSAIC_LUNA_PROVIDER = env.MOSAIC_LUNA_PROVIDER || 'fixture';
-env.MOSAIC_TERRA_PROVIDER = env.MOSAIC_TERRA_PROVIDER || 'fixture';
-env.MOSAIC_SOL_PROVIDER = env.MOSAIC_SOL_PROVIDER || 'fixture';
+
+// Always force fixture providers unless explicitly opting into ambient shell values.
+// Key is still cleared, so even live cannot spend — but badges would otherwise drift.
+const allowAmbient = process.env.MOSAIC_E2E_ALLOW_AMBIENT_PROVIDERS === '1';
+if (!allowAmbient) {
+  env.MOSAIC_LUNA_PROVIDER = 'fixture';
+  env.MOSAIC_TERRA_PROVIDER = 'fixture';
+  env.MOSAIC_SOL_PROVIDER = 'fixture';
+} else {
+  env.MOSAIC_LUNA_PROVIDER = env.MOSAIC_LUNA_PROVIDER || 'fixture';
+  env.MOSAIC_TERRA_PROVIDER = env.MOSAIC_TERRA_PROVIDER || 'fixture';
+  env.MOSAIC_SOL_PROVIDER = env.MOSAIC_SOL_PROVIDER || 'fixture';
+}
 
 const args = [
   '-listen-addr',
@@ -117,16 +186,29 @@ const child = spawn(bin, args, {
 
 const shutdown = (signal) => {
   if (!child.killed) {
-    child.kill(signal);
+    try {
+      child.kill(signal);
+    } catch {
+      // ignore
+    }
   }
 };
 
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-// Playwright on Windows often sends the parent a kill; forward if possible.
-process.on('exit', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => {
+  shutdown('SIGINT');
+  unlinkDb();
+});
+process.on('SIGTERM', () => {
+  shutdown('SIGTERM');
+  unlinkDb();
+});
+process.on('exit', () => {
+  shutdown('SIGTERM');
+  unlinkDb();
+});
 
 child.on('exit', (code, signal) => {
+  unlinkDb();
   if (signal) {
     process.exit(1);
   }
@@ -135,5 +217,6 @@ child.on('exit', (code, signal) => {
 
 child.on('error', (err) => {
   console.error('[start-demo] failed to spawn:', err);
+  unlinkDb();
   process.exit(1);
 });

@@ -22,7 +22,7 @@ test.describe('COP walk', () => {
     // Brook Lane ends open after correction (blocked → open story).
     const brook = claimRow(page, 'Road', 'road-brook-lane');
     await expect(brook).toBeVisible();
-    await expect(brook.getByTestId('cop-claim-title')).toContainText(/open/i);
+    await expect(brook).toHaveAttribute('data-status', /^open$/i);
     await expect(brook.getByTestId('cop-claim-class')).toHaveAttribute(
       'data-claim-class',
       'reported_fact',
@@ -31,11 +31,12 @@ test.describe('COP walk', () => {
     // Main street bridge remains blocked.
     const bridge = claimRow(page, 'Road', 'road-main-street-bridge');
     await expect(bridge).toBeVisible();
-    await expect(bridge.getByTestId('cop-claim-title')).toContainText(/blocked/i);
+    await expect(bridge).toHaveAttribute('data-status', /^blocked$/i);
 
-    // EMS resource present (late beat leaves it unavailable).
+    // EMS resource present; late beat leaves it unavailable at rev 9.
     const ems = claimRow(page, 'Resource', 'resource-ems-004');
     await expect(ems).toBeVisible();
+    await expect(ems).toHaveAttribute('data-status', /^unavailable$/i);
     await expect(ems.getByTestId('cop-claim-class')).toHaveAttribute(
       'data-claim-class',
       'reported_fact',
@@ -52,7 +53,7 @@ test.describe('COP walk', () => {
     // Unit assignment.
     const unit = claimRow(page, 'Unit', 'unit-017');
     await expect(unit).toBeVisible();
-    await expect(unit.getByTestId('cop-claim-title')).toContainText(/assigned/i);
+    await expect(unit).toHaveAttribute('data-status', /^assigned$/i);
     await expect(unit.getByTestId('cop-claim-class')).toHaveAttribute(
       'data-claim-class',
       'reported_fact',

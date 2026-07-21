@@ -51,6 +51,7 @@
               data-testid="audit-record-row"
               data-audit-id={record.audit_record_id}
               data-action={record.action}
+              data-note={record.note || ''}
             >
               <div class="timeline-badge action-badge" data-action={record.action}></div>
               <div class="timeline-time">{formatTimestamp(record.created_at)}</div>
