@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type Page, type Response } from '@playwright/test';
 
 /** Wait until SSE connection pill reports live. */
 export async function waitConnected(page: Page) {
@@ -82,4 +82,52 @@ export function recommendationCard(page: Page, recommendationId: string) {
   return page.locator(
     `[data-testid="advice-recommendation-card"][data-recommendation-id="${recommendationId}"]`,
   );
+}
+
+/**
+ * Deliberate on-camera hold so the recorded walkthrough leaves room for
+ * voiceover. Regression specs never call this (they wait on state); only the
+ * `record` project paces itself with holds. Duration is tunable via
+ * MOSAIC_E2E_HOLD_MS so the video can be lengthened without editing specs.
+ */
+export const HOLD_MS = Number(process.env.MOSAIC_E2E_HOLD_MS || 2600);
+
+export async function hold(page: Page, ms: number = HOLD_MS) {
+  await page.waitForTimeout(ms);
+}
+
+/** Await the operator model POST (analyze | brief | interpret). */
+export function waitOperatorPOST(
+  page: Page,
+  pathSuffix: string,
+  timeout = 30_000,
+): Promise<Response> {
+  return page.waitForResponse(
+    (r) =>
+      r.url().includes(`/api/v1/operator/${pathSuffix}`) && r.request().method() === 'POST',
+    { timeout },
+  );
+}
+
+/**
+ * Assert the model result card rendered a successful banked (replay) result for
+ * `agent`, honestly marked executed:false and provenance "replay (banked)".
+ */
+export async function expectBankedModelResult(
+  page: Page,
+  agent: string,
+  opts: { beat?: string; status?: RegExp } = {},
+) {
+  const statusRe = opts.status ?? /^(ok|accepted|repaired)$/i;
+  await expect(page.getByTestId('model-result-card')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('model-result-card')).toHaveAttribute('data-agent', agent);
+  await expect(page.getByTestId('model-result-card')).toHaveAttribute('data-executed', 'false');
+  if (opts.beat) {
+    await expect(page.getByTestId('model-result-card')).toHaveAttribute('data-beat', opts.beat);
+  }
+  await expect(page.getByTestId('model-result-status')).toHaveText(statusRe);
+  await expect(page.getByTestId('model-result-status')).toHaveAttribute('data-status', statusRe);
+  await expect(page.getByTestId('model-result-boundary')).toHaveAttribute('data-executed', 'false');
+  // Successful bank hits under replay must not be mislabeled as generic fixture.
+  await expect(page.getByTestId('model-provenance-badge')).toContainText(/replay \(banked\)/i);
 }

@@ -438,7 +438,7 @@ Dependencies noted. Workstreams A→B are the foundation; C rides on them.
 ### Workstream G — Capture (original goal)
 | ID | Task | Size | Deps | Claim | Status |
 |----|------|------|------|-------|--------|
-| G1 | Playwright capture keyed off real intermediate rail states + synthetic cursor + paced holds | **M** | C2, C3, D2 | — | Todo |
+| G1 | Playwright capture keyed off real intermediate rail states + synthetic cursor + paced holds | **M** | C2, C3, D2 | playwright-demo-e2e | Done (`f26f2c6`/`f4ad58b`/`f40d91e`: `ui/e2e` suite waits on real COP revisions, replay-backed model flow, walkthrough recording artifact; see [docs/tasks/playwright-demo-e2e.md](tasks/playwright-demo-e2e.md)) |
 
 ### Workstream H — Agent prompts & structured output (Live-mode quality)
 | ID | Task | Size | Deps | Claim | Status |

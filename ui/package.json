@@ -15,7 +15,9 @@
     "test:e2e:ui": "npm run build && npm run e2e:prepare:force && playwright test --ui",
     "test:e2e:walkthrough": "npm run build && npm run e2e:prepare:force && playwright test --project=walkthrough",
     "test:e2e:fixture": "npm run build && npm run e2e:prepare:force && playwright test --project=fixture",
-    "test:e2e:replay": "npm run build && npm run e2e:prepare:force && playwright test --project=replay"
+    "test:e2e:replay": "npm run build && npm run e2e:prepare:force && playwright test --project=replay",
+    "test:e2e:record": "npm run build && npm run e2e:prepare:force && node e2e/record.mjs",
+    "test:e2e:record:live": "npm run build && npm run e2e:prepare:force && node e2e/record.mjs --live"
   },
   "devDependencies": {
     "@playwright/test": "^1.54.2",

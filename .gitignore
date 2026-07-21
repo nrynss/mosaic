@@ -22,5 +22,7 @@ ui/playwright-report/
 ui/blob-report/
 ui/playwright/.cache/
 ui/.e2e-bin/
+# Archived demo recordings — kept on local disk, too large for git (publish via YouTube).
+ui/recordings/
 mosaicdemo
 mosaicdemo.exe

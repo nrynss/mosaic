@@ -11,8 +11,10 @@
  *   - ui/.e2e-bin/mosaicdemo[.exe] (npm run e2e:prepare)
  *
  * Paths are always absolute native paths (Windows-safe).
- * OPENAI_API_KEY is cleared; provider flags forced to fixture unless
- * MOSAIC_E2E_ALLOW_AMBIENT_PROVIDERS=1.
+ * fixture/replay: OPENAI_API_KEY is cleared; provider flags forced to fixture
+ * unless MOSAIC_E2E_ALLOW_AMBIENT_PROVIDERS=1.
+ * live: keeps/loads OPENAI_API_KEY (shell env, else repo-root .env) and forces
+ * live providers + MOSAIC_SIM_MODE=record; banks under ui/recordings/cassettes-live.
  */
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
@@ -20,6 +22,7 @@ import { existsSync, mkdirSync, readdirSync, unlinkSync, statSync } from 'node:f
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ensureRootEnvKeys } from './load-root-env.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uiRoot = path.resolve(__dirname, '..');
@@ -37,9 +40,15 @@ function argValue(name, fallback) {
 const mode = String(argValue('mode', process.env.MOSAIC_E2E_MODE || 'fixture')).toLowerCase();
 const port = String(argValue('port', process.env.MOSAIC_E2E_PORT || '18080'));
 const listen = `127.0.0.1:${port}`;
+// Beat spacing is 1ms for fast, deterministic regression runs. The recording
+// server overrides it (e.g. --beat-spacing=2600ms) so the progressive COP
+// reveal is slow enough to narrate. Go parses this as time.Duration.
+const beatSpacing = String(
+  argValue('beat-spacing', process.env.MOSAIC_E2E_BEAT_SPACING || '1ms'),
+);
 
-if (mode !== 'fixture' && mode !== 'replay') {
-  console.error(`unknown mode ${mode}; use fixture|replay`);
+if (mode !== 'fixture' && mode !== 'replay' && mode !== 'live') {
+  console.error(`unknown mode ${mode}; use fixture|replay|live`);
   process.exit(2);
 }
 
@@ -51,6 +60,9 @@ const bin = process.env.MOSAIC_E2E_BIN
 
 const uiDir = path.join(uiRoot, 'dist');
 const cassetteDir = path.join(repoRoot, 'testdata', 'demo', 'cassettes');
+// Live mode banks fresh cassettes HERE, never over the committed replay bank
+// (replay tests depend on that bank being byte-stable). Gitignored under ui/.
+const liveCassetteDir = path.join(uiRoot, 'recordings', 'cassettes-live');
 const dbDir = path.join(os.tmpdir(), 'mosaic-playwright-e2e');
 mkdirSync(dbDir, { recursive: true });
 const dbPath = path.join(
@@ -133,29 +145,56 @@ try {
   process.exit(1);
 }
 
-// Strip ambient OpenAI key so fixture/replay cannot call live APIs.
 const env = { ...process.env };
-delete env.OPENAI_API_KEY;
-env.OPENAI_API_KEY = '';
 env.MOSAIC_SEED_ON_START = '0';
-env.MOSAIC_SIM_BEAT_SPACING = '1ms';
-env.MOSAIC_SIM_MODE = mode === 'replay' ? 'replay' : 'fixture';
+env.MOSAIC_SIM_BEAT_SPACING = beatSpacing;
 env.MOSAIC_UI_DIR = uiDir;
-if (mode === 'replay') {
-  env.MOSAIC_CASSETTE_DIR = cassetteDir;
-}
 
-// Always force fixture providers unless explicitly opting into ambient shell values.
-// Key is still cleared, so even live cannot spend — but badges would otherwise drift.
-const allowAmbient = process.env.MOSAIC_E2E_ALLOW_AMBIENT_PROVIDERS === '1';
-if (!allowAmbient) {
-  env.MOSAIC_LUNA_PROVIDER = 'fixture';
-  env.MOSAIC_TERRA_PROVIDER = 'fixture';
-  env.MOSAIC_SOL_PROVIDER = 'fixture';
+if (mode === 'live') {
+  // LIVE recording: REAL OpenAI calls ($$$). Requires a funded key. SIM_MODE
+  // record so the run also banks a cassette — to liveCassetteDir, never the
+  // committed replay bank. Providers forced live.
+  // If the parent (record.mjs / shell) did not export the key, load it from
+  // the repo-root .env so live mode still works.
+  const { envPath, loaded } = ensureRootEnvKeys(['OPENAI_API_KEY']);
+  if (loaded.includes('OPENAI_API_KEY')) {
+    env.OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+    console.log(`[start-demo] loaded OPENAI_API_KEY from ${envPath}`);
+  } else if (process.env.OPENAI_API_KEY) {
+    env.OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+  }
+  if (!String(env.OPENAI_API_KEY || '').trim()) {
+    console.error(
+      '[start-demo] live mode requires a funded OPENAI_API_KEY in the environment or repo-root .env.',
+    );
+    console.error(`[start-demo] looked for: ${envPath}`);
+    process.exit(1);
+  }
+  mkdirSync(liveCassetteDir, { recursive: true });
+  env.MOSAIC_SIM_MODE = 'record';
+  env.MOSAIC_CASSETTE_DIR = liveCassetteDir;
+  env.MOSAIC_LUNA_PROVIDER = 'live';
+  env.MOSAIC_TERRA_PROVIDER = 'live';
+  env.MOSAIC_SOL_PROVIDER = 'live';
 } else {
-  env.MOSAIC_LUNA_PROVIDER = env.MOSAIC_LUNA_PROVIDER || 'fixture';
-  env.MOSAIC_TERRA_PROVIDER = env.MOSAIC_TERRA_PROVIDER || 'fixture';
-  env.MOSAIC_SOL_PROVIDER = env.MOSAIC_SOL_PROVIDER || 'fixture';
+  // fixture / replay: strip the key so no live call is possible, force fixture
+  // providers (badges would otherwise drift), and point replay at the bank.
+  delete env.OPENAI_API_KEY;
+  env.OPENAI_API_KEY = '';
+  env.MOSAIC_SIM_MODE = mode === 'replay' ? 'replay' : 'fixture';
+  if (mode === 'replay') {
+    env.MOSAIC_CASSETTE_DIR = cassetteDir;
+  }
+  const allowAmbient = process.env.MOSAIC_E2E_ALLOW_AMBIENT_PROVIDERS === '1';
+  if (!allowAmbient) {
+    env.MOSAIC_LUNA_PROVIDER = 'fixture';
+    env.MOSAIC_TERRA_PROVIDER = 'fixture';
+    env.MOSAIC_SOL_PROVIDER = 'fixture';
+  } else {
+    env.MOSAIC_LUNA_PROVIDER = env.MOSAIC_LUNA_PROVIDER || 'fixture';
+    env.MOSAIC_TERRA_PROVIDER = env.MOSAIC_TERRA_PROVIDER || 'fixture';
+    env.MOSAIC_SOL_PROVIDER = env.MOSAIC_SOL_PROVIDER || 'fixture';
+  }
 }
 
 const args = [
@@ -169,12 +208,14 @@ const args = [
   repoRoot,
 ];
 
-console.log(`[start-demo] mode=${mode} listen=${listen}`);
+console.log(`[start-demo] mode=${mode} listen=${listen} beat-spacing=${beatSpacing}`);
 console.log(`[start-demo] bin=${bin}`);
 console.log(`[start-demo] ui=${uiDir}`);
 console.log(`[start-demo] db=${dbPath}`);
 if (mode === 'replay') {
-  console.log(`[start-demo] cassettes=${cassetteDir}`);
+  console.log(`[start-demo] cassettes(read)=${cassetteDir}`);
+} else if (mode === 'live') {
+  console.log(`[start-demo] LIVE — real OpenAI calls; banking to ${liveCassetteDir}`);
 }
 
 const child = spawn(bin, args, {

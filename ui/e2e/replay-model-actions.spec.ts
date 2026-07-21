@@ -1,33 +1,10 @@
-import { test, expect, type Page, type Response } from '@playwright/test';
-import { playScenarioToRevision9, waitConnected } from './helpers';
-
-async function waitOperatorPOST(page: Page, pathSuffix: string): Promise<Response> {
-  return page.waitForResponse(
-    (r) =>
-      r.url().includes(`/api/v1/operator/${pathSuffix}`) &&
-      r.request().method() === 'POST',
-    { timeout: 30_000 },
-  );
-}
-
-async function expectBankedModelResult(
-  page: Page,
-  agent: string,
-  opts: { beat?: string; status?: RegExp } = {},
-) {
-  const statusRe = opts.status ?? /^(ok|accepted|repaired)$/i;
-  await expect(page.getByTestId('model-result-card')).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId('model-result-card')).toHaveAttribute('data-agent', agent);
-  await expect(page.getByTestId('model-result-card')).toHaveAttribute('data-executed', 'false');
-  if (opts.beat) {
-    await expect(page.getByTestId('model-result-card')).toHaveAttribute('data-beat', opts.beat);
-  }
-  await expect(page.getByTestId('model-result-status')).toHaveText(statusRe);
-  await expect(page.getByTestId('model-result-status')).toHaveAttribute('data-status', statusRe);
-  await expect(page.getByTestId('model-result-boundary')).toHaveAttribute('data-executed', 'false');
-  // Successful bank hits under replay must not be mislabeled as generic fixture.
-  await expect(page.getByTestId('model-provenance-badge')).toContainText(/replay \(banked\)/i);
-}
+import { test, expect } from '@playwright/test';
+import {
+  expectBankedModelResult,
+  playScenarioToRevision9,
+  waitConnected,
+  waitOperatorPOST,
+} from './helpers';
 
 /**
  * Replay project: drive model UI affordances against testdata/demo/cassettes.
