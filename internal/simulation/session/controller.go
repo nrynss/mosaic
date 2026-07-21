@@ -408,10 +408,12 @@ func (c *Controller) runBeats(
 
 // delayFor returns the wait from session start for the beat at sorted index i.
 // When BeatSpacing > 0, equal spacing is used (i * BeatSpacing). Otherwise the
-// beat's own Delay (relative to start) is used.
+// beat's own Delay (relative to start) is used. Formula matches
+// simulation.EqualSpacingDelay without importing the parent package (avoids
+// pulling executor deps into session tests).
 func (c *Controller) delayFor(index int, beat contracts.ScheduledBeat) time.Duration {
 	if c.beatSpacing > 0 {
-		if index <= 0 {
+		if index <= 0 || c.beatSpacing <= 0 {
 			return 0
 		}
 		return time.Duration(index) * c.beatSpacing

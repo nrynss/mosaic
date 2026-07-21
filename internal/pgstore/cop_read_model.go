@@ -105,14 +105,16 @@ func (s *Store) SaveCOPReadModelKey(ctx context.Context, key string, result cont
 	if key == "" {
 		return fmt.Errorf("%w: cop read-model key is required", ErrInvalidRecord)
 	}
-	if result.COP == nil {
-		return fmt.Errorf("%w: cop payload is required", ErrInvalidRecord)
-	}
 	if result.StateRevision < 0 {
 		return fmt.Errorf("%w: state revision must be non-negative", ErrInvalidRecord)
 	}
+	// Normalize nil COP to empty object so materialization always stores valid JSONB.
+	cop := result.COP
+	if cop == nil {
+		cop = map[string]any{}
+	}
 
-	copJSON, err := marshalRecord(result.COP)
+	copJSON, err := marshalRecord(cop)
 	if err != nil {
 		return fmt.Errorf("encode cop_json: %w", err)
 	}

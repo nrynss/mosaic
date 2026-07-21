@@ -26,6 +26,9 @@ type PreferMaterializedRecovery struct {
 	Fallback     RecoveryReader
 }
 
+// Compile-time: PreferMaterializedRecovery is a drop-in RecoveryReader.
+var _ RecoveryReader = PreferMaterializedRecovery{}
+
 // Recover returns the materialized ProjectionResult when present; otherwise it
 // delegates to Fallback (typically replay.Runner).
 func (r PreferMaterializedRecovery) Recover(ctx context.Context) (contracts.ProjectionResult, error) {

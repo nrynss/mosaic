@@ -219,6 +219,11 @@ func (e *BeatExecutor) appendBeat(ctx context.Context, beat contracts.ScheduledB
 	if err != nil {
 		return fmt.Errorf("simulation: load raw event %q: %w", rawID, err)
 	}
+	if payload == nil {
+		// Match EventLog backends that store nil as empty BYTEA; avoid
+		// nil-vs-empty ambiguity at the envelope layer.
+		payload = []byte{}
+	}
 	env := eventlog.EventEnvelope{
 		PartitionKey:   e.partitionKey,
 		IdempotencyKey: rawID, // stable source identity; at-least-once safe
