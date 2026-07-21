@@ -6,11 +6,50 @@ quarantining for lack of an `incident_id`/`location_id`. Then re-record the demo
 cassette bank. Keep exactly one beat (invalid input) quarantined as the honest
 failure case.
 
-**Branch:** `feat/v0.4-pluggable-event-spine`
+**Branch:** `feat/v0.4-pluggable-event-spine`  
+**Status:** ✅ **Implemented** (2026-07-21)  
+**Implementation commit:** `3eea527`  
 **Depends on:** demo cassette recorder (`1bb0974`) and the live path
 (`6c2ad38`, `660a347`). See
 [demo-cassette-recorder.md](../runbook/demo-cassette-recorder.md) and
 [demo-recorder-script.md](demo-recorder-script.md).
+
+---
+
+## Implementation record (landed)
+
+| Decision / artifact | What shipped |
+|---------------------|--------------|
+| Placement | **(A) `attributes` only** — free-text `payload_bytes_b64` / `raw_sha256` / `content_type` unchanged |
+| Identifiers | Exact literals from `expected-outcomes.json` (plus `event_type`, and `entity_kind: resource` on EMS beats 5/9) |
+| Beat 8 | Left bare; remains the only live quarantine |
+| Luna prompt | Minimal clarify in `prompts/luna/v1.0.0.md`: attributes are **authoritative intake IDs to echo**; still forbids fabricating missing IDs. Hash `3f943e46…` (was `c08e5460…`); `promptEvalHashes` updated |
+| Manifest | Beats 1, 2, 6, 7 default `ok`; only beat 8 `expected_status: quarantined` |
+| StubLuna | Quarantine set = only `raw-domestic-008-invalid-input` |
+| Live re-record | `TestDemoCastRecordLiveE2E` ~**117s** PASS; **12** cassettes; Luna keys rehashed after attribute change |
+| No-live verify | `TestDemoCastReplayNoLiveE2E` PASS ×2 (no key); offline DemoCast green |
+| Runbook | §2a replaced with post-enrichment run + historical note of bare-fixture first pass |
+
+**Live Luna outcomes (banked):**
+
+| Beat | status | `event_type` / notes |
+|------|--------|----------------------|
+| 1–2 | accepted → ok | `incident_reported`; `incident-domestic-001`, `location-cedar-lane-014` |
+| 3 | accepted → ok | `weather_alert_issued`; `weather-heavy-rain-001` |
+| 4 | accepted → ok | `road_status_changed`; `road-main-street-bridge` |
+| 5 | accepted → ok | **`resource_status_changed`**; `resource-ems-004` available |
+| 6 | accepted → ok | `unit_status_changed`; `unit-017` |
+| 7 | accepted → ok | `road_status_changed`; `road-brook-lane` (enriched; live accepts, does not “repair”) |
+| 8 | **quarantined** | bare invalid JSON; honest failure case |
+| 9 | accepted → ok | **`resource_status_changed`**; `resource-ems-004` unavailable |
+| 10 | accepted → ok | `road_status_changed`; `road-brook-lane` open |
+| Terra / Sol | ok | rev9 keys unchanged |
+
+**Residual notes (not open work):**
+
+- Beat 7 free text still says the road id was omitted while attributes supply `road_id` — intentional for live accept; the deterministic fixture pipeline’s “repaired” story is unchanged.
+- Next live re-record can still drift wording/`canonical_seq`; CI is pinned to this bank.
+- Option (B) structured JSON payloads remains a possible future realism upgrade.
 
 ---
 
@@ -98,6 +137,9 @@ The identifiers must land where Luna treats them as **authoritative**. Two optio
 
 Recommend **(A)** for the demo timeline; note **(B)** as the more realistic follow-up.
 
+**Chosen and implemented:** **(A)**. Prompt was adjusted only for attribute
+authority (echo, don’t invent); anti-fabrication rule kept. Option (B) not taken.
+
 ---
 
 ## 4. Re-record (this changes the committed bank)
@@ -125,17 +167,18 @@ Enriching the inputs changes Luna outcomes, so:
 
 ## 5. Acceptance criteria
 
-- [ ] `raw-events.json` enriched with exact `expected-outcomes.json` identifiers; only
-      beat 8 left bare.
-- [ ] Live re-record: beats 1–7, 9, 10 bank `accepted`/`ok`; beat 8 `quarantined`.
-- [ ] EMS beats (5, 9) normalize as `resource_status_changed` (misclassification fixed).
-- [ ] Live-normalized canonical events use the **same IDs as the COP** (reconcilable).
-- [ ] `prompts/luna/v1.0.0.md` NOT loosened to fabricate IDs; if edited for attribute
-      trust, prompt-eval baselines updated in the same change.
-- [ ] Offline identity loop + no-live replay verifier both green; manifest
+- [x] `raw-events.json` enriched with exact `expected-outcomes.json` identifiers; only
+      beat 8 left bare. (`3eea527`)
+- [x] Live re-record: beats 1–7, 9, 10 bank `accepted`/`ok`; beat 8 `quarantined`.
+      (~117s gated live pass; bank under `testdata/demo/cassettes/`)
+- [x] EMS beats (5, 9) normalize as `resource_status_changed` (misclassification fixed).
+- [x] Live-normalized canonical events use the **same IDs as the COP** (reconcilable).
+- [x] `prompts/luna/v1.0.0.md` NOT loosened to fabricate IDs; attribute-trust clarify +
+      `promptEvalHashes` updated in the same change (`3f943e46…`).
+- [x] Offline identity loop + no-live replay verifier both green; manifest
       `expected_status` matches banked outcomes.
-- [ ] Runbook §2a updated with the new run.
-- [ ] Authored `ontology/*` schemas unchanged.
+- [x] Runbook §2a updated with the new run.
+- [x] Authored `ontology/*` schemas unchanged.
 
 ---
 
