@@ -515,15 +515,21 @@ const cassetteReplayPromptVersion = "mosaic-cassette-replay-v1"
 // replayPromptVersions resolves honest Terra/Sol PromptVersion strings for
 // ModeReplay from banked cassette recordings. Falls back to
 // cassetteReplayPromptVersion when provenance was not recorded (legacy banks).
+// Store open/List failures are logged once so a misconfigured cassette dir is
+// not silent until the first Assess miss.
 func replayPromptVersions(ctx context.Context, env modelEnv) (terraPV, solPV string) {
 	terraPV = cassetteReplayPromptVersion
 	solPV = cassetteReplayPromptVersion
-	store, _, err := openCassetteStore(env)
+	store, dir, err := openCassetteStore(env)
 	if err != nil || store == nil {
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "mosaicdemo: cassette provenance scan skipped (open store %q): %v\n", dir, err)
+		}
 		return terraPV, solPV
 	}
 	recs, err := store.List(ctx)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "mosaicdemo: cassette provenance scan failed (list %q): %v\n", dir, err)
 		return terraPV, solPV
 	}
 	if p := cassette.BankedPromptProvenance(recs, cassette.AgentTerra); p != "" {

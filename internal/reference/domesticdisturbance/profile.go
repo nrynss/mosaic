@@ -284,6 +284,11 @@ func (r *runtime) ProcessBeat(ctx context.Context, beatID string) error {
 
 // recordProgressiveSessionAdvisories indexes fixture artifacts written during
 // this beat against the active simulation session (C3 session-scoped board).
+//
+// StagesRun covers newly executed stages. StagesSkipped covers durable stages
+// already intact (including IntactRestart on a second Play). Both must be
+// indexed so GET /advisories still surfaces fixture advisories for the new
+// session_id when ContinueProgressive skips re-running intact continuum work.
 func (r *runtime) recordProgressiveSessionAdvisories(result simulator.AdvisoryReplayResult) {
 	if r == nil || r.advisory == nil || r.sessionAdvisories == nil || r.active == nil {
 		return
@@ -292,7 +297,10 @@ func (r *runtime) recordProgressiveSessionAdvisories(result simulator.AdvisoryRe
 	if !ok || sessionID == "" {
 		return
 	}
-	r.advisory.RecordSessionStages(r.sessionAdvisories, sessionID, result.StagesRun)
+	stages := make([]string, 0, len(result.StagesRun)+len(result.StagesSkipped))
+	stages = append(stages, result.StagesRun...)
+	stages = append(stages, result.StagesSkipped...)
+	r.advisory.RecordSessionStages(r.sessionAdvisories, sessionID, stages)
 }
 
 // RawEventPayload returns fixture raw-event JSON for EventLog.Append.

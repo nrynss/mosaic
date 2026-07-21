@@ -348,8 +348,9 @@ func TestReplayPromptVersionsUsesBankedProvenance(t *testing.T) {
 }
 
 func TestComposeModelsReplayModelRunUsesBankedPromptProvenance(t *testing.T) {
-	// End-to-end compose: ModeReplay + banked provenance → ModelRun.PromptVersion
-	// is the rejoined version+hash, not only mosaic-cassette-replay-v1.
+	// End-to-end compose: ModeReplay + matching banked keys → successful
+	// Assess/Brief ModelRuns carry rejoined version+hash, not only
+	// mosaic-cassette-replay-v1.
 	ctx := context.Background()
 	root := repositoryRoot(t)
 	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "models-replay-prov.db"))
@@ -358,27 +359,127 @@ func TestComposeModelsReplayModelRunUsesBankedPromptProvenance(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = database.Close() })
 
-	prompt, err := loadVersionedPrompt(root, openaimodel.AgentTerra, "v1.0.0")
+	terraPrompt, err := loadVersionedPrompt(root, openaimodel.AgentTerra, "v1.0.0")
 	if err != nil {
-		t.Fatalf("load prompt: %v", err)
+		t.Fatalf("load terra prompt: %v", err)
 	}
-	wantVersion, wantHash := splitPromptProvenance(prompt.Provenance)
-	wantProvenance := prompt.Provenance
+	solPrompt, err := loadVersionedPrompt(root, openaimodel.AgentSol, "v1.0.0")
+	if err != nil {
+		t.Fatalf("load sol prompt: %v", err)
+	}
+	terraVersion, terraHash := splitPromptProvenance(terraPrompt.Provenance)
+	solVersion, solHash := splitPromptProvenance(solPrompt.Provenance)
+
+	// Build request identity the services will send so cassette keys match.
+	terraEvidence := []gen.Evidence{{
+		SchemaVersion: "1.0.0",
+		EvidenceID:    "ev-replay-prov",
+		TargetKind:    "canonical_event",
+		TargetID:      "canonical-domestic-007-repaired-road",
+		Explanation:   "Repaired Brook Lane closure is effective.",
+		CreatedAt:     "2026-01-01T00:00:00Z",
+	}}
+	cop := map[string]any{
+		"state_revision":      int64(7),
+		"effective_event_ids": []any{"canonical-domestic-007-repaired-road"},
+		"roads":               []any{map[string]any{"road_id": "road-brook-lane", "status": "blocked"}},
+	}
+	copJSON, err := json.Marshal(cop)
+	if err != nil {
+		t.Fatalf("marshal cop: %v", err)
+	}
+	terraReq := terra.Request{
+		StateRevision: 7,
+		SerializedCOP: copJSON,
+		Evidence:      terraEvidence,
+	}
+	terraKey, terraFP, err := cassette.TerraKey(terraReq, cassette.KeyMeta{})
+	if err != nil {
+		t.Fatalf("terra key: %v", err)
+	}
+
+	insight := gen.Insight{
+		SchemaVersion:   "1.0.0",
+		InsightID:       "insight-replay-prov-001",
+		StateRevision:   7,
+		LifecycleStatus: "active",
+		Assertions:      []any{"Brook Lane access may be constrained."},
+		Evidence: []any{map[string]any{
+			"target_kind": "canonical_event",
+			"target_id":   "canonical-domestic-007-repaired-road",
+			"explanation": "Repaired Brook Lane closure is effective.",
+		}},
+		Confidence: json.RawMessage(`{"source_quality":"medium","transformation_certainty":"medium","reasoning_support":"high","basis":"permitted evidence"}`),
+		CreatedAt:  "2026-01-01T00:00:00Z",
+	}
+	insightJSON, err := json.Marshal(insight)
+	if err != nil {
+		t.Fatalf("marshal insight: %v", err)
+	}
+
+	solEvidence := []gen.Evidence{{
+		SchemaVersion: "1.0.0",
+		EvidenceID:    "ev-insight-replay",
+		TargetKind:    "insight",
+		TargetID:      insight.InsightID,
+		Explanation:   "Recommendation limited to the cited assessment.",
+		CreatedAt:     "2026-01-01T00:00:00Z",
+	}}
+	solReq := sol.Request{
+		StateRevision: 7,
+		SerializedCOP: copJSON,
+		Insights:      []gen.Insight{insight},
+		Evidence:      solEvidence,
+		RequestedBy:   "supervisor-demo",
+	}
+	solKey, solFP, err := cassette.SolKey(solReq, cassette.KeyMeta{})
+	if err != nil {
+		t.Fatalf("sol key: %v", err)
+	}
+	recJSON, err := json.Marshal(gen.Recommendation{
+		SchemaVersion:    "1.0.0",
+		RecommendationID: "rec-replay-prov-001",
+		StateRevision:    7,
+		Text:             "Consider reviewing the Brook Lane access constraint with the supervisor.",
+		Evidence: []any{map[string]any{
+			"target_kind": "insight",
+			"target_id":   insight.InsightID,
+			"explanation": "Recommendation limited to the cited assessment.",
+		}},
+		CreatedAt: "2026-01-01T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("marshal recommendation: %v", err)
+	}
 
 	mem := cassette.NewMemoryStore()
-	// Seed any terra recording with the loaded prompt provenance (compose scans List).
 	if err := mem.Put(ctx, &cassette.Recording{
 		SchemaVersion:      cassette.SchemaVersion,
-		Key:                "terra/rev7/aaaaaaaaaaaaaaaa",
+		Key:                terraKey,
 		Agent:              cassette.AgentTerra,
 		StateRevision:      7,
-		RequestFingerprint: strings.Repeat("a", 64),
-		PromptVersion:      wantVersion,
-		PromptHash:         wantHash,
-		ResponseID:         "replay-prov-resp",
-		InsightJSON:        json.RawMessage(`{"not":"a-valid-insight"}`),
+		RequestFingerprint: terraFP,
+		PromptVersion:      terraVersion,
+		PromptHash:         terraHash,
+		ResponseID:         "replay-terra-hit",
+		InsightJSON:        insightJSON,
+		RecordedAt:         "2026-06-01T00:00:00Z",
 	}); err != nil {
-		t.Fatalf("seed: %v", err)
+		t.Fatalf("seed terra: %v", err)
+	}
+	if err := mem.Put(ctx, &cassette.Recording{
+		SchemaVersion:      cassette.SchemaVersion,
+		Key:                solKey,
+		Agent:              cassette.AgentSol,
+		StateRevision:      7,
+		RequestFingerprint: solFP,
+		PromptVersion:      solVersion,
+		PromptHash:         solHash,
+		ResponseID:         "replay-sol-hit",
+		RecommendationJSON: recJSON,
+		RecordedAt:         "2026-06-01T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("seed sol: %v", err)
 	}
 
 	bundle, err := composeModels(ctx, database, root,
@@ -398,38 +499,44 @@ func TestComposeModelsReplayModelRunUsesBankedPromptProvenance(t *testing.T) {
 		t.Fatalf("CassetteMode = %q", bundle.CassetteMode)
 	}
 
-	// Valid input; cassette miss (seed key does not match request) still emits a
-	// ModelRun whose PromptVersion came from the banked List scan at compose.
-	out, assessErr := bundle.Terra.Assess(ctx, contracts.TerraInput{
+	terraOut, err := bundle.Terra.Assess(ctx, contracts.TerraInput{
 		StateRevision: 7,
-		COP: map[string]any{
-			"state_revision": int64(7),
-			"incidents":      []any{},
-		},
-		Evidence: []gen.Evidence{{
-			SchemaVersion: "1.0.0",
-			EvidenceID:    "ev-replay-prov",
-			TargetKind:    "canonical_event",
-			TargetID:      "evt-1",
-			Explanation:   "synthetic evidence for provenance test",
-			CreatedAt:     "2026-01-01T00:00:00Z",
-		}},
+		COP:           cop,
+		Evidence:      terraEvidence,
 	})
-	if assessErr == nil {
-		t.Fatal("expected Assess error on cassette miss or invalid insight")
+	if err != nil {
+		t.Fatalf("successful banked Assess: %v", err)
 	}
-	if out.ModelRun.ModelRunID == "" {
-		t.Fatalf("expected a ModelRun even on failure; assessErr=%v", assessErr)
+	if terraOut.ModelRun.ValidationStatus != "valid" {
+		t.Fatalf("terra ModelRun status = %q, want valid", terraOut.ModelRun.ValidationStatus)
 	}
-	if out.ModelRun.PromptVersion != wantProvenance {
-		t.Fatalf("ModelRun.PromptVersion = %q, want banked %q (not %q); assessErr=%v",
-			out.ModelRun.PromptVersion, wantProvenance, cassetteReplayPromptVersion, assessErr)
+	if terraOut.ModelRun.PromptVersion != terraPrompt.Provenance {
+		t.Fatalf("terra ModelRun.PromptVersion = %q, want banked %q",
+			terraOut.ModelRun.PromptVersion, terraPrompt.Provenance)
 	}
-	if out.ModelRun.PromptVersion == cassetteReplayPromptVersion {
-		t.Fatal("replay lost banked provenance — ModelRun used opaque fallback only")
+	if terraOut.ModelRun.PromptVersion == cassetteReplayPromptVersion {
+		t.Fatal("terra replay lost banked provenance")
 	}
-	if !strings.Contains(out.ModelRun.PromptVersion, wantVersion) || !strings.Contains(out.ModelRun.PromptVersion, wantHash) {
-		t.Fatalf("ModelRun.PromptVersion %q missing version/hash pieces", out.ModelRun.PromptVersion)
+
+	solOut, err := bundle.Sol.Brief(ctx, contracts.SolInput{
+		StateRevision: 7,
+		COP:           cop,
+		Insights:      []gen.Insight{insight},
+		Evidence:      solEvidence,
+		RequestedBy:   "supervisor-demo",
+	})
+	if err != nil {
+		t.Fatalf("successful banked Brief: %v", err)
+	}
+	if solOut.ModelRun.ValidationStatus != "valid" {
+		t.Fatalf("sol ModelRun status = %q, want valid", solOut.ModelRun.ValidationStatus)
+	}
+	if solOut.ModelRun.PromptVersion != solPrompt.Provenance {
+		t.Fatalf("sol ModelRun.PromptVersion = %q, want banked %q",
+			solOut.ModelRun.PromptVersion, solPrompt.Provenance)
+	}
+	if solOut.ModelRun.PromptVersion == cassetteReplayPromptVersion {
+		t.Fatal("sol replay lost banked provenance")
 	}
 }
 

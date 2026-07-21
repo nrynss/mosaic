@@ -56,7 +56,7 @@ func TestF1ProgressiveProjectionAndSessionIsolationE2E(t *testing.T) {
 		t.Fatal("session_id empty on first start")
 	}
 
-	// Mid-session progressive samples: at least one revision in (0, 9).
+	// Mid-session progressive samples: ≥2 distinct revisions in (0, 9).
 	seen := map[int]bool{}
 	var samples []int
 	deadline := time.Now().Add(30 * time.Second)
@@ -80,15 +80,15 @@ func TestF1ProgressiveProjectionAndSessionIsolationE2E(t *testing.T) {
 	if !seen[9] {
 		t.Fatalf("final revision 9 not observed; samples=%v\n%s", samples, proc.output.String())
 	}
-	intermediate := false
+	intermediateCount := 0
 	for rev := range seen {
 		if rev > 0 && rev < 9 {
-			intermediate = true
-			break
+			intermediateCount++
 		}
 	}
-	if !intermediate {
-		t.Fatalf("no intermediate COP revision during progressive Play; samples=%v (bulk-seed smell)", samples)
+	if intermediateCount < 2 {
+		t.Fatalf("intermediate COP revisions = %d; samples=%v (want ≥2 in (0,9); bulk-seed smell)\n%s",
+			intermediateCount, samples, proc.output.String())
 	}
 
 	// Progressive advisories for active session.
@@ -154,10 +154,14 @@ func TestF1ProgressiveProjectionAndSessionIsolationE2E(t *testing.T) {
 	if rev, _ := cop2["state_revision"].(float64); rev != 9 {
 		t.Fatalf("COP after second Play = %#v, want 9\n%s", cop2["state_revision"], proc.output.String())
 	}
-	// Advisory re-index for a second session when durable stages are already
-	// intact may leave GET /advisories empty (SessionAdvisoryView only Records
-	// stages that ContinueProgressive re-runs). COP isolation is the release
-	// gate here; re-index residual is outside F1 ownership.
+	// IntactRestart must re-index session-scoped advisories for the new epoch.
+	adv2 := advisoryResponseData(t, getResponse(t, http.MethodGet, proc.baseURL+"/api/v1/advisories", ""))
+	if insights, _ := adv2["insights"].([]any); len(insights) != 2 {
+		t.Fatalf("insights after second Play = %d, want 2", len(insights))
+	}
+	if recs, _ := adv2["recommendations"].([]any); len(recs) != 1 {
+		t.Fatalf("recommendations after second Play = %d, want 1", len(recs))
+	}
 
 	end2 := getResponse(t, http.MethodPost, proc.baseURL+"/api/v1/simulation/end", "")
 	if end2.StatusCode != http.StatusOK {
@@ -174,9 +178,10 @@ func TestF1ProgressiveProjectionAndSessionIsolationE2E(t *testing.T) {
 	}
 }
 
-// TestF1ReplayModeProgressiveParityE2E proves MOSAIC_SIM_MODE=replay starts
+// TestF1ReplayModeProgressiveParityE2E proves MOSAIC_SIM_MODE=replay composes
 // without a key, surfaces cassette_mode=replay, and progressive Play still
-// reaches the fixture board (no network).
+// reaches the fixture continuum board (no network; fixture advisories, not
+// banked operator cassette responses).
 func TestF1ReplayModeProgressiveParityE2E(t *testing.T) {
 	root := advisoryRepositoryRoot(t)
 	binary := buildMosaicDemo(t, root)

@@ -1,9 +1,11 @@
 package simulation_test
 
 import (
+	"bytes"
 	"go/parser"
 	"go/token"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,12 +15,10 @@ import (
 //
 // The progressive reveal is real: ingestion, projector, Terra/Sol services,
 // ontology schemas, and the frozen domestic-disturbance dataset are not
-// re-architected by the event-spine simulation path. This test documents the
-// Section 5 surface and fails if those packages import simulation (production)
-// or if the frozen integrity anchors disappear.
-//
-// F1 itself only owns tests under simulation/e2e/cmd test files — running this
-// file plus the existing deterministic core package tests is the honesty gate.
+// re-architected by the event-spine simulation path. Structural guards below
+// fail if those packages import simulation (production) or if frozen anchors
+// disappear. TestF1Section5DeterministicCorePackagesPass re-runs the
+// deterministic core package tests as the §9 honesty gate.
 
 // section5FrameworkPaths are production trees that must stay free of simulation
 // imports and must remain present as the deterministic core.
@@ -172,5 +172,33 @@ func TestF1ProgressivePathDoesNotLiveInFrameworkPackages(t *testing.T) {
 			}
 			return nil
 		})
+	}
+}
+
+// section5GoTestPatterns are the deterministic-core packages re-executed as the
+// HANDOFF §5 / §9 honesty gate ("existing deterministic-core tests stay green").
+var section5GoTestPatterns = []string{
+	"./internal/ingestion/...",
+	"./internal/terra/...",
+	"./internal/sol/...",
+	"./internal/luna/...",
+	"./internal/ontology/...",
+	"./internal/reference/domesticdisturbance/state/...",
+	"./internal/reference/domesticdisturbance/dataset/...",
+	"./internal/reference/domesticdisturbance/simulator/...",
+}
+
+// TestF1Section5DeterministicCorePackagesPass re-runs §5 package tests so the
+// honesty claim is not only structural (path presence / import scan).
+func TestF1Section5DeterministicCorePackagesPass(t *testing.T) {
+	root := findRepoRoot(t)
+	args := append([]string{"test", "-count=1"}, section5GoTestPatterns...)
+	cmd := exec.Command("go", args...)
+	cmd.Dir = root
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Section 5 deterministic-core package tests failed: %v\n%s", err, buf.String())
 	}
 }

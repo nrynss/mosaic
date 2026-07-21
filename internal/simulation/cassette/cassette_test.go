@@ -393,19 +393,28 @@ func TestJoinAndBankedPromptProvenance(t *testing.T) {
 		t.Fatalf("Join empty version = %q", got)
 	}
 
+	// Newest RecordedAt wins when a bank mixes prompts for one agent.
 	recs := []*cassette.Recording{
-		{Agent: cassette.AgentSol, PromptVersion: "v0.9.0", PromptHash: "aaa"},
-		{Agent: cassette.AgentTerra, PromptVersion: "v1.0.0", PromptHash: "deadbeef"},
-		{Agent: cassette.AgentTerra, PromptVersion: "v2.0.0", PromptHash: "ignored"},
+		{Agent: cassette.AgentSol, PromptVersion: "v0.9.0", PromptHash: "aaa", RecordedAt: "2026-01-01T00:00:00Z", Key: "sol/a"},
+		{Agent: cassette.AgentTerra, PromptVersion: "v1.0.0", PromptHash: "deadbeef", RecordedAt: "2026-01-01T00:00:00Z", Key: "terra/old"},
+		{Agent: cassette.AgentTerra, PromptVersion: "v2.0.0", PromptHash: "newerhash", RecordedAt: "2026-06-01T00:00:00Z", Key: "terra/new"},
 	}
-	if got := cassette.BankedPromptProvenance(recs, cassette.AgentTerra); got != "v1.0.0+sha256:deadbeef" {
-		t.Fatalf("terra banked = %q", got)
+	if got := cassette.BankedPromptProvenance(recs, cassette.AgentTerra); got != "v2.0.0+sha256:newerhash" {
+		t.Fatalf("terra banked (newest RecordedAt) = %q", got)
 	}
 	if got := cassette.BankedPromptProvenance(recs, cassette.AgentSol); got != "v0.9.0+sha256:aaa" {
 		t.Fatalf("sol banked = %q", got)
 	}
 	if got := cassette.BankedPromptProvenance(recs, "luna"); got != "" {
 		t.Fatalf("missing agent banked = %q", got)
+	}
+	// Tie on time: higher Key wins for determinism.
+	tie := []*cassette.Recording{
+		{Agent: cassette.AgentTerra, PromptVersion: "v1", PromptHash: "a", RecordedAt: "2026-01-01T00:00:00Z", Key: "terra/a"},
+		{Agent: cassette.AgentTerra, PromptVersion: "v1", PromptHash: "b", RecordedAt: "2026-01-01T00:00:00Z", Key: "terra/z"},
+	}
+	if got := cassette.BankedPromptProvenance(tie, cassette.AgentTerra); got != "v1+sha256:b" {
+		t.Fatalf("tie-break by key = %q", got)
 	}
 }
 

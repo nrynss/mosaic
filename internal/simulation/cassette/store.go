@@ -15,7 +15,9 @@ import (
 type Store interface {
 	Get(ctx context.Context, key string) (*Recording, error)
 	Put(ctx context.Context, rec *Recording) error
-	// List returns deep copies of all banked recordings (order is undefined).
+	// List returns deep copies of all banked recordings. Order is not a
+	// selection contract — callers that need a preferred recording (e.g.
+	// BankedPromptProvenance) must sort or pick deterministically themselves.
 	// Used at compose time under ModeReplay to recover prompt provenance for
 	// ModelRun.PromptVersion without a per-call terra/sol contract change.
 	List(ctx context.Context) ([]*Recording, error)
@@ -171,11 +173,16 @@ func (s *FileStore) Put(_ context.Context, rec *Recording) error {
 
 // List walks Dir for *.json recording files and returns decoded deep copies.
 // Missing Dir is an empty list (not an error) so compose-time provenance scan
-// is safe before any Put.
+// is safe before any Put. Holds the same mutex as Put so concurrent Put/List
+// do not race on partial renames.
 func (s *FileStore) List(_ context.Context) ([]*Recording, error) {
 	if s == nil || strings.TrimSpace(s.Dir) == "" {
 		return nil, ErrStoreRequired
 	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	info, err := os.Stat(s.Dir)
 	if err != nil {
 		if os.IsNotExist(err) {

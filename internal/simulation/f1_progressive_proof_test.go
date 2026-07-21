@@ -14,12 +14,13 @@ import (
 	"mosaic.local/mosaic/internal/simulation/session"
 )
 
-// F1 progressive-projection proofs (simulation package).
+// F1 progressive path proofs (simulation package).
 //
-// These tests prove the interactive composition pattern without bulk-seeding:
-// OnBeat → EventLog.Append (raw.event, IdempotencyKey=raw_event_id) →
-// per-beat process work that advances a revision ladder. They do not re-architect
-// the framework; they lock the honest EventLog-driven path that D1/C3/C5 landed.
+// These tests lock the controller + EventLog composition pattern (not the real
+// domain projector): OnBeat → EventLog.Append (raw.event,
+// IdempotencyKey=raw_event_id) → per-beat process work that advances a local
+// revision ladder. Real progressive materialization is covered by
+// cmd/mosaicdemo and tests/e2e proofs.
 
 // progressiveSchedule mirrors the composition schedule surface for unit proofs.
 type progressiveSchedule struct {
@@ -33,9 +34,9 @@ func (s progressiveSchedule) Beats() []contracts.ScheduledBeat {
 }
 
 // TestF1ProgressiveOnBeatAppendsThenAdvancesRevisionLadder proves the
-// composition OnBeat contract: each beat Appends to EventLog first, then runs
-// process work that advances revision, with intermediate revisions visible
-// before the final value — not a bulk-seed jump to the end.
+// controller + EventLog composition pattern: each beat Appends first, then
+// mock process work advances a local revision ladder with intermediates —
+// not a bulk jump. (Not domain ProcessBeat / projector.)
 func TestF1ProgressiveOnBeatAppendsThenAdvancesRevisionLadder(t *testing.T) {
 	log := memory.New()
 	// 5 beats → final revision 5 via +1 per beat (unit ladder; fixture is 10→9).

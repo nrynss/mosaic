@@ -51,6 +51,10 @@
 // ModelRun.PromptVersion under replay. The cassette does not load or hash
 // prompts itself — that remains composition's responsibility.
 //
+// Demo invariant: a bank is one live-record session with a uniform prompt per
+// agent. ModelRun.PromptVersion is resolved once at compose (not per Assess).
+// BankedPromptProvenance picks the newest RecordedAt when a bank mixes versions.
+//
 // # Storage
 //
 // MemoryStore is for tests. FileStore writes one JSON file per recording under

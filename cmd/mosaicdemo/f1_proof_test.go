@@ -69,17 +69,16 @@ func TestF1ProgressiveProjectionIntermediateRevisions(t *testing.T) {
 	if !seen[9] {
 		t.Fatalf("never observed final revision 9; samples=%v", samples)
 	}
-	// Progressive path must expose at least one intermediate revision before 9.
+	// Progressive path must expose multiple intermediate revisions before 9.
 	// (Bulk seed would jump empty→9 with no mid-session materialization.)
-	intermediate := false
+	intermediateCount := 0
 	for rev := range seen {
 		if rev > 0 && rev < 9 {
-			intermediate = true
-			break
+			intermediateCount++
 		}
 	}
-	if !intermediate {
-		t.Fatalf("no intermediate COP revision observed during Play; samples=%v (want progressive ladder, not bulk jump)", samples)
+	if intermediateCount < 2 {
+		t.Fatalf("intermediate COP revisions = %d (samples=%v); want ≥2 distinct values in (0,9) for progressive ladder", intermediateCount, samples)
 	}
 }
 
@@ -155,16 +154,9 @@ func TestF1SessionReplayIsolationTwoSequentialPlays(t *testing.T) {
 	waitSessionEnded(t, app.simulation, 15*time.Second)
 	assertFixtureCOP(t, app.handler)
 
-	// Session-scoped advisories: ContinueProgressive may skip re-running intact
-	// durable stages and therefore may not Record ids for the new session.
-	// COP isolation is the D1h R2 gate; advisory re-index on intact stages is a
-	// known residual (outside F1 ownership — note for coordinator).
-	advReq := httptest.NewRequest(http.MethodGet, "http://mosaic.test/api/v1/advisories", nil)
-	advResp := httptest.NewRecorder()
-	app.handler.ServeHTTP(advResp, advReq)
-	if advResp.Code != http.StatusOK {
-		t.Fatalf("advisories after second Play status = %d", advResp.Code)
-	}
+	// Second session must re-index session-scoped advisories even when durable
+	// continuum stages are already intact (IntactRestart path).
+	assertFixtureAdvisories(t, app.handler)
 
 	if _, err := app.simulation.End(context.Background()); err != nil {
 		t.Fatalf("End after second: %v", err)
@@ -204,11 +196,11 @@ func TestF1FixtureCassetteModeSurfacedOnProgressivePath(t *testing.T) {
 	assertCassetteMode(t, app.handler, "passthrough")
 }
 
-// TestF1ReplayModeComposesWithProgressiveSimulation proves replay mode:
-// no network required, cassette_mode=replay surfaced, progressive Play still
-// drives fixture continuum to rev 9 (operator Terra/Sol bank is separate from
-// progressive fixture advisories). Empty bank → ErrReplayMiss is unit-covered
-// in models_test; here we only prove simulation composition parity.
+// TestF1ReplayModeComposesWithProgressiveSimulation proves cassette mode
+// composition + progressive fixture continuum under replay: no network,
+// cassette_mode=replay surfaced, COP/advisories still reach fixture end state.
+// Progressive advisories use the fixture continuum, not banked Terra/Sol
+// cassette responses. Empty-bank ErrReplayMiss is unit-covered in models_test.
 func TestF1ReplayModeComposesWithProgressiveSimulation(t *testing.T) {
 	root := repositoryRoot(t)
 	ui := makeDashboard(t)
@@ -242,9 +234,9 @@ func TestF1ReplayModeComposesWithProgressiveSimulation(t *testing.T) {
 	assertCassetteMode(t, app.handler, "replay")
 }
 
-// TestF1RecordModeWithoutKeyDemotesAndProgressiveStillWorks proves record/live
-// without OPENAI_API_KEY demotes safely to passthrough and progressive Play
-// remains the fixture path (no real API calls).
+// TestF1RecordModeWithoutKeyDemotesAndProgressiveStillWorks proves record mode
+// without a key demotes to passthrough (no banked live path) and progressive
+// Play still uses the deterministic fixture continuum (no real API calls).
 func TestF1RecordModeWithoutKeyDemotesAndProgressiveStillWorks(t *testing.T) {
 	root := repositoryRoot(t)
 	ui := makeDashboard(t)
