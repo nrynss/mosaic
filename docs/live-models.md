@@ -29,12 +29,54 @@ Provider selection is configured at startup using process environment variables.
 | `MOSAIC_LUNA_PROVIDER` | Ingestion & normalisation mode for Luna | `fixture`, `live` | `fixture` | `live` |
 | `MOSAIC_TERRA_PROVIDER` | Interactive incident assessment mode for Terra | `fixture`, `live` | `fixture` | `live` |
 | `MOSAIC_SOL_PROVIDER` | Interactive recipient briefing mode for Sol | `fixture`, `live` | `fixture` | `live` |
+| `MOSAIC_SIM_MODE` | Simulation inference cassette mode (Terra/Sol) | `fixture` / `passthrough` / `off`, `live` / `record`, `replay` / `recorded` | `fixture` (passthrough) | unset (passthrough) |
+| `MOSAIC_CASSETTE_MODE` | Alias of `MOSAIC_SIM_MODE` (ignored when SIM is set) | same as above | unset | unset |
+| `MOSAIC_CASSETTE_DIR` | Directory for cassette FileStore recordings | path | `recordings` (cwd-relative; gitignored at repo root) | same |
+
+### Simulation cassette modes (Live / Replay / Fixture)
+
+Terra and Sol structured clients can be wrapped with a **cassette** decorator
+(`internal/simulation/cassette`) so one paid live run can be banked and replayed
+without further API cost. Luna is not cassette-wrapped (ingestion path is
+independent).
+
+| Mode (`MOSAIC_SIM_MODE`) | Cassette | Inner client | API cost |
+|---|---|---|---|
+| **fixture** (default / CI) | Passthrough (no decorator) | refuse / fixture clients | None |
+| **live** / **record** | **Record** | real OpenAI when key + `MOSAIC_*_PROVIDER=live` | Yes |
+| **replay** / **recorded** | **Replay** | unused (`nil`); store only | None |
+
+Rules:
+
+1. **Default is fixture/passthrough** — safe for CI and Docker without keys.
+2. **Record** wraps only agents that are effectively live (provider `live` **and** key present). If mode is `live`/`record` but the key is missing or providers stay fixture, composition demotes to passthrough (same as existing provider fallback; refusals are not banked).
+3. **Replay** does **not** require `OPENAI_API_KEY`. Terra/Sol always use the FileStore; a missing recording returns `cassette.ErrReplayMiss` (never a silent network call).
+4. Per-agent `MOSAIC_TERRA_PROVIDER` / `MOSAIC_SOL_PROVIDER` still gate which agents are live when mode is live/record.
+5. Cassette mode is server-only env configuration (no UI secrets). Mode status is available on the composition bundle (`CassetteMode`) for a later capability/status surface (D2 “Replay last run”).
+
+Example — bank one run, then replay:
+
+```powershell
+# Bank (paid): live providers + record mode
+$env:OPENAI_API_KEY = "sk-..."
+$env:MOSAIC_TERRA_PROVIDER = "live"
+$env:MOSAIC_SOL_PROVIDER = "live"
+$env:MOSAIC_SIM_MODE = "live"
+$env:MOSAIC_CASSETTE_DIR = "recordings"
+# run mosaicdemo once through the advisory beats...
+
+# Replay (free): no key required
+Remove-Item Env:OPENAI_API_KEY -ErrorAction SilentlyContinue
+$env:MOSAIC_SIM_MODE = "replay"
+$env:MOSAIC_CASSETTE_DIR = "recordings"
+```
 
 ### Effective selection rules
 
-1. Agent is **`live`** only when the env requests `live` **and** `OPENAI_API_KEY` is non-empty.
+1. Agent is **`live`** only when the env requests `live` **and** `OPENAI_API_KEY` is non-empty (and sim mode is not forcing Terra/Sol onto replay).
 2. If env requests `live` but the key is **absent**, that agent **falls back to `fixture`**.
 3. If env requests `live`, key is present, but OpenAI returns billing/quota/network errors → agent stays **`live`** in capability metadata; the invocation is recorded as failed/refused/timed_out.
+4. `MOSAIC_SIM_MODE=replay` forces Terra/Sol onto the cassette store regardless of provider flags; reported provider selection for those agents is fixture.
 
 This fallback status is reported in the `providers` object on advisories / operator responses (what the UI badges show).
 
